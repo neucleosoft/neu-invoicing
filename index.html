@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>neuInvoicing</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      // Debug script to check if HTML loads
+      console.log('🔍 HTML loaded, waiting for React...');
+      setTimeout(() => {
+        const root = document.getElementById('root');
+        if (root && root.children.length === 0) {
+          console.error('❌ React did not mount! Root div is empty.');
+          root.innerHTML = '<div style="padding:50px;font-family:Arial;"><h1>❌ React Failed to Mount</h1><p>The HTML loaded but React did not initialize.</p><p>Check the console for errors.</p><p><strong>electronAPI available:</strong> ' + (!!window.electronAPI) + '</p></div>';
+        } else {
+          console.log('✅ React mounted successfully');
+        }
+      }, 5000);
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

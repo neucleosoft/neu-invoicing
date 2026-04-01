@@ -1,0 +1,68 @@
+# Credentials (never commit)
+credentials.json
+client_secret*.json
+
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+node_modules
+dist
+dist-electron
+release
+*.local
+
+# Editor directories and files
+.claude/
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Database
+*.sqlite
+*.sqlite-journal
+*.db
+
+# Prisma
+prisma/migrations/*
+!prisma/migrations/.gitkeep
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build
+build
+out
+electron/**/*.js
+electron/**/*.js.map
+vite.config.js
+vite.config.d.ts
+tsconfig.node.tsbuildinfo
+
+# Sensitive files
+sbox_live_key.csv
+*.csv
+
+# Private data (invoices, notes)
+invoices database/
+learning_pdf/
+party-captures/
+
+# Scraping tools (not part of the app)
+platform-tools/
+*.zip
+nul
+claude.md
