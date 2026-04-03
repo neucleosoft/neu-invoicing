@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { google } from 'googleapis'
 import { getOAuth2Client } from './auth'
-import { getDatabasePath, getPrisma } from './database'
+import { getDatabasePath, getPrisma, ensureTablesExist } from './database'
 import fs from 'fs'
 import Store from 'electron-store'
 
@@ -89,6 +89,9 @@ const performSync = async () => {
         })
 
         console.log('Database downloaded successfully')
+
+        // The downloaded DB might be from an older version — add any missing tables
+        ensureTablesExist(`file:${dbPath}`)
       } else {
         // Upload to cloud (local is newer or same)
         console.log('Uploading database to cloud...')

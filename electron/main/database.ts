@@ -11,7 +11,7 @@ let prisma: PrismaClient
  * Uses ELECTRON_RUN_AS_NODE=1 so Electron's binary acts as Node.js
  * and runs the Prisma CLI to sync schema → SQLite tables.
  */
-const ensureTablesExist = (dbUrl: string) => {
+export const ensureTablesExist = (dbUrl: string) => {
   const isDevMode = !!process.env.VITE_DEV_SERVER_URL
   const appPath = isDevMode ? process.cwd() : app.getAppPath()
   const schemaPath = path.join(appPath, 'prisma', 'schema.prisma')
