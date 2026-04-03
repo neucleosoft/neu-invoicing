@@ -104,7 +104,7 @@ const Onboarding = () => {
               >
                 {formData.logoPath ? (
                   <img
-                    src={`file://${formData.logoPath}`}
+                    src={`local-resource://${formData.logoPath.replace(/\\/g, '/')}`}
                     alt="Logo"
                     className="max-h-24 mx-auto"
                   />
@@ -176,7 +176,7 @@ const Onboarding = () => {
               >
                 {formData.signaturePath ? (
                   <img
-                    src={`file://${formData.signaturePath}`}
+                    src={`local-resource://${formData.signaturePath.replace(/\\/g, '/')}`}
                     alt="Signature"
                     className="max-h-24 mx-auto"
                   />

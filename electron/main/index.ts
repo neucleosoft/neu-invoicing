@@ -1,6 +1,7 @@
 import path from 'path'
+import fs from 'fs'
 
-import { app, BrowserWindow } from 'electron'
+import { app, BrowserWindow, protocol } from 'electron'
 import { setupDatabase } from './database'
 import { setupAuthHandlers } from './auth'
 import { setupSyncHandlers } from './sync'
@@ -18,6 +19,10 @@ import { setupGstHandlers } from './handlers/gst'
 import { setupChallanHandlers } from './handlers/challan'
 import { setupCreditNoteHandlers } from './handlers/creditNote'
 import { setupCashBankHandlers } from './handlers/cashBank'
+
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'local-resource', privileges: { bypassCSP: true, stream: true, supportFetchAPI: true } }
+])
 
 let mainWindow: BrowserWindow | null = null
 
@@ -72,6 +77,21 @@ const createWindow = () => {
 app.whenReady().then(async () => {
   // Initialize database
   await setupDatabase()
+
+  // Serve local files via custom protocol (renderer can't access file:// directly)
+  // Chrome parses "local-resource://C:/path" as host="c", pathname="/path"
+  // So we reconstruct the Windows path from those pieces
+  protocol.handle('local-resource', (request) => {
+    const url = new URL(request.url)
+    const filePath = url.host
+      ? `${url.host.toUpperCase()}:${decodeURIComponent(url.pathname)}`
+      : decodeURIComponent(url.pathname)
+
+    const data = fs.readFileSync(filePath)
+    const ext = path.extname(filePath).toLowerCase()
+    const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg'
+    return new Response(data, { headers: { 'Content-Type': mimeType } })
+  })
 
   // Setup IPC handlers
   setupAuthHandlers()
