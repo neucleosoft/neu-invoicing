@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { google } from 'googleapis'
 import { getOAuth2Client } from './auth'
-import { getDatabasePath, getPrisma, ensureTablesExist } from './database'
+import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
 import fs from 'fs'
 import Store from 'electron-store'
 
@@ -58,6 +58,7 @@ const performSync = async () => {
     })
 
     const files = response.data.files || []
+    const prisma = getPrisma()
 
     if (files.length > 0) {
       // Cloud file exists
@@ -68,7 +69,11 @@ const performSync = async () => {
       const localStats = fs.existsSync(dbPath) ? fs.statSync(dbPath) : null
       const localModifiedTime = localStats ? localStats.mtime : new Date(0)
 
-      if (cloudModifiedTime > localModifiedTime) {
+      // Check if local DB is empty (no company = fresh install)
+      const localCompany = await prisma.company.findFirst()
+      const localIsEmpty = !localCompany
+
+      if (localIsEmpty || cloudModifiedTime > localModifiedTime) {
         // Download from cloud (cloud is newer)
         console.log('Downloading database from cloud...')
         const dest = fs.createWriteStream(dbPath)
@@ -92,6 +97,9 @@ const performSync = async () => {
 
         // The downloaded DB might be from an older version — add any missing tables
         ensureTablesExist(`file:${dbPath}`)
+
+        // Reconnect Prisma so it reads the new file instead of the old empty one
+        await reconnectDatabase()
       } else {
         // Upload to cloud (local is newer or same)
         console.log('Uploading database to cloud...')
@@ -127,7 +135,6 @@ const performSync = async () => {
     }
 
     // Update sync metadata in database
-    const prisma = getPrisma()
     const deviceId = require('os').hostname()
 
     await prisma.syncMetadata.upsert({

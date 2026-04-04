@@ -86,6 +86,14 @@ export const getPrisma = () => {
   return prisma
 }
 
+// Reopen the same connection (call after sync replaces the file on disk)
+// We reuse the same Prisma object so all handlers still have a valid reference
+export const reconnectDatabase = async () => {
+  await prisma.$disconnect()
+  await prisma.$connect()
+  console.log('Database reconnected successfully')
+}
+
 export const getDatabasePath = () => {
   const userDataPath = app.getPath('userData')
   return path.join(userDataPath, 'neuinvoicing.db')

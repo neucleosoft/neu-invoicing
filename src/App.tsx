@@ -31,6 +31,15 @@ function App() {
         setAuthStatus(status)
 
         if (status.isAuthenticated) {
+          // Sync first — if cloud has newer data, download it before checking company
+          // This way we don't show onboarding when cloud already has the user's data
+          try {
+            await window.electronAPI.sync.syncNow()
+          } catch (syncError) {
+            // Sync failed (maybe offline) — no problem, continue with local data
+            console.log('Sync failed, continuing with local data:', syncError)
+          }
+
           const companyResult = await window.electronAPI.company.get()
           if (companyResult.success && companyResult.data) {
             setCompany(companyResult.data)

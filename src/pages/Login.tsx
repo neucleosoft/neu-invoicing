@@ -16,15 +16,24 @@ const Login = () => {
       const result = await window.electronAPI.auth.signInWithGoogle()
 
       if (result.success) {
-        setAuthStatus({ isAuthenticated: true, user: result.user })
+        // Sync first — cloud might have existing data
+        // Do this BEFORE setting auth status so the user stays on login page
+        // instead of flashing the onboarding page
+        try {
+          await window.electronAPI.sync.syncNow()
+        } catch (syncError) {
+          console.log('Sync failed, continuing with local data:', syncError)
+        }
 
-        // Check if company exists
+        // Check if company exists (after sync, so cloud data is available)
         const companyResult = await window.electronAPI.company.get()
+
+        // Now update state — React renders the right page in one go
+        setAuthStatus({ isAuthenticated: true, user: result.user })
         if (companyResult.success && companyResult.data) {
           setCompany(companyResult.data)
           navigate('/')
         } else {
-          // Redirect to onboarding
           navigate('/onboarding')
         }
       } else {
