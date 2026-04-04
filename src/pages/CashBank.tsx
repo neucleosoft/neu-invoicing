@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
+import NumberInput from '../components/NumberInput'
 
 interface BankAccount {
   id: string
@@ -382,12 +383,10 @@ const CashBank = () => {
                 {!editingAccount && (
                   <div>
                     <label className="label">Opening Balance</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.currentBalance}
-                      onChange={(e) => setFormData({ ...formData, currentBalance: parseFloat(e.target.value) || 0 })}
+                    <NumberInput
                       className="input"
+                      value={formData.currentBalance}
+                      onChange={(val) => setFormData({ ...formData, currentBalance: val })}
                       placeholder="0.00"
                     />
                   </div>
@@ -440,12 +439,10 @@ const CashBank = () => {
               <form onSubmit={handleAdjustSubmit} className="space-y-4">
                 <div>
                   <label className="label">Amount *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={adjustData.amount}
-                    onChange={(e) => setAdjustData({ ...adjustData, amount: parseFloat(e.target.value) || 0 })}
+                  <NumberInput
                     className="input"
+                    value={adjustData.amount}
+                    onChange={(val) => setAdjustData({ ...adjustData, amount: val })}
                     placeholder="Positive to add, negative to subtract"
                   />
                   <p className="text-xs text-gray-500 mt-1">

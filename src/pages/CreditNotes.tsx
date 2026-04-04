@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
+import NumberInput from '../components/NumberInput'
 
 interface CreditDebitNote {
   id: string
@@ -573,51 +574,43 @@ const CreditNotes = () => {
 
                           <div className="w-20">
                             <label className="label text-xs">Qty</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.quantity}
-                              onChange={(e) => updateNoteItem(index, 'quantity', parseFloat(e.target.value) || 0)}
-                              min="1"
-                              step="1"
+                              onChange={(val) => updateNoteItem(index, 'quantity', val)}
+                              min={1}
                               required
                             />
                           </div>
 
                           <div className="w-28">
                             <label className="label text-xs">Rate</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.rate}
-                              onChange={(e) => updateNoteItem(index, 'rate', parseFloat(e.target.value) || 0)}
-                              min="0"
-                              step="0.01"
+                              onChange={(val) => updateNoteItem(index, 'rate', val)}
+                              min={0}
                               required
                             />
                           </div>
 
                           <div className="w-24">
                             <label className="label text-xs">Discount</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.discount}
-                              onChange={(e) => updateNoteItem(index, 'discount', parseFloat(e.target.value) || 0)}
-                              min="0"
-                              step="0.01"
+                              onChange={(val) => updateNoteItem(index, 'discount', val)}
+                              min={0}
                             />
                           </div>
 
                           <div className="w-20">
                             <label className="label text-xs">Tax %</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.taxRate}
-                              onChange={(e) => updateNoteItem(index, 'taxRate', parseFloat(e.target.value) || 0)}
-                              min="0"
-                              step="0.01"
+                              onChange={(val) => updateNoteItem(index, 'taxRate', val)}
+                              min={0}
                             />
                           </div>
 

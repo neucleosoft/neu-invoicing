@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
+import NumberInput from '../components/NumberInput'
 
 interface Challan {
   id: string
@@ -510,39 +511,33 @@ const DeliveryChallan = () => {
 
                           <div className="w-24">
                             <label className="label text-xs">Qty</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.quantity}
-                              onChange={(e) => updateChallanItem(index, 'quantity', parseFloat(e.target.value) || 0)}
-                              min="1"
-                              step="1"
+                              onChange={(val) => updateChallanItem(index, 'quantity', val)}
+                              min={1}
                               required
                             />
                           </div>
 
                           <div className="w-32">
                             <label className="label text-xs">Rate</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.rate}
-                              onChange={(e) => updateChallanItem(index, 'rate', parseFloat(e.target.value) || 0)}
-                              min="0"
-                              step="0.01"
+                              onChange={(val) => updateChallanItem(index, 'rate', val)}
+                              min={0}
                               required
                             />
                           </div>
 
                           <div className="w-24">
                             <label className="label text-xs">Tax %</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.taxRate}
-                              onChange={(e) => updateChallanItem(index, 'taxRate', parseFloat(e.target.value) || 0)}
-                              min="0"
-                              step="0.01"
+                              onChange={(val) => updateChallanItem(index, 'taxRate', val)}
+                              min={0}
                             />
                           </div>
 

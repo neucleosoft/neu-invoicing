@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { PaymentTransaction } from '../types'
 import { formatCurrency } from '../utils/currency'
+import NumberInput from '../components/NumberInput'
 
 interface Party {
   id: string
@@ -196,13 +197,11 @@ const Payments = () => {
 
                 <div>
                   <label className="label">Amount *</label>
-                  <input
-                    type="number"
+                  <NumberInput
                     className="input"
                     value={formData.amount}
-                    onChange={(e) => setFormData({...formData, amount: parseFloat(e.target.value) || 0})}
-                    min="0.01"
-                    step="0.01"
+                    onChange={(val) => setFormData({...formData, amount: val})}
+                    min={0.01}
                     required
                   />
                 </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react'
 import { Item } from '../types'
 import { formatCurrency } from '../utils/currency'
+import NumberInput from '../components/NumberInput'
 
 const Items = () => {
   const [items, setItems] = useState<Item[]>([])
@@ -243,33 +244,30 @@ const Items = () => {
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="label">Sale Price *</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.salePrice}
-                    onChange={(e) => setFormData({ ...formData, salePrice: parseFloat(e.target.value) || 0 })}
-                    required
+                  <NumberInput
                     className="input"
+                    value={formData.salePrice}
+                    onChange={(val) => setFormData({ ...formData, salePrice: val })}
+                    min={0}
+                    required
                   />
                 </div>
                 <div>
                   <label className="label">Purchase Price</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.purchasePrice}
-                    onChange={(e) => setFormData({ ...formData, purchasePrice: parseFloat(e.target.value) || 0 })}
+                  <NumberInput
                     className="input"
+                    value={formData.purchasePrice}
+                    onChange={(val) => setFormData({ ...formData, purchasePrice: val })}
+                    min={0}
                   />
                 </div>
                 <div>
                   <label className="label">Tax Rate (%)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={formData.taxRate}
-                    onChange={(e) => setFormData({ ...formData, taxRate: parseFloat(e.target.value) || 0 })}
+                  <NumberInput
                     className="input"
+                    value={formData.taxRate}
+                    onChange={(val) => setFormData({ ...formData, taxRate: val })}
+                    min={0}
                   />
                 </div>
               </div>
@@ -309,22 +307,20 @@ const Items = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="label">Current Stock</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.currentStock}
-                      onChange={(e) => setFormData({ ...formData, currentStock: parseFloat(e.target.value) || 0 })}
+                    <NumberInput
                       className="input"
+                      value={formData.currentStock}
+                      onChange={(val) => setFormData({ ...formData, currentStock: val })}
+                      min={0}
                     />
                   </div>
                   <div>
                     <label className="label">Low Stock Warning</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.lowStockWarning}
-                      onChange={(e) => setFormData({ ...formData, lowStockWarning: parseFloat(e.target.value) || 0 })}
+                    <NumberInput
                       className="input"
+                      value={formData.lowStockWarning}
+                      onChange={(val) => setFormData({ ...formData, lowStockWarning: val })}
+                      min={0}
                     />
                   </div>
                 </div>

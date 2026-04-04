@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from 'react'
 import { Party } from '../types'
 import { formatCurrency } from '../utils/currency'
 import { validateGSTIN, INDIAN_STATE_CODES } from '../utils/gstValidation'
+import NumberInput from '../components/NumberInput'
 
 // Avatar color palette (6 colors)
 const AVATAR_COLORS = [
@@ -557,12 +558,10 @@ const Parties = () => {
                 {!editingParty && (
                   <div>
                     <label className="label">Opening Balance</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={formData.openingBalance}
-                      onChange={(e) => setFormData({ ...formData, openingBalance: parseFloat(e.target.value) || 0 })}
+                    <NumberInput
                       className="input"
+                      value={formData.openingBalance}
+                      onChange={(val) => setFormData({ ...formData, openingBalance: val })}
                       placeholder="0.00"
                     />
                   </div>

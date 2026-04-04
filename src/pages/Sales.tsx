@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { SalesInvoice } from '../types'
 import { downloadInvoicePDF, InvoiceTemplate } from '../utils/generateInvoicePDF'
 import { formatCurrency } from '../utils/currency'
+import NumberInput from '../components/NumberInput'
 
 interface Party {
   id: string
@@ -586,51 +587,43 @@ const Sales = () => {
 
                           <div className="w-24">
                             <label className="label text-xs">Qty</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.quantity}
-                              onChange={(e) => updateInvoiceItem(index, 'quantity', parseFloat(e.target.value) || 0)}
-                              min="1"
-                              step="1"
+                              onChange={(val) => updateInvoiceItem(index, 'quantity', val)}
+                              min={1}
                               required
                             />
                           </div>
 
                           <div className="w-32">
                             <label className="label text-xs">Rate</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.rate}
-                              onChange={(e) => updateInvoiceItem(index, 'rate', parseFloat(e.target.value) || 0)}
-                              min="0"
-                              step="0.01"
+                              onChange={(val) => updateInvoiceItem(index, 'rate', val)}
+                              min={0}
                               required
                             />
                           </div>
 
                           <div className="w-24">
                             <label className="label text-xs">Disc</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.discount}
-                              onChange={(e) => updateInvoiceItem(index, 'discount', parseFloat(e.target.value) || 0)}
-                              min="0"
-                              step="0.01"
+                              onChange={(val) => updateInvoiceItem(index, 'discount', val)}
+                              min={0}
                             />
                           </div>
 
                           <div className="w-24">
                             <label className="label text-xs">Tax %</label>
-                            <input
-                              type="number"
+                            <NumberInput
                               className="input"
                               value={item.taxRate}
-                              onChange={(e) => updateInvoiceItem(index, 'taxRate', parseFloat(e.target.value) || 0)}
-                              min="0"
-                              step="0.01"
+                              onChange={(val) => updateInvoiceItem(index, 'taxRate', val)}
+                              min={0}
                             />
                           </div>
 
@@ -682,13 +675,11 @@ const Sales = () => {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="label">Amount Paid</label>
-                      <input
-                        type="number"
+                      <NumberInput
                         className="input"
                         value={formData.amountPaid}
-                        onChange={(e) => setFormData({...formData, amountPaid: parseFloat(e.target.value) || 0})}
-                        min="0"
-                        step="0.01"
+                        onChange={(val) => setFormData({...formData, amountPaid: val})}
+                        min={0}
                       />
                     </div>
                     <div>
