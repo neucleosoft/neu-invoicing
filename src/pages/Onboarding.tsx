@@ -34,14 +34,14 @@ const Onboarding = () => {
 
   const handleLogoUpload = async () => {
     const result = await window.electronAPI.company.selectImage();
-    if (result.success) {
+    if (result.success && result.path) {
       setFormData({ ...formData, logoPath: result.path });
     }
   };
 
   const handleSignatureUpload = async () => {
     const result = await window.electronAPI.company.selectImage();
-    if (result.success) {
+    if (result.success && result.path) {
       setFormData({ ...formData, signaturePath: result.path });
     }
   };

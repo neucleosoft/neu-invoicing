@@ -88,6 +88,23 @@ const Sales = () => {
         const companyResult = await window.electronAPI.company.get()
         const company = companyResult.success ? companyResult.data : undefined
 
+        // Convert logo file to base64 for PDF generation
+        if (company?.logoPath) {
+          try {
+            const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
+            const response = await fetch(logoUrl)
+            const blob = await response.blob()
+            const reader = new FileReader()
+            const logoBase64 = await new Promise<string>((resolve) => {
+              reader.onloadend = () => resolve(reader.result as string)
+              reader.readAsDataURL(blob)
+            })
+            company.logoBase64 = logoBase64
+          } catch {
+            // Logo file missing or unreadable, skip it
+          }
+        }
+
         // Pass all invoice fields (including GST data) to PDF generator
         const pdfData = {
           ...invoice,

@@ -197,11 +197,11 @@ function parseInvoiceText(text) {
       if (cols.length >= 6 && /^\d+$/.test(cols[0])) {
         // Try standard 6-col first (QTY in cols[3])
         let qtyColIdx = 3;
-        let qtyM = cols[qtyColIdx].match(/^(\d+)\s*([A-Z]+)?$/);
+        let qtyM = cols[qtyColIdx].match(/^(\d+)\s*([A-Za-z]+)?$/);
         // If that fails and there's a FREIGHT column, try cols[4]
         if (!qtyM && hasFreightCol && cols.length >= 7) {
           qtyColIdx = 4;
-          qtyM = cols[qtyColIdx].match(/^(\d+)\s*([A-Z]+)?$/);
+          qtyM = cols[qtyColIdx].match(/^(\d+)\s*([A-Za-z]+)?$/);
         }
         if (qtyM) {
           curSno = 0; curName = '';
@@ -216,7 +216,7 @@ function parseInvoiceText(text) {
 
       // 1b. Complete item WITHOUT HSN via tab separation (5 columns)
       if (cols.length >= 5 && /^\d+$/.test(cols[0]) && !hasHsnCol) {
-        const qtyM = cols[2].match(/^(\d+)\s*([A-Z]+)?$/);
+        const qtyM = cols[2].match(/^(\d+)\s*([A-Za-z]+)?$/);
         if (qtyM) {
           curSno = 0; curName = '';
           inv.items.push({
@@ -232,7 +232,7 @@ function parseInvoiceText(text) {
       {
         const norm = line.replace(/\t/g, '  ');
         const m = norm.match(
-          /^(\d+)\s+(.+)\s+(\d{4,8})\s+(\d+)\s+([A-Z]+)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$/
+          /^(\d+)\s+(.+)\s+(\d{4,8})\s+(\d+)\s+([A-Za-z]+)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$/
         );
         if (m) {
           curSno = 0; curName = '';
@@ -245,26 +245,10 @@ function parseInvoiceText(text) {
         }
       }
 
-      // 2b. Complete item via space regex WITHOUT HSN
-      if (!hasHsnCol) {
-        const norm = line.replace(/\t/g, '  ');
-        const m = norm.match(
-          /^(\d+)\s+(.+)\s+(\d+)\s+([A-Z]+)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$/
-        );
-        if (m) {
-          curSno = 0; curName = '';
-          inv.items.push({
-            sno: +m[1], rawName: m[2].trim(), name: normalizeItemName(m[2].trim()),
-            hsnCode: '', quantity: +m[3], unit: m[4],
-            rate: parseNum(m[5]), amount: parseNum(m[6]), taxRate: 0,
-          });
-          continue;
-        }
-      }
-
       // 3a. Data-only row for multi-line items: HSN, QTY UNIT, RATE, AMOUNT
+      // (checked before 2b to prevent HSN codes being misread as item serial numbers)
       if (cols.length >= 4 && /^\d{4,8}$/.test(cols[0]) && curSno > 0) {
-        const qtyM = cols[1].match(/^(\d+)\s*([A-Z]+)?$/);
+        const qtyM = cols[1].match(/^(\d+)\s*([A-Za-z]+)?$/);
         if (qtyM) {
           inv.items.push({
             sno: curSno, rawName: curName, name: normalizeItemName(curName),
@@ -280,7 +264,7 @@ function parseInvoiceText(text) {
       if (curSno > 0 && cols.length >= 2) {
         const norm = line.replace(/\t/g, '  ');
         const dm = norm.match(
-          /^(\d{4,8})\s+(\d+)\s+([A-Z]+)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$/
+          /^(\d{4,8})\s+(\d+)\s+([A-Za-z]+)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$/
         );
         if (dm) {
           inv.items.push({
@@ -294,8 +278,8 @@ function parseInvoiceText(text) {
       }
 
       // 3c. Data-only row for no-HSN multi-line items: QTY UNIT, RATE, AMOUNT
-      if (curSno > 0 && !hasHsnCol && cols.length >= 3) {
-        const qtyM = cols[0].match(/^(\d+)\s*([A-Z]+)?$/);
+      if (curSno > 0 && cols.length >= 3) {
+        const qtyM = cols[0].match(/^(\d+)\s*([A-Za-z]+)?$/);
         if (qtyM) {
           inv.items.push({
             sno: curSno, rawName: curName, name: normalizeItemName(curName),
@@ -303,6 +287,23 @@ function parseInvoiceText(text) {
             rate: parseNum(cols[1]), amount: parseNum(cols[2]), taxRate: 0,
           });
           curSno = 0; curName = '';
+          continue;
+        }
+      }
+
+      // 2b. Complete item via space regex WITHOUT HSN (also tried as fallback when HSN col exists but item has no HSN)
+      {
+        const norm = line.replace(/\t/g, '  ');
+        const m = norm.match(
+          /^(\d+)\s+(.+)\s+(\d+)\s+([A-Za-z]+)\s+([\d,]+(?:\.\d+)?)\s+([\d,]+(?:\.\d+)?)\s*$/
+        );
+        if (m) {
+          curSno = 0; curName = '';
+          inv.items.push({
+            sno: +m[1], rawName: m[2].trim(), name: normalizeItemName(m[2].trim()),
+            hsnCode: '', quantity: +m[3], unit: m[4],
+            rate: parseNum(m[5]), amount: parseNum(m[6]), taxRate: 0,
+          });
           continue;
         }
       }

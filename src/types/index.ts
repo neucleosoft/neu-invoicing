@@ -317,6 +317,7 @@ declare global {
         create: (data: Partial<Company>) => Promise<{ success: boolean; data?: Company; error?: string }>
         update: (id: string, data: Partial<Company>) => Promise<{ success: boolean; data?: Company; error?: string }>
         uploadLogo: (filePath: string) => Promise<{ success: boolean; path?: string; error?: string }>
+        selectImage: () => Promise<{ success: boolean; path?: string; error?: string }>
       }
       party: {
         getAll: (type?: string) => Promise<{ success: boolean; data?: Party[]; error?: string }>
