@@ -142,16 +142,26 @@ const DeliveryChallan = () => {
       const companyResult = await window.electronAPI.company.get()
       const company = companyResult.success ? companyResult.data : undefined
 
-      // Convert logo to base64 (same pattern as Sales.tsx)
+      // Convert logo to base64 resized (200x200 is plenty for PDF)
       if (company?.logoPath) {
         try {
           const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
           const response = await fetch(logoUrl)
           const blob = await response.blob()
-          const reader = new FileReader()
-          const logoBase64 = await new Promise<string>((resolve) => {
-            reader.onloadend = () => resolve(reader.result as string)
-            reader.readAsDataURL(blob)
+          const img = new Image()
+          const imgUrl = URL.createObjectURL(blob)
+          const logoBase64 = await new Promise<string>((resolve, reject) => {
+            img.onload = () => {
+              const canvas = document.createElement('canvas')
+              canvas.width = 600
+              canvas.height = 600
+              const ctx = canvas.getContext('2d')!
+              ctx.drawImage(img, 0, 0, 600, 600)
+              URL.revokeObjectURL(imgUrl)
+              resolve(canvas.toDataURL('image/png'))
+            }
+            img.onerror = reject
+            img.src = imgUrl
           })
           ;(company as any).logoBase64 = logoBase64
         } catch {
