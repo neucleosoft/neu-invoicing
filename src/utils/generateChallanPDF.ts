@@ -210,12 +210,18 @@ function generateChallanTemplate(doc: jsPDF, challan: ChallanData) {
     HC = [ML, ML + 25, ML + 60, ML + 75, ML + 100, ML + 115, ML + 140, RE]
   }
 
+  doc.line(ML, HSN_TOP, RE, HSN_TOP)
   const hsnBottom = HSN_TOP + HSN_H
+  doc.line(ML, hsnBottom, RE, hsnBottom)
   for (let i = 1; i < HC.length - 1; i++) {
     doc.line(HC[i], HSN_TOP, HC[i], hsnBottom)
   }
 
   // HSN header row 1
+  doc.setFillColor(198, 224, 180)
+  doc.setDrawColor(0, 0, 0)
+  doc.rect(ML, HSN_TOP, CW, ROW_H, 'FD')
+  doc.line(ML, HSN_TOP + HSN_HDR_H, RE, HSN_TOP + HSN_HDR_H)
   doc.setFontSize(7.5)
   doc.setFont('helvetica', 'bold')
   const hsnHdr1Y = HSN_TOP + 5
@@ -281,6 +287,7 @@ function generateChallanTemplate(doc: jsPDF, challan: ChallanData) {
 
   // HSN Total row
   const hsnTotalY = hsnDataStart + hsnDataRows * ROW_H
+  doc.line(ML, hsnTotalY, RE, hsnTotalY)
   doc.line(ML, hsnTotalY + ROW_H, RE, hsnTotalY + ROW_H)
   doc.setFont('helvetica', 'bold')
   const hty = hsnTotalY + 5
@@ -304,6 +311,46 @@ function generateChallanTemplate(doc: jsPDF, challan: ChallanData) {
   // FOOTER: Bank Details | Terms & Conditions | Authorised Signatory
   // ════════════════════════════════════════════════════════════════════════════
   drawFooter(doc, challan.company, companyLogo, FOOTER_TOP, BORDER_BOTTOM, ML, RE)
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // REDRAW: Lines on top of green fills
+  // ════════════════════════════════════════════════════════════════════════════
+  doc.setDrawColor(0, 0, 0)
+
+  // Outer page border
+  doc.setLineWidth(0.6)
+  doc.rect(ML, BORDER_TOP, CW, BORDER_BOTTOM - BORDER_TOP)
+  doc.setLineWidth(0.4)
+
+  // Vertical column lines through items header, items, tax rows, and TOTAL
+  for (let ci = 1; ci < IC.length - 1; ci++) {
+    doc.line(IC[ci], TRANSPORT_BOTTOM, IC[ci], TOTAL_TOP + TOTAL_ROW_H)
+  }
+
+  // HSN vertical column lines
+  for (let ci = 1; ci < HC.length - 1; ci++) {
+    if (isInter && ci === 3) {
+      doc.line(HC[ci], HSN_TOP + ROW_H, HC[ci], HSN_TOP + HSN_H)
+    } else if (!isInter && (ci === 3 || ci === 5)) {
+      doc.line(HC[ci], HSN_TOP + ROW_H, HC[ci], HSN_TOP + HSN_H)
+    } else {
+      doc.line(HC[ci], HSN_TOP, HC[ci], HSN_TOP + HSN_H)
+    }
+  }
+
+  // All horizontal lines on green sections
+  // Items header
+  doc.line(ML, BILLSHIP_BOTTOM, RE, BILLSHIP_BOTTOM)
+  doc.line(ML, BILLSHIP_BOTTOM + ITEMS_HDR_H, RE, BILLSHIP_BOTTOM + ITEMS_HDR_H)
+  // TOTAL row
+  doc.line(ML, TOTAL_TOP, RE, TOTAL_TOP)
+  doc.line(ML, TOTAL_TOP + TOTAL_ROW_H, RE, TOTAL_TOP + TOTAL_ROW_H)
+  // HSN header
+  doc.line(ML, HSN_TOP, RE, HSN_TOP)
+  doc.line(HC[2], HSN_TOP + ROW_H, RE, HSN_TOP + ROW_H)
+  // Amount in words
+  doc.line(ML, WORDS_TOP, RE, WORDS_TOP)
+  doc.line(ML, FOOTER_TOP, RE, FOOTER_TOP)
 }
 
 // ─── Main exports ─────────────────────────────────────────────────────────────

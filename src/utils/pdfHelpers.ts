@@ -444,18 +444,16 @@ export function drawItemsTableHeader(
 ) {
   const ITEMS_HDR_BOTTOM = BILLSHIP_BOTTOM + ITEMS_HDR_H
 
-  doc.setFillColor(30, 30, 30)
+  doc.setFillColor(198, 224, 180)
   doc.rect(ML, BILLSHIP_BOTTOM, CW, ITEMS_HDR_H, 'F')
-  doc.line(ML, ITEMS_HDR_BOTTOM, RE, ITEMS_HDR_BOTTOM)
 
   const hdrs = ['S.NO.', 'ITEMS', 'HSN', 'QTY.', 'RATE', 'AMOUNT']
   doc.setFontSize(8.5)
   doc.setFont('helvetica', 'bold')
-  doc.setTextColor(255, 255, 255)
+  doc.setTextColor(0, 0, 0)
   hdrs.forEach((h, i) => {
     doc.text(h, (IC[i] + IC[i + 1]) / 2, BILLSHIP_BOTTOM + 5.5, { align: 'center' })
   })
-  doc.setTextColor(0, 0, 0)
 }
 
 /** Draw item data rows */
@@ -504,11 +502,10 @@ export function drawTotalRow(
   IC: number[], RE: number,
   _currency?: string
 ) {
+  doc.setFillColor(198, 224, 180)
+  doc.rect(IC[0], TOTAL_TOP, RE - IC[0], TOTAL_ROW_H, 'F')
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(9)
-  doc.setLineWidth(0.5)
-  doc.line(IC[0], TOTAL_TOP + TOTAL_ROW_H, RE, TOTAL_TOP + TOTAL_ROW_H)
-  doc.setLineWidth(0.4)
   doc.text('TOTAL', (IC[1] + IC[2]) / 2, TOTAL_TOP + 5.5, { align: 'center' })
   doc.text(totalQty.toString(), (IC[3] + IC[4]) / 2, TOTAL_TOP + 5.5, { align: 'center' })
   doc.text(fmtRs(totalAmount), RE - 3, TOTAL_TOP + 5.5, { align: 'right' })
@@ -522,8 +519,9 @@ export function drawAmountInWords(
   ML: number, CW: number
 ) {
   const RE = ML + CW
-  doc.line(ML, WORDS_TOP, RE, WORDS_TOP)
-  doc.line(ML, FOOTER_TOP, RE, FOOTER_TOP)
+  doc.setFillColor(198, 224, 180)
+  doc.setDrawColor(0, 0, 0)
+  doc.rect(ML, WORDS_TOP, CW, FOOTER_TOP - WORDS_TOP, 'FD')
 
   doc.setFontSize(7.5)
   doc.setFont('helvetica', 'bold')
