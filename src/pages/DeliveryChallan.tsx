@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
+import { downloadChallanPDF } from '../utils/generateChallanPDF'
 import NumberInput from '../components/NumberInput'
 
 interface Challan {
@@ -132,6 +133,33 @@ const DeliveryChallan = () => {
     if (result.success && result.data) {
       setViewingChallan(result.data)
       setShowViewModal(true)
+    }
+  }
+
+  const handleDownloadPDF = async (challanId: string) => {
+    const result = await window.electronAPI.challan.getById(challanId)
+    if (result.success && result.data) {
+      const companyResult = await window.electronAPI.company.get()
+      const company = companyResult.success ? companyResult.data : undefined
+
+      // Convert logo to base64 (same pattern as Sales.tsx)
+      if (company?.logoPath) {
+        try {
+          const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
+          const response = await fetch(logoUrl)
+          const blob = await response.blob()
+          const reader = new FileReader()
+          const logoBase64 = await new Promise<string>((resolve) => {
+            reader.onloadend = () => resolve(reader.result as string)
+            reader.readAsDataURL(blob)
+          })
+          ;(company as any).logoBase64 = logoBase64
+        } catch {
+          // Logo file missing or unreadable, skip it
+        }
+      }
+
+      downloadChallanPDF({ ...result.data, company } as any)
     }
   }
 
@@ -371,6 +399,12 @@ const DeliveryChallan = () => {
                           className="text-primary-600 hover:text-primary-700"
                         >
                           View
+                        </button>
+                        <button
+                          onClick={() => handleDownloadPDF(challan.id)}
+                          className="text-indigo-600 hover:text-indigo-700"
+                        >
+                          PDF
                         </button>
                         {challan.status !== 'CONVERTED' && (
                           <button
@@ -737,6 +771,12 @@ const DeliveryChallan = () => {
                   className="btn btn-secondary"
                 >
                   Close
+                </button>
+                <button
+                  onClick={() => handleDownloadPDF(viewingChallan.id)}
+                  className="btn btn-secondary"
+                >
+                  Download PDF
                 </button>
                 {(viewingChallan.status === 'PENDING' || viewingChallan.status === 'DELIVERED') && (
                   <button

@@ -8,6 +8,8 @@ export interface Company {
   email?: string
   taxId?: string
   logoPath?: string
+  logoBase64?: string
+  signaturePath?: string
   fiscalYearStart: number
   currency: string
   invoicePrefix: string
