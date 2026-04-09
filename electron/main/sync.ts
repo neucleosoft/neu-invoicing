@@ -180,13 +180,7 @@ export const performInitialSync = async () => {
 // Trigger sync after database changes (properly debounced)
 let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
 
+// Disabled auto-sync — sync only happens when user clicks sync button
 export const triggerSyncAfterChange = async () => {
-  if (syncDebounceTimer) {
-    clearTimeout(syncDebounceTimer)
-  }
-  syncDebounceTimer = setTimeout(() => {
-    performSync().catch((err) => {
-      console.error('Background sync failed:', err)
-    })
-  }, 5000)
+  // intentionally empty
 }
