@@ -2,6 +2,44 @@ import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 import { triggerSyncAfterChange } from '../sync'
 
+// Generate fiscal year string (e.g., "26-27" for April 2026 - March 2027)
+const getFiscalYear = (): string => {
+  const now = new Date()
+  const month = now.getMonth() + 1 // 1-12
+  const year = now.getFullYear() % 100 // last 2 digits
+  if (month >= 4) {
+    // April onwards = current year to next year
+    return `${String(year).padStart(2, '0')}-${String(year + 1).padStart(2, '0')}`
+  } else {
+    // Jan-March = previous year to current year
+    return `${String(year - 1).padStart(2, '0')}-${String(year).padStart(2, '0')}`
+  }
+}
+
+// Generate next invoice number in format NS/SL/26-27/01
+const generateNextInvoiceNumber = async (prisma: any): Promise<string> => {
+  const fy = getFiscalYear()
+  const prefix = `NS/SL/${fy}/`
+
+  // Find the last invoice in this fiscal year
+  const lastInvoice = await prisma.salesInvoice.findFirst({
+    where: {
+      type: 'INVOICE',
+      invoiceNumber: { startsWith: prefix }
+    },
+    orderBy: { invoiceNumber: 'desc' }
+  })
+
+  let nextNum = 1
+  if (lastInvoice) {
+    const lastPart = lastInvoice.invoiceNumber.split('/').pop()
+    const parsed = parseInt(lastPart || '0')
+    if (!isNaN(parsed)) nextNum = parsed + 1
+  }
+
+  return `${prefix}${String(nextNum).padStart(2, '0')}`
+}
+
 // Determine supply type based on party GSTIN
 const determineSupplyType = (party: any, totalAmount: number, isInterState: boolean): string => {
   const hasGstin = party?.taxId && party.taxId.length === 15
@@ -470,16 +508,7 @@ export const setupSalesHandlers = () => {
       }
 
       // Generate new invoice number
-      const lastInvoice = await prisma.salesInvoice.findFirst({
-        where: { type: 'INVOICE' },
-        orderBy: { invoiceNumber: 'desc' }
-      })
-
-      const company = await prisma.company.findFirst()
-      const prefix = company?.invoicePrefix || 'INV'
-      const year = new Date().getFullYear()
-      const lastNumber = lastInvoice ? parseInt(lastInvoice.invoiceNumber.split('-').pop() || '0') : 0
-      const newInvoiceNumber = `${prefix}-${year}-${String(lastNumber + 1).padStart(3, '0')}`
+      const newInvoiceNumber = await generateNextInvoiceNumber(prisma)
 
       // Create invoice from quotation
       const invoice = await prisma.salesInvoice.create({
@@ -567,17 +596,7 @@ export const setupSalesHandlers = () => {
   // Generate invoice number
   ipcMain.handle('sales:generateInvoiceNumber', async () => {
     try {
-      const lastInvoice = await prisma.salesInvoice.findFirst({
-        where: { type: 'INVOICE' },
-        orderBy: { invoiceNumber: 'desc' }
-      })
-
-      const company = await prisma.company.findFirst()
-      const prefix = company?.invoicePrefix || 'INV'
-      const year = new Date().getFullYear()
-      const lastNumber = lastInvoice ? parseInt(lastInvoice.invoiceNumber.split('-').pop() || '0') : 0
-      const newInvoiceNumber = `${prefix}-${year}-${String(lastNumber + 1).padStart(3, '0')}`
-
+      const newInvoiceNumber = await generateNextInvoiceNumber(prisma)
       return { success: true, data: newInvoiceNumber }
     } catch (error) {
       return {

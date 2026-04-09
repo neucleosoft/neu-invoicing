@@ -2,6 +2,18 @@ import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 import { triggerSyncAfterChange } from '../sync'
 
+// Generate fiscal year string (e.g., "26-27" for April 2026 - March 2027)
+const getFiscalYear = (): string => {
+  const now = new Date()
+  const month = now.getMonth() + 1
+  const year = now.getFullYear() % 100
+  if (month >= 4) {
+    return `${String(year).padStart(2, '0')}-${String(year + 1).padStart(2, '0')}`
+  } else {
+    return `${String(year - 1).padStart(2, '0')}-${String(year).padStart(2, '0')}`
+  }
+}
+
 export const setupChallanHandlers = () => {
   const prisma = getPrisma()
 
@@ -373,14 +385,22 @@ export const setupChallanHandlers = () => {
   // Generate challan number
   ipcMain.handle('challan:generateChallanNumber', async () => {
     try {
+      const fy = getFiscalYear()
+      const prefix = `NS/DC/${fy}/`
+
       const lastChallan = await prisma.deliveryChallan.findFirst({
+        where: { challanNumber: { startsWith: prefix } },
         orderBy: { challanNumber: 'desc' }
       })
 
-      const year = new Date().getFullYear()
-      const lastNumber = lastChallan ? parseInt(lastChallan.challanNumber.split('-').pop() || '0') : 0
-      const newChallanNumber = `DC-${year}-${String(lastNumber + 1).padStart(3, '0')}`
+      let nextNum = 1
+      if (lastChallan) {
+        const lastPart = lastChallan.challanNumber.split('/').pop()
+        const parsed = parseInt(lastPart || '0')
+        if (!isNaN(parsed)) nextNum = parsed + 1
+      }
 
+      const newChallanNumber = `${prefix}${String(nextNum).padStart(2, '0')}`
       return { success: true, data: newChallanNumber }
     } catch (error) {
       return {
