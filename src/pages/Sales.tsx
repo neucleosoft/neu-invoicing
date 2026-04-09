@@ -184,8 +184,8 @@ const Sales = () => {
       setFormData({
         partyId: fullInvoice.party?.id || '',
         type: fullInvoice.type,
-        invoiceDate: fullInvoice.invoiceDate.split('T')[0],
-        dueDate: fullInvoice.dueDate?.split('T')[0] || '',
+        invoiceDate: new Date(fullInvoice.invoiceDate).toISOString().split('T')[0],
+        dueDate: fullInvoice.dueDate ? new Date(fullInvoice.dueDate).toISOString().split('T')[0] : '',
         notes: fullInvoice.notes || '',
         termsConditions: fullInvoice.termsConditions || '',
         amountPaid: 0,
