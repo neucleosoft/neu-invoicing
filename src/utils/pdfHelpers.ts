@@ -229,7 +229,7 @@ export function getTaxGroups(items: PDFDocumentData['items'], isInterState: bool
 export function getHSNGroups(items: PDFDocumentData['items'], isInterState: boolean): HSNGroup[] {
   const map: Record<string, HSNGroup> = {}
   for (const it of items) {
-    const hsn = it.hsnCode || it.item.hsnCode || '-'
+    const hsn = it.hsnCode || it.item.hsnCode || it.item.skuHsn || '-'
     const taxable = it.taxableAmount ?? (it.rate * it.quantity)
     const rate = it.taxRate || 0
     if (!map[hsn]) map[hsn] = { hsn, taxable: 0, rate, igst: 0, cgst: 0, sgst: 0, totalTax: 0 }
@@ -482,7 +482,7 @@ export function drawItemRows(
     // ITEMS
     doc.text(doc.splitTextToSize(it.item.name, IC[2] - IC[1] - 4)[0], IC[1] + 2, ty)
     // HSN
-    const hsn = it.hsnCode || it.item.hsnCode || ''
+    const hsn = it.hsnCode || it.item.hsnCode || it.item.skuHsn || ''
     doc.text(hsn, (IC[2] + IC[3]) / 2, ty, { align: 'center' })
     // QTY
     doc.text(`${it.quantity} ${it.item.unit || 'PCS'}`, (IC[3] + IC[4]) / 2, ty, { align: 'center' })

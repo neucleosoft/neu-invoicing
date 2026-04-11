@@ -48,7 +48,7 @@ export const setupItemHandlers = () => {
         data: {
           name: data.name,
           skuHsn: data.skuHsn,
-          hsnCode: data.hsnCode || null,
+          hsnCode: data.hsnCode || data.skuHsn || null,
           type: data.type,
           unit: data.unit || 'pcs',
           salePrice: data.salePrice || 0,
@@ -79,6 +79,7 @@ export const setupItemHandlers = () => {
         data: {
           name: data.name,
           skuHsn: data.skuHsn,
+          hsnCode: data.hsnCode || data.skuHsn || null,
           type: data.type,
           unit: data.unit,
           salePrice: data.salePrice,
