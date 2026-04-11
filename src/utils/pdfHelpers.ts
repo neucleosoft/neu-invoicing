@@ -468,19 +468,31 @@ export function drawItemRows(
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8.5)
 
-  const displayItems = items.slice(0, maxItemRows)
-  for (let row = 0; row < displayItems.length; row++) {
-    const it = displayItems[row]
-    const ry = ITEMS_HDR_BOTTOM + row * ROW_H
-    const ty = ry + 5 // text y (vertically centered)
+  const LINE_H = 3.5 // height per wrapped text line
+  const ITEM_GAP = 7 // fixed gap between items
+  const maxY = ITEMS_HDR_BOTTOM + maxItemRows * ROW_H // bottom of items area
 
-    // Only draw horizontal line for rows with actual items
-    doc.line(IC[0], ry + ROW_H, RE, ry + ROW_H)
+  let currentY = ITEMS_HDR_BOTTOM
+
+  for (let row = 0; row < items.length; row++) {
+    const it = items[row]
+
+    // Split name into lines that fit the column
+    const nameLines = doc.splitTextToSize(it.item.name, IC[2] - IC[1] - 4)
+    const nameHeight = nameLines.length * LINE_H
+    const rowHeight = Math.max(ITEM_GAP, nameHeight + 3)
+
+    // Stop if this item won't fit
+    if (currentY + rowHeight > maxY) break
+
+    const ty = currentY + 5 // text baseline
 
     // S.NO
     doc.text((row + 1).toString(), (IC[0] + IC[1]) / 2, ty, { align: 'center' })
-    // ITEMS
-    doc.text(doc.splitTextToSize(it.item.name, IC[2] - IC[1] - 4)[0], IC[1] + 2, ty)
+    // ITEMS — draw all wrapped lines
+    for (let l = 0; l < nameLines.length; l++) {
+      doc.text(nameLines[l], IC[1] + 2, ty + l * LINE_H)
+    }
     // HSN
     const hsn = it.hsnCode || it.item.hsnCode || it.item.skuHsn || ''
     doc.text(hsn, (IC[2] + IC[3]) / 2, ty, { align: 'center' })
@@ -491,6 +503,8 @@ export function drawItemRows(
     // AMOUNT (taxable = rate * qty, before tax)
     const taxable = it.taxableAmount ?? (it.rate * it.quantity)
     doc.text(fmtNum(taxable), RE - 3, ty, { align: 'right' })
+
+    currentY += rowHeight
   }
 }
 
