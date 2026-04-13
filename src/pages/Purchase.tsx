@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { PurchaseBill } from '../types'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 interface Party {
   id: string
@@ -50,6 +52,9 @@ const Purchase = () => {
     loadItems()
   }, [])
 
+  const toast = useToast()
+  const confirm = useConfirm()
+
   const loadBills = async () => {
     const result = await window.electronAPI.purchase.getAll()
     if (result.success && result.data) {
@@ -72,13 +77,13 @@ const Purchase = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = window.confirm('Are you sure you want to delete this purchase bill?')
+    const confirmed = await confirm({ message: 'Are you sure you want to delete this purchase bill?', danger: true })
     if (confirmed) {
       const result = await window.electronAPI.purchase.delete(id)
       if (result.success) {
         loadBills()
       } else {
-        alert('Failed to delete purchase bill: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to delete purchase bill: ' + (result.error || 'Unknown error'))
       }
     }
   }
@@ -115,7 +120,7 @@ const Purchase = () => {
 
   const addBillItem = () => {
     if (billItems.length >= 1 && billItems[billItems.length - 1].itemId === '') {
-      alert('Please complete the current item first')
+      toast.info('Please complete the current item first')
       return
     }
     setBillItems([...billItems, {
@@ -180,12 +185,12 @@ const Purchase = () => {
     e.preventDefault()
 
     if (!formData.partyId) {
-      alert('Please select a supplier')
+      toast.info('Please select a supplier')
       return
     }
 
     if (billItems.length === 0) {
-      alert('Please add at least one item')
+      toast.info('Please add at least one item')
       return
     }
 
@@ -204,18 +209,18 @@ const Purchase = () => {
       const result = await window.electronAPI.purchase.update(editingBill.id, billData)
 
       if (result.success) {
-        alert('Purchase bill updated successfully!')
+        toast.success('Purchase bill updated successfully!')
         setShowModal(false)
         resetForm()
         loadBills()
       } else {
-        alert('Failed to update purchase bill: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to update purchase bill: ' + (result.error || 'Unknown error'))
       }
     } else {
       // Create new bill
       const billNumResult = await window.electronAPI.purchase.generateBillNumber()
       if (!billNumResult.success) {
-        alert('Failed to generate bill number')
+        toast.error('Failed to generate bill number')
         return
       }
 
@@ -233,12 +238,12 @@ const Purchase = () => {
       const result = await window.electronAPI.purchase.create(billData)
 
       if (result.success) {
-        alert('Purchase bill created successfully!')
+        toast.success('Purchase bill created successfully!')
         setShowModal(false)
         resetForm()
         loadBills()
       } else {
-        alert('Failed to create purchase bill: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to create purchase bill: ' + (result.error || 'Unknown error'))
       }
     }
   }

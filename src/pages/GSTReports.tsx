@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { formatCurrency } from '../utils/currency'
+import { useToast } from '../components/Toast'
 import type { GSTR1Data, GSTR3BData, HSNSummaryItem, GSTReportFilters } from '../types'
 
 type ReportType = 'dashboard' | 'gstr1' | 'gstr2' | 'gstr3b' | 'gstr9' | 'hsn'
@@ -23,6 +24,8 @@ const GSTReports = () => {
   // Drill-down state
   const [drillDownSection, setDrillDownSection] = useState<string | null>(null)
   const [drillDownInvoices, setDrillDownInvoices] = useState<any[]>([])
+
+  const toast = useToast()
 
   // Initialize dates based on preset
   useEffect(() => {
@@ -86,7 +89,7 @@ const GSTReports = () => {
 
   const handleGenerateReport = async (reportType: ReportType) => {
     if (!startDate || !endDate) {
-      alert('Please select a date range')
+      toast.info('Please select a date range')
       return
     }
 
@@ -101,7 +104,7 @@ const GSTReports = () => {
             setGstr1Data(result.data)
             setActiveReport('gstr1')
           } else {
-            alert('Failed to generate GSTR-1: ' + (result.error || 'Unknown error'))
+            toast.error('Failed to generate GSTR-1: ' + (result.error || 'Unknown error'))
           }
           break
         }
@@ -111,7 +114,7 @@ const GSTReports = () => {
             setGstr2Data(result.data)
             setActiveReport('gstr2')
           } else {
-            alert('Failed to generate GSTR-2: ' + (result.error || 'Unknown error'))
+            toast.error('Failed to generate GSTR-2: ' + (result.error || 'Unknown error'))
           }
           break
         }
@@ -121,7 +124,7 @@ const GSTReports = () => {
             setGstr3bData(result.data)
             setActiveReport('gstr3b')
           } else {
-            alert('Failed to generate GSTR-3B: ' + (result.error || 'Unknown error'))
+            toast.error('Failed to generate GSTR-3B: ' + (result.error || 'Unknown error'))
           }
           break
         }
@@ -131,7 +134,7 @@ const GSTReports = () => {
             setGstr9Data(result.data)
             setActiveReport('gstr9')
           } else {
-            alert('Failed to generate GSTR-9: ' + (result.error || 'Unknown error'))
+            toast.error('Failed to generate GSTR-9: ' + (result.error || 'Unknown error'))
           }
           break
         }
@@ -141,13 +144,13 @@ const GSTReports = () => {
             setHsnData(result.data)
             setActiveReport('hsn')
           } else {
-            alert('Failed to generate HSN Summary: ' + (result.error || 'Unknown error'))
+            toast.error('Failed to generate HSN Summary: ' + (result.error || 'Unknown error'))
           }
           break
         }
       }
     } catch (error) {
-      alert('Error generating report')
+      toast.error('Error generating report')
     } finally {
       setLoading(false)
     }
@@ -168,7 +171,7 @@ const GSTReports = () => {
         URL.revokeObjectURL(url)
       }
     } catch (error) {
-      alert('Failed to export')
+      toast.error('Failed to export')
     }
   }
 
@@ -182,12 +185,12 @@ const GSTReports = () => {
       }
 
       if (result?.success && result.data) {
-        alert(`Excel file saved to: ${result.data}`)
+        toast.success(`Excel file saved to: ${result.data}`)
       } else {
-        alert('Failed to export: ' + (result?.error || 'Unknown error'))
+        toast.error('Failed to export: ' + (result?.error || 'Unknown error'))
       }
     } catch (error) {
-      alert('Failed to export to Excel')
+      toast.error('Failed to export to Excel')
     }
   }
 

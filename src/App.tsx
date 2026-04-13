@@ -1,6 +1,8 @@
 import { useEffect } from 'react'
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
 import { useStore } from './store/useStore'
+import { ToastProvider } from './components/Toast'
+import { ConfirmProvider } from './components/ConfirmDialog'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
@@ -64,7 +66,7 @@ function App() {
   if (!window.electronAPI) {
     return (
       <div style={{ padding: '50px', fontFamily: 'Arial', textAlign: 'center' }}>
-        <h1 style={{ color: 'red' }}>⚠️ electronAPI Not Available</h1>
+        <h1 style={{ color: 'red' }}>electronAPI Not Available</h1>
         <p>The app is rendering but electronAPI is not loaded.</p>
         <p>This indicates a preload script issue.</p>
       </div>
@@ -73,55 +75,63 @@ function App() {
 
   if (authStatus === null) {
     return (
-      <div className="flex items-center justify-center h-screen">
-        <div className="text-lg">Loading...</div>
-      </div>
+      <ToastProvider><ConfirmProvider>
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-lg">Loading...</div>
+        </div>
+      </ConfirmProvider></ToastProvider>
     )
   }
 
   if (!authStatus.isAuthenticated) {
     return (
-      <Router>
-        <Routes>
-          <Route path="/login" element={<Login />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </Router>
+      <ToastProvider><ConfirmProvider>
+        <Router>
+          <Routes>
+            <Route path="/login" element={<Login />} />
+            <Route path="*" element={<Navigate to="/login" replace />} />
+          </Routes>
+        </Router>
+      </ConfirmProvider></ToastProvider>
     )
   }
 
   // If authenticated but no company exists, redirect to onboarding
   if (!company) {
     return (
-      <Router>
-        <Routes>
-          <Route path="/onboarding" element={<Onboarding />} />
-          <Route path="*" element={<Navigate to="/onboarding" replace />} />
-        </Routes>
-      </Router>
+      <ToastProvider><ConfirmProvider>
+        <Router>
+          <Routes>
+            <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="*" element={<Navigate to="/onboarding" replace />} />
+          </Routes>
+        </Router>
+      </ConfirmProvider></ToastProvider>
     )
   }
 
   return (
-    <Router>
-      <Routes>
-        <Route path="/onboarding" element={<Navigate to="/" replace />} />
-        <Route path="/" element={<Layout />}>
-          <Route index element={<Dashboard />} />
-          <Route path="parties" element={<Parties />} />
-          <Route path="items" element={<Items />} />
-          <Route path="sales" element={<Sales />} />
-          <Route path="purchase" element={<Purchase />} />
-          <Route path="payments" element={<Payments />} />
-          <Route path="delivery-challan" element={<DeliveryChallan />} />
-          <Route path="credit-notes" element={<CreditNotes />} />
-          <Route path="cash-bank" element={<CashBank />} />
-          <Route path="reports" element={<Reports />} />
-          <Route path="gst-reports" element={<GSTReports />} />
-          <Route path="settings" element={<Settings />} />
-        </Route>
-      </Routes>
-    </Router>
+    <ToastProvider><ConfirmProvider>
+      <Router>
+        <Routes>
+          <Route path="/onboarding" element={<Navigate to="/" replace />} />
+          <Route path="/" element={<Layout />}>
+            <Route index element={<Dashboard />} />
+            <Route path="parties" element={<Parties />} />
+            <Route path="items" element={<Items />} />
+            <Route path="sales" element={<Sales />} />
+            <Route path="purchase" element={<Purchase />} />
+            <Route path="payments" element={<Payments />} />
+            <Route path="delivery-challan" element={<DeliveryChallan />} />
+            <Route path="credit-notes" element={<CreditNotes />} />
+            <Route path="cash-bank" element={<CashBank />} />
+            <Route path="reports" element={<Reports />} />
+            <Route path="gst-reports" element={<GSTReports />} />
+            <Route path="settings" element={<Settings />} />
+          </Route>
+        </Routes>
+      </Router>
+    </ConfirmProvider></ToastProvider>
   )
 }
 

@@ -3,6 +3,8 @@ import { Party } from '../types'
 import { formatCurrency } from '../utils/currency'
 import { validateGSTIN, INDIAN_STATE_CODES } from '../utils/gstValidation'
 import NumberInput from '../components/NumberInput'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 // Avatar color palette (6 colors)
 const AVATAR_COLORS = [
@@ -55,6 +57,8 @@ const Parties = () => {
 
   // GST Validation state (local validation only - free, no API)
   const [gstValidation, setGstValidation] = useState<{ valid: boolean; error?: string; stateCode?: string; stateName?: string } | null>(null)
+  const toast = useToast()
+  const confirm = useConfirm()
 
   useEffect(() => {
     loadParties()
@@ -162,13 +166,13 @@ const Parties = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = window.confirm('Are you sure you want to delete this party?')
+    const confirmed = await confirm({ message: 'Are you sure you want to delete this party?', danger: true })
     if (confirmed) {
       const result = await window.electronAPI.party.delete(id)
       if (result.success) {
         loadParties()
       } else {
-        alert('Failed to delete party: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to delete party: ' + (result.error || 'Unknown error'))
       }
     }
   }

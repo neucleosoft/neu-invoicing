@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { Company } from '../types'
 import { InvoiceTemplate, TEMPLATE_INFO } from '../utils/generateInvoicePDF'
+import { useToast } from '../components/Toast'
 
 type SettingsTab = 'company' | 'templates' | 'tax' | 'backup'
 
@@ -23,6 +24,7 @@ const Settings = () => {
   const [saving, setSaving] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<InvoiceTemplate>('classic')
   const [templateLoading, setTemplateLoading] = useState(true)
+  const toast = useToast()
 
   useEffect(() => {
     if (company) {
@@ -56,11 +58,11 @@ const Settings = () => {
         const result = await window.electronAPI.company.update(company.id, formData)
         if (result.success && result.data) {
           setCompany(result.data)
-          alert('Settings updated successfully!')
+          toast.success('Settings updated successfully!')
         }
       }
     } catch (error) {
-      alert('Error updating settings')
+      toast.error('Error updating settings')
     } finally {
       setSaving(false)
     }
@@ -71,10 +73,10 @@ const Settings = () => {
     try {
       const result = await window.electronAPI.settings.set('invoiceTemplate', template)
       if (result.success) {
-        alert(`Template "${TEMPLATE_INFO[template].name}" selected successfully!`)
+        toast.success(`Template "${TEMPLATE_INFO[template].name}" selected successfully!`)
       }
     } catch (error) {
-      alert('Failed to save template preference')
+      toast.error('Failed to save template preference')
     }
   }
 

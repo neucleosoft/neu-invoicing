@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
 import { downloadChallanPDF } from '../utils/generateChallanPDF'
 import NumberInput from '../components/NumberInput'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 interface Challan {
   id: string
@@ -75,6 +77,8 @@ const DeliveryChallan = () => {
   })
 
   const [challanItems, setChallanItems] = useState<ChallanItem[]>([])
+  const toast = useToast()
+  const confirm = useConfirm()
 
   useEffect(() => {
     loadChallans()
@@ -104,26 +108,26 @@ const DeliveryChallan = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = window.confirm('Are you sure you want to delete this delivery challan?')
+    const confirmed = await confirm({ message: 'Are you sure you want to delete this delivery challan?', danger: true })
     if (confirmed) {
       const result = await window.electronAPI.challan.delete(id)
       if (result.success) {
         loadChallans()
       } else {
-        alert('Failed to delete challan: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to delete challan: ' + (result.error || 'Unknown error'))
       }
     }
   }
 
   const handleConvertToInvoice = async (id: string) => {
-    const confirmed = window.confirm('Convert this delivery challan to a sales invoice?')
+    const confirmed = await confirm({ message: 'Convert this delivery challan to a sales invoice?', danger: true })
     if (confirmed) {
       const result = await window.electronAPI.challan.convertToInvoice(id)
       if (result.success) {
-        alert('Challan converted to invoice successfully!')
+        toast.success('Challan converted to invoice successfully!')
         loadChallans()
       } else {
-        alert('Failed to convert challan: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to convert challan: ' + (result.error || 'Unknown error'))
       }
     }
   }
@@ -198,7 +202,7 @@ const DeliveryChallan = () => {
 
   const addChallanItem = () => {
     if (challanItems.length >= 1 && challanItems[challanItems.length - 1].itemId === '') {
-      alert('Please complete the current item first')
+      toast.info('Please complete the current item first')
       return
     }
     setChallanItems([...challanItems, {
@@ -259,12 +263,12 @@ const DeliveryChallan = () => {
     e.preventDefault()
 
     if (!formData.partyId) {
-      alert('Please select a customer')
+      toast.info('Please select a customer')
       return
     }
 
     if (challanItems.length === 0) {
-      alert('Please add at least one item')
+      toast.info('Please add at least one item')
       return
     }
 
@@ -278,18 +282,18 @@ const DeliveryChallan = () => {
       const result = await window.electronAPI.challan.update(editingChallan.id, challanData)
 
       if (result.success) {
-        alert('Delivery challan updated successfully!')
+        toast.success('Delivery challan updated successfully!')
         setShowModal(false)
         resetForm()
         loadChallans()
       } else {
-        alert('Failed to update challan: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to update challan: ' + (result.error || 'Unknown error'))
       }
     } else {
       // Create new challan
       const challanNumResult = await window.electronAPI.challan.generateChallanNumber()
       if (!challanNumResult.success) {
-        alert('Failed to generate challan number')
+        toast.error('Failed to generate challan number')
         return
       }
 
@@ -302,12 +306,12 @@ const DeliveryChallan = () => {
       const result = await window.electronAPI.challan.create(challanData)
 
       if (result.success) {
-        alert('Delivery challan created successfully!')
+        toast.success('Delivery challan created successfully!')
         setShowModal(false)
         resetForm()
         loadChallans()
       } else {
-        alert('Failed to create challan: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to create challan: ' + (result.error || 'Unknown error'))
       }
     }
   }

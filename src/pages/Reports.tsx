@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { formatCurrency } from '../utils/currency'
+import { useToast } from '../components/Toast'
 
 const Reports = () => {
   const [activeReport, setActiveReport] = useState<'sales' | 'stock' | 'receivables' | 'payables' | 'tax'>('sales')
@@ -8,6 +9,7 @@ const Reports = () => {
   const [statusFilter, setStatusFilter] = useState('')
   const [reportData, setReportData] = useState<any>(null)
   const [loading, setLoading] = useState(false)
+  const toast = useToast()
 
   const reports = [
     { id: 'sales', name: 'Sales Report', icon: '📊' },
@@ -50,10 +52,10 @@ const Reports = () => {
       if (result?.success) {
         setReportData(result.data)
       } else {
-        alert('Failed to generate report: ' + (result?.error || 'Unknown error'))
+        toast.error('Failed to generate report: ' + (result?.error || 'Unknown error'))
       }
     } catch (error) {
-      alert('Error generating report')
+      toast.error('Error generating report')
     } finally {
       setLoading(false)
     }

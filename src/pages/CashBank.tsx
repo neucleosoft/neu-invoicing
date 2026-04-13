@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 interface BankAccount {
   id: string
@@ -42,6 +44,9 @@ const CashBank = () => {
     amount: 0,
     notes: ''
   })
+
+  const toast = useToast()
+  const confirm = useConfirm()
 
   useEffect(() => {
     loadAccounts()
@@ -88,7 +93,7 @@ const CashBank = () => {
       loadAccounts()
       loadTotalBalance()
     } else {
-      alert('Failed to save account: ' + (result.error || 'Unknown error'))
+      toast.error('Failed to save account: ' + (result.error || 'Unknown error'))
     }
   }
 
@@ -106,14 +111,14 @@ const CashBank = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = window.confirm('Are you sure you want to delete this account?')
+    const confirmed = await confirm({ message: 'Are you sure you want to delete this account?', danger: true })
     if (confirmed) {
       const result = await window.electronAPI.cashBank.delete(id)
       if (result.success) {
         loadAccounts()
         loadTotalBalance()
       } else {
-        alert('Failed to delete account: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to delete account: ' + (result.error || 'Unknown error'))
       }
     }
   }
@@ -130,7 +135,7 @@ const CashBank = () => {
     if (!adjustingAccount) return
 
     if (adjustData.amount === 0) {
-      alert('Amount cannot be zero')
+      toast.info('Amount cannot be zero')
       return
     }
 
@@ -147,7 +152,7 @@ const CashBank = () => {
       loadAccounts()
       loadTotalBalance()
     } else {
-      alert('Failed to adjust balance: ' + (result.error || 'Unknown error'))
+      toast.error('Failed to adjust balance: ' + (result.error || 'Unknown error'))
     }
   }
 

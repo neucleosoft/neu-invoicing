@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 interface CreditDebitNote {
   id: string
@@ -81,6 +83,8 @@ const CreditNotes = () => {
   const [items, setItems] = useState<Item[]>([])
   const [partyInvoices, setPartyInvoices] = useState<PartyInvoice[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const toast = useToast()
+  const confirm = useConfirm()
 
   // Form state
   const [formData, setFormData] = useState({
@@ -144,13 +148,13 @@ const CreditNotes = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = window.confirm('Are you sure you want to delete this note?')
+    const confirmed = await confirm({ message: 'Are you sure you want to delete this note?', danger: true })
     if (confirmed) {
       const result = await window.electronAPI.creditNote.delete(id)
       if (result.success) {
         loadNotes()
       } else {
-        alert('Failed to delete note: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to delete note: ' + (result.error || 'Unknown error'))
       }
     }
   }
@@ -193,7 +197,7 @@ const CreditNotes = () => {
 
   const addNoteItem = () => {
     if (noteItems.length >= 1 && noteItems[noteItems.length - 1].itemId === '') {
-      alert('Please complete the current item first')
+      toast.info('Please complete the current item first')
       return
     }
     setNoteItems([...noteItems, {
@@ -260,12 +264,12 @@ const CreditNotes = () => {
     e.preventDefault()
 
     if (!formData.partyId) {
-      alert('Please select a party')
+      toast.info('Please select a party')
       return
     }
 
     if (noteItems.length === 0) {
-      alert('Please add at least one item')
+      toast.info('Please add at least one item')
       return
     }
 
@@ -278,17 +282,17 @@ const CreditNotes = () => {
       const result = await window.electronAPI.creditNote.update(editingNote.id, noteData)
 
       if (result.success) {
-        alert('Note updated successfully!')
+        toast.success('Note updated successfully!')
         setShowModal(false)
         resetForm()
         loadNotes()
       } else {
-        alert('Failed to update note: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to update note: ' + (result.error || 'Unknown error'))
       }
     } else {
       const noteNumResult = await window.electronAPI.creditNote.generateNoteNumber(formData.type)
       if (!noteNumResult.success) {
-        alert('Failed to generate note number')
+        toast.error('Failed to generate note number')
         return
       }
 
@@ -301,12 +305,12 @@ const CreditNotes = () => {
       const result = await window.electronAPI.creditNote.create(noteData)
 
       if (result.success) {
-        alert('Note created successfully!')
+        toast.success('Note created successfully!')
         setShowModal(false)
         resetForm()
         loadNotes()
       } else {
-        alert('Failed to create note: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to create note: ' + (result.error || 'Unknown error'))
       }
     }
   }

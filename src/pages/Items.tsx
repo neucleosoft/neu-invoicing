@@ -2,6 +2,8 @@ import { useEffect, useState, useMemo } from 'react'
 import { Item } from '../types'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 const Items = () => {
   const [items, setItems] = useState<Item[]>([])
@@ -20,6 +22,8 @@ const Items = () => {
     currentStock: 0,
     lowStockWarning: 10
   })
+  const toast = useToast()
+  const confirm = useConfirm()
 
   useEffect(() => {
     loadItems()
@@ -76,13 +80,13 @@ const Items = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = window.confirm('Are you sure you want to delete this item?')
+    const confirmed = await confirm({ message: 'Are you sure you want to delete this item?', danger: true })
     if (confirmed) {
       const result = await window.electronAPI.item.delete(id)
       if (result.success) {
         loadItems()
       } else {
-        alert('Failed to delete item: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to delete item: ' + (result.error || 'Unknown error'))
       }
     }
   }

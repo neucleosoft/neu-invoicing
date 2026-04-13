@@ -3,6 +3,8 @@ import { SalesInvoice } from '../types'
 import { downloadInvoicePDF, InvoiceTemplate } from '../utils/generateInvoicePDF'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import { useToast } from '../components/Toast'
+import { useConfirm } from '../components/ConfirmDialog'
 
 interface Party {
   id: string
@@ -37,6 +39,8 @@ const Sales = () => {
   const [items, setItems] = useState<Item[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState<InvoiceTemplate>('classic')
   const [searchQuery, setSearchQuery] = useState('')
+  const toast = useToast()
+  const confirm = useConfirm()
 
   // Form state
   const [formData, setFormData] = useState({
@@ -126,11 +130,11 @@ const Sales = () => {
 
         downloadInvoicePDF(pdfData, selectedTemplate)
       } else {
-        alert('Failed to load invoice details')
+        toast.error('Failed to load invoice details')
       }
     } catch (error) {
       console.error('Error generating PDF:', error)
-      alert('Failed to generate PDF')
+      toast.error('Failed to generate PDF')
     }
   }
 
@@ -149,13 +153,13 @@ const Sales = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = window.confirm('Are you sure you want to delete this invoice?')
+    const confirmed = await confirm({ message: 'Are you sure you want to delete this invoice?', danger: true })
     if (confirmed) {
       const result = await window.electronAPI.sales.delete(id)
       if (result.success) {
         loadInvoices()
       } else {
-        alert('Failed to delete invoice: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to delete invoice: ' + (result.error || 'Unknown error'))
       }
     }
   }
@@ -163,7 +167,7 @@ const Sales = () => {
   const handleConvertToInvoice = async (id: string) => {
     const result = await window.electronAPI.sales.convertQuoteToInvoice(id)
     if (result.success) {
-      alert('Quotation converted to invoice successfully!')
+      toast.success('Quotation converted to invoice successfully!')
       loadInvoices()
     }
   }
@@ -205,7 +209,7 @@ const Sales = () => {
 
   const addInvoiceItem = () => {
     if (invoiceItems.length >= 1 && invoiceItems[invoiceItems.length - 1].itemId === '') {
-      alert('Please complete the current item first')
+      toast.info('Please complete the current item first')
       return
     }
     setInvoiceItems([...invoiceItems, {
@@ -270,12 +274,12 @@ const Sales = () => {
     e.preventDefault()
 
     if (!formData.partyId) {
-      alert('Please select a customer')
+      toast.info('Please select a customer')
       return
     }
 
     if (invoiceItems.length === 0) {
-      alert('Please add at least one item')
+      toast.info('Please add at least one item')
       return
     }
 
@@ -299,18 +303,18 @@ const Sales = () => {
       const result = await window.electronAPI.sales.update(editingInvoice.id, invoiceData)
 
       if (result.success) {
-        alert('Invoice updated successfully!')
+        toast.success('Invoice updated successfully!')
         setShowModal(false)
         resetForm()
         loadInvoices()
       } else {
-        alert('Failed to update invoice: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to update invoice: ' + (result.error || 'Unknown error'))
       }
     } else {
       // Create new invoice
       const invoiceNumResult = await window.electronAPI.sales.generateInvoiceNumber()
       if (!invoiceNumResult.success) {
-        alert('Failed to generate invoice number')
+        toast.error('Failed to generate invoice number')
         return
       }
 
@@ -330,12 +334,12 @@ const Sales = () => {
       const result = await window.electronAPI.sales.create(invoiceData)
 
       if (result.success) {
-        alert('Invoice created successfully!')
+        toast.success('Invoice created successfully!')
         setShowModal(false)
         resetForm()
         loadInvoices()
       } else {
-        alert('Failed to create invoice: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to create invoice: ' + (result.error || 'Unknown error'))
       }
     }
   }

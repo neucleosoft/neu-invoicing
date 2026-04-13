@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { PaymentTransaction } from '../types'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import { useToast } from '../components/Toast'
 
 interface Party {
   id: string
@@ -25,6 +26,8 @@ const Payments = () => {
     paymentDate: new Date().toISOString().split('T')[0],
     notes: ''
   })
+
+  const toast = useToast()
 
   useEffect(() => {
     loadPayments()
@@ -59,12 +62,12 @@ const Payments = () => {
     e.preventDefault()
 
     if (!formData.partyId) {
-      alert(`Please select a ${paymentType === 'PAYMENT_IN' ? 'customer' : 'supplier'}`)
+      toast.info(`Please select a ${paymentType === 'PAYMENT_IN' ? 'customer' : 'supplier'}`)
       return
     }
 
     if (formData.amount <= 0) {
-      alert('Amount must be greater than 0')
+      toast.info('Amount must be greater than 0')
       return
     }
 
@@ -81,12 +84,12 @@ const Payments = () => {
     }
 
     if (result.success) {
-      alert('Payment recorded successfully!')
+      toast.success('Payment recorded successfully!')
       setShowModal(false)
       resetForm()
       loadPayments()
     } else {
-      alert('Failed to record payment: ' + (result.error || 'Unknown error'))
+      toast.error('Failed to record payment: ' + (result.error || 'Unknown error'))
     }
   }
 
