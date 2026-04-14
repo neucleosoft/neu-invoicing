@@ -49,6 +49,7 @@ const Sales = () => {
   const [formData, setFormData] = useState({
     partyId: '',
     type: 'INVOICE' as 'INVOICE' | 'QUOTATION',
+    status: 'DRAFT' as string,
     invoiceDate: new Date().toISOString().split('T')[0],
     dueDate: '',
     notes: '',
@@ -191,6 +192,7 @@ const Sales = () => {
       setFormData({
         partyId: fullInvoice.party?.id || '',
         type: fullInvoice.type,
+        status: fullInvoice.status || 'DRAFT',
         invoiceDate: new Date(fullInvoice.invoiceDate).toISOString().split('T')[0],
         dueDate: fullInvoice.dueDate ? new Date(fullInvoice.dueDate).toISOString().split('T')[0] : '',
         notes: fullInvoice.notes || '',
@@ -296,6 +298,7 @@ const Sales = () => {
       const invoiceData = {
         partyId: formData.partyId,
         type: formData.type,
+        status: formData.status,
         invoiceDate: formData.invoiceDate,
         dueDate: formData.dueDate,
         notes: formData.notes,
@@ -334,7 +337,7 @@ const Sales = () => {
         balanceDue: total - (formData.amountPaid || 0),
         amountPaid: formData.amountPaid || 0,
         paymentMode: formData.paymentMode,
-        status: 'DRAFT'
+        status: formData.status
       }
 
       const result = await window.electronAPI.sales.create(invoiceData)
@@ -354,6 +357,7 @@ const Sales = () => {
     setFormData({
       partyId: '',
       type: 'INVOICE',
+      status: 'DRAFT',
       invoiceDate: new Date().toISOString().split('T')[0],
       dueDate: '',
       notes: '',
@@ -563,6 +567,20 @@ const Sales = () => {
                     >
                       <option value="INVOICE">Invoice</option>
                       <option value="QUOTATION">Quotation</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="label">Status *</label>
+                    <select
+                      className="input"
+                      value={formData.status}
+                      onChange={(e) => setFormData({...formData, status: e.target.value})}
+                    >
+                      <option value="DRAFT">Draft</option>
+                      <option value="PAID">Paid</option>
+                      <option value="PARTIAL">Partial</option>
+                      <option value="OVERDUE">Overdue</option>
                     </select>
                   </div>
 

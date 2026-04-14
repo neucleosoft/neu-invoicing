@@ -185,12 +185,7 @@ export const setupSalesHandlers = () => {
 
         const supplyType = determineSupplyType(party, totalAmount, isInterState)
 
-        let status = 'DRAFT'
-        if (data.amountPaid >= totalAmount) {
-          status = 'PAID'
-        } else if (data.amountPaid > 0) {
-          status = 'PARTIAL'
-        }
+        const status = data.status || 'DRAFT'
 
         const created = await tx.salesInvoice.create({
           data: {
@@ -347,14 +342,7 @@ export const setupSalesHandlers = () => {
         const totalAmount = subtotal + taxAmount - (data.discount || 0)
         const balanceDue = totalAmount - (existingInvoice.amountPaid || 0)
 
-        let status = existingInvoice.status
-        if (existingInvoice.amountPaid >= totalAmount) {
-          status = 'PAID'
-        } else if ((existingInvoice.amountPaid || 0) > 0) {
-          status = 'PARTIAL'
-        } else {
-          status = 'DRAFT'
-        }
+        const status = data.status || existingInvoice.status
 
         const supplyType = determineSupplyType(party, totalAmount, isInterState)
 
