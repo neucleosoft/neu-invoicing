@@ -17,10 +17,13 @@ interface Item {
   name: string
   salePrice: number
   taxRate: number
+  hsnCode?: string
+  skuHsn?: string
 }
 
 interface InvoiceItem {
   itemId: string
+  hsnCode: string
   quantity: number
   rate: number
   taxRate: number
@@ -197,6 +200,7 @@ const Sales = () => {
       })
       setInvoiceItems(fullInvoice.items?.map((item: any) => ({
         itemId: item.item?.id || item.itemId,
+        hsnCode: item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '',
         quantity: item.quantity,
         rate: item.rate,
         taxRate: item.taxRate,
@@ -214,6 +218,7 @@ const Sales = () => {
     }
     setInvoiceItems([...invoiceItems, {
       itemId: '',
+      hsnCode: '',
       quantity: 1,
       rate: 0,
       taxRate: 0,
@@ -226,12 +231,13 @@ const Sales = () => {
     const newItems = [...invoiceItems]
     newItems[index] = { ...newItems[index], [field]: value }
 
-    // If item selected, populate rate and tax
+    // If item selected, populate rate, tax, and HSN code
     if (field === 'itemId') {
       const item = items.find(i => i.id === value)
       if (item) {
         newItems[index].rate = item.salePrice
         newItems[index].taxRate = item.taxRate
+        newItems[index].hsnCode = item.hsnCode || item.skuHsn || ''
       }
     }
 
@@ -521,7 +527,7 @@ const Sales = () => {
       {/* Create/Edit Invoice Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">{editingInvoice ? 'Edit Invoice' : 'Create New Invoice'}</h2>
@@ -615,6 +621,17 @@ const Sales = () => {
                                 <option key={i.id} value={i.id}>{i.name}</option>
                               ))}
                             </select>
+                          </div>
+
+                          <div className="w-32">
+                            <label className="label text-xs">HSN/SKU</label>
+                            <input
+                              type="text"
+                              className="input"
+                              value={item.hsnCode}
+                              onChange={(e) => updateInvoiceItem(index, 'hsnCode', e.target.value)}
+                              placeholder="HSN/SKU"
+                            />
                           </div>
 
                           <div className="w-24">
@@ -836,6 +853,7 @@ const Sales = () => {
                   <thead>
                     <tr>
                       <th className="table-header">Item</th>
+                      <th className="table-header">HSN/SKU</th>
                       <th className="table-header">Qty</th>
                       <th className="table-header">Rate</th>
                       <th className="table-header">Tax %</th>
@@ -846,6 +864,7 @@ const Sales = () => {
                     {viewingInvoice.items?.map((item, index) => (
                       <tr key={index} className="border-t">
                         <td className="table-cell">{item.item?.name}</td>
+                        <td className="table-cell text-gray-500">{item.hsnCode || '-'}</td>
                         <td className="table-cell">{item.quantity}</td>
                         <td className="table-cell">{formatCurrency(item.rate)}</td>
                         <td className="table-cell">{item.taxRate}%</td>
