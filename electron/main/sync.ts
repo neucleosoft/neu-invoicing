@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, BrowserWindow } from 'electron'
 import { google } from 'googleapis'
 import { getOAuth2Client } from './auth'
 import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
@@ -11,6 +11,14 @@ let syncStatus = {
   status: 'idle', // idle, syncing, error
   lastSync: null as Date | null,
   lastError: null as string | null
+}
+
+// Update status AND tell the UI about it
+const updateSyncStatus = (updates: Partial<typeof syncStatus>) => {
+  Object.assign(syncStatus, updates)
+  BrowserWindow.getAllWindows().forEach(win => {
+    win.webContents.send('sync:statusChanged', syncStatus)
+  })
 }
 
 const CLOUD_DB_FILENAME = 'neuinvoicing.db'
@@ -31,8 +39,7 @@ const performSync = async () => {
   // Skip sync in demo mode
   if (store.get('demo_mode')) {
     console.log('🎭 DEMO MODE: Skipping Google Drive sync')
-    syncStatus.status = 'idle'
-    syncStatus.lastSync = new Date()
+    updateSyncStatus({ status: 'idle', lastSync: new Date() })
     return {
       success: true,
       message: 'Demo mode - sync disabled',
@@ -41,8 +48,7 @@ const performSync = async () => {
   }
 
   try {
-    syncStatus.status = 'syncing'
-    syncStatus.lastError = null
+    updateSyncStatus({ status: 'syncing', lastError: null })
 
     const auth = getOAuth2Client()
     const drive = google.drive({ version: 'v3', auth })
@@ -152,8 +158,7 @@ const performSync = async () => {
       }
     })
 
-    syncStatus.status = 'idle'
-    syncStatus.lastSync = new Date()
+    updateSyncStatus({ status: 'idle', lastSync: new Date() })
 
     return {
       success: true,
@@ -161,8 +166,10 @@ const performSync = async () => {
     }
   } catch (error) {
     console.error('Sync error:', error)
-    syncStatus.status = 'error'
-    syncStatus.lastError = error instanceof Error ? error.message : 'Sync failed'
+    updateSyncStatus({
+      status: 'error',
+      lastError: error instanceof Error ? error.message : 'Sync failed'
+    })
 
     return {
       success: false,
