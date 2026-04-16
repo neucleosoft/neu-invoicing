@@ -2,6 +2,18 @@ import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 import { triggerSyncAfterChange } from '../sync'
 
+// Normalize invoice number — pad last numeric segment to 2 digits
+// NS/SL/26-27/6 → NS/SL/26-27/06, NS/SL/26-27/06 stays NS/SL/26-27/06
+const normalizeInvoiceNumber = (num: string): string => {
+  const parts = num.trim().split('/')
+  const last = parts[parts.length - 1]
+  const parsed = parseInt(last)
+  if (!isNaN(parsed)) {
+    parts[parts.length - 1] = String(parsed).padStart(2, '0')
+  }
+  return parts.join('/')
+}
+
 // Generate fiscal year string (e.g., "26-27" for April 2026 - March 2027)
 const getFiscalYear = (): string => {
   const now = new Date()
@@ -108,7 +120,15 @@ export const setupSalesHandlers = () => {
   // Create invoice
   ipcMain.handle('sales:create', async (_, data) => {
     try {
+      // Normalize invoice number — pad last numeric segment to 2 digits
+      // so NS/SL/26-27/6 and NS/SL/26-27/06 are treated as the same
+      data.invoiceNumber = normalizeInvoiceNumber(data.invoiceNumber)
+
       const invoice = await prisma.$transaction(async (tx: any) => {
+        // Check for duplicate invoice number
+        const existing = await tx.salesInvoice.findUnique({ where: { invoiceNumber: data.invoiceNumber } })
+        if (existing) throw new Error(`Invoice number ${data.invoiceNumber} already exists`)
+
         // Get party and company details for GST calculation
         const party = await tx.party.findUnique({ where: { id: data.partyId } })
         const company = await tx.company.findFirst()
@@ -271,6 +291,11 @@ export const setupSalesHandlers = () => {
   // Update invoice
   ipcMain.handle('sales:update', async (_, id: string, data) => {
     try {
+      // Normalize invoice number
+      if (data.invoiceNumber) {
+        data.invoiceNumber = normalizeInvoiceNumber(data.invoiceNumber)
+      }
+
       const invoice = await prisma.$transaction(async (tx: any) => {
         const existingInvoice = await tx.salesInvoice.findUnique({
           where: { id },
@@ -279,6 +304,12 @@ export const setupSalesHandlers = () => {
 
         if (!existingInvoice) {
           throw new Error('Invoice not found')
+        }
+
+        // Check for duplicate if invoice number changed
+        if (data.invoiceNumber && data.invoiceNumber !== existingInvoice.invoiceNumber) {
+          const duplicate = await tx.salesInvoice.findUnique({ where: { invoiceNumber: data.invoiceNumber } })
+          if (duplicate) throw new Error(`Invoice number ${data.invoiceNumber} already exists`)
         }
 
         // Get party and company for GST recalculation
@@ -359,6 +390,7 @@ export const setupSalesHandlers = () => {
         const updated = await tx.salesInvoice.update({
           where: { id },
           data: {
+            invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             type: data.type,
             partyId: data.partyId,

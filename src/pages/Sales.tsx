@@ -51,6 +51,7 @@ const Sales = () => {
     type: 'INVOICE' as 'INVOICE' | 'QUOTATION',
     status: 'DRAFT' as string,
     invoiceDate: new Date().toISOString().split('T')[0],
+    invoiceNo: '',
     dueDate: '',
     notes: '',
     termsConditions: '',
@@ -196,6 +197,7 @@ const Sales = () => {
       const fullInvoice = result.data
       setEditingInvoice(fullInvoice)
       setFormData({
+        invoiceNumber: fullInvoice.invoiceNumber || '',
         partyId: fullInvoice.party?.id || '',
         type: fullInvoice.type,
         status: fullInvoice.status || 'DRAFT',
@@ -311,6 +313,7 @@ const Sales = () => {
     if (editingInvoice) {
       // Update existing invoice
       const invoiceData = {
+        invoiceNumber: formData.invoiceNumber,
         partyId: formData.partyId,
         type: formData.type,
         status: formData.status,
@@ -340,16 +343,9 @@ const Sales = () => {
         toast.error('Failed to update invoice: ' + (result.error || 'Unknown error'))
       }
     } else {
-      // Create new invoice
-      const invoiceNumResult = await window.electronAPI.sales.generateInvoiceNumber()
-      if (!invoiceNumResult.success) {
-        toast.error('Failed to generate invoice number')
-        return
-      }
-
+      // Create new invoice — invoiceNumber already in formData (pre-filled or user-edited)
       const invoiceData = {
         ...formData,
-        invoiceNumber: invoiceNumResult.data,
         items: invoiceItems,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
@@ -395,6 +391,14 @@ const Sales = () => {
     setShowAdditionalFields(false)
   }
 
+  const handleNewInvoice = async () => {
+    const result = await window.electronAPI.sales.generateInvoiceNumber()
+    if (result.success) {
+      setFormData(prev => ({ ...prev, invoiceNumber: result.data }))
+    }
+    setShowModal(true)
+  }
+
   const isOverdue = (invoice: SalesInvoice): boolean => {
     if (invoice.status === 'PAID') return false
     if (!invoice.dueDate) return false
@@ -421,7 +425,7 @@ const Sales = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Sales & Invoices</h1>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={handleNewInvoice}
           className="btn btn-primary"
         >
           + New Invoice
@@ -464,7 +468,7 @@ const Sales = () => {
               <>
                 <p className="text-lg mb-4">No invoices yet</p>
                 <button
-                  onClick={() => setShowModal(true)}
+                  onClick={handleNewInvoice}
                   className="btn btn-primary"
                 >
                   Create Your First Invoice
@@ -569,6 +573,18 @@ const Sales = () => {
               <form onSubmit={handleSubmit} className="space-y-6">
                 {/* Basic Info */}
                 <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Invoice Number *</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={formData.invoiceNumber}
+                      onChange={(e) => setFormData({...formData, invoiceNumber: e.target.value})}
+                      placeholder="Auto-generated"
+                      required
+                    />
+                  </div>
+
                   <div>
                     <label className="label">Customer *</label>
                     <select
