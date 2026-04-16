@@ -128,7 +128,13 @@ model SalesInvoice {
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
 
-  dueDate          DateTime?
+  dueDate           DateTime?
+  // Additional fields (all optional)
+  poNumber          String?
+  ewayBillNo        String?
+  vehicleNumber     String?
+  warrantyPeriod    String?
+  dispatchedThrough String?
   // Relations
   items            SalesInvoiceItem[]
   payments         PaymentTransaction[]

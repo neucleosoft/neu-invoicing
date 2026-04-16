@@ -211,6 +211,11 @@ export const setupSalesHandlers = () => {
             cessAmount: totalCess,
             supplyType,
             ecommerceGstin: data.ecommerceGstin || null,
+            poNumber: data.poNumber || null,
+            ewayBillNo: data.ewayBillNo || null,
+            vehicleNumber: data.vehicleNumber || null,
+            warrantyPeriod: data.warrantyPeriod || null,
+            dispatchedThrough: data.dispatchedThrough || null,
             items: {
               create: processedItems
             }
@@ -371,6 +376,11 @@ export const setupSalesHandlers = () => {
             sgstAmount: totalSgst,
             igstAmount: totalIgst,
             supplyType,
+            poNumber: data.poNumber || null,
+            ewayBillNo: data.ewayBillNo || null,
+            vehicleNumber: data.vehicleNumber || null,
+            warrantyPeriod: data.warrantyPeriod || null,
+            dispatchedThrough: data.dispatchedThrough || null,
             items: {
               create: processedItems
             }

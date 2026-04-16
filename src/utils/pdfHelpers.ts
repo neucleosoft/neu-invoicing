@@ -83,6 +83,12 @@ export interface InvoiceData extends PDFDocumentData {
   sgstAmount?: number
   igstAmount?: number
   cessAmount?: number
+  // Additional fields
+  poNumber?: string
+  ewayBillNo?: string
+  vehicleNumber?: string
+  warrantyPeriod?: string
+  dispatchedThrough?: string
 }
 
 // ─── Template types ───────────────────────────────────────────────────────────
@@ -157,9 +163,9 @@ export function fmtNum(amount: number): string {
   return amount < 0 ? '-' + result : result
 }
 
-/** Format with Rs. prefix */
+/** Format with ₹ prefix */
 export function fmtRs(amount: number): string {
-  return 'Rs. ' + fmtNum(amount)
+  return '₹ ' + fmtNum(amount)
 }
 
 /** Format with PDF-safe currency symbol */

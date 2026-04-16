@@ -55,8 +55,14 @@ const Sales = () => {
     notes: '',
     termsConditions: '',
     amountPaid: 0,
-    paymentMode: 'CASH' as string
+    paymentMode: 'CASH' as string,
+    poNumber: '',
+    ewayBillNo: '',
+    vehicleNumber: '',
+    warrantyPeriod: '',
+    dispatchedThrough: '',
   })
+  const [showAdditionalFields, setShowAdditionalFields] = useState(false)
 
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([])
 
@@ -198,8 +204,17 @@ const Sales = () => {
         notes: fullInvoice.notes || '',
         termsConditions: fullInvoice.termsConditions || '',
         amountPaid: 0,
-        paymentMode: 'CASH'
+        paymentMode: 'CASH',
+        poNumber: fullInvoice.poNumber || '',
+        ewayBillNo: fullInvoice.ewayBillNo || '',
+        vehicleNumber: fullInvoice.vehicleNumber || '',
+        warrantyPeriod: fullInvoice.warrantyPeriod || '',
+        dispatchedThrough: fullInvoice.dispatchedThrough || '',
       })
+      // Show the additional fields section if any of them have values
+      if (fullInvoice.poNumber || fullInvoice.ewayBillNo || fullInvoice.vehicleNumber || fullInvoice.warrantyPeriod || fullInvoice.dispatchedThrough) {
+        setShowAdditionalFields(true)
+      }
       setInvoiceItems(fullInvoice.items?.map((item: any) => ({
         itemId: item.item?.id || item.itemId,
         hsnCode: item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '',
@@ -303,6 +318,11 @@ const Sales = () => {
         dueDate: formData.dueDate,
         notes: formData.notes,
         termsConditions: formData.termsConditions,
+        poNumber: formData.poNumber,
+        ewayBillNo: formData.ewayBillNo,
+        vehicleNumber: formData.vehicleNumber,
+        warrantyPeriod: formData.warrantyPeriod,
+        dispatchedThrough: formData.dispatchedThrough,
         items: invoiceItems,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
@@ -363,10 +383,16 @@ const Sales = () => {
       notes: '',
       termsConditions: '',
       amountPaid: 0,
-      paymentMode: 'CASH'
+      paymentMode: 'CASH',
+      poNumber: '',
+      ewayBillNo: '',
+      vehicleNumber: '',
+      warrantyPeriod: '',
+      dispatchedThrough: '',
     })
     setInvoiceItems([])
     setEditingInvoice(null)
+    setShowAdditionalFields(false)
   }
 
   const isOverdue = (invoice: SalesInvoice): boolean => {
@@ -789,6 +815,55 @@ const Sales = () => {
                       placeholder="Terms that appear on invoice..."
                     />
                   </div>
+                </div>
+
+                {/* Additional Fields (collapsible) */}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdditionalFields(!showAdditionalFields)}
+                    className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-800"
+                  >
+                    <span className={`transform transition-transform ${showAdditionalFields ? 'rotate-180' : ''}`}>
+                      ▼
+                    </span>
+                    Additional Fields
+                  </button>
+
+                  {showAdditionalFields && (
+                    <div className="grid grid-cols-2 gap-4 mt-3 p-4 bg-gray-50 rounded-lg">
+                      <div>
+                        <label className="label">P.O. Number</label>
+                        <input type="text" className="input" value={formData.poNumber}
+                          onChange={(e) => setFormData({...formData, poNumber: e.target.value})}
+                          placeholder="Customer's purchase order number" />
+                      </div>
+                      <div>
+                        <label className="label">e-Way Bill No</label>
+                        <input type="text" className="input" value={formData.ewayBillNo}
+                          onChange={(e) => setFormData({...formData, ewayBillNo: e.target.value})}
+                          placeholder="e-Way Bill number" />
+                      </div>
+                      <div>
+                        <label className="label">Vehicle Number</label>
+                        <input type="text" className="input" value={formData.vehicleNumber}
+                          onChange={(e) => setFormData({...formData, vehicleNumber: e.target.value})}
+                          placeholder="Transport vehicle number" />
+                      </div>
+                      <div>
+                        <label className="label">Warranty Period</label>
+                        <input type="text" className="input" value={formData.warrantyPeriod}
+                          onChange={(e) => setFormData({...formData, warrantyPeriod: e.target.value})}
+                          placeholder="e.g. 12 Months" />
+                      </div>
+                      <div>
+                        <label className="label">Dispatched Through</label>
+                        <input type="text" className="input" value={formData.dispatchedThrough}
+                          onChange={(e) => setFormData({...formData, dispatchedThrough: e.target.value})}
+                          placeholder="Transport company / courier" />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Actions */}

@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { downloadClassicPDF } from './pdfmakeInvoice'
 import {
   fmtNum,
   fmtRs,
@@ -628,6 +629,11 @@ export function generateInvoicePDF(invoice: InvoiceData, template: InvoiceTempla
 }
 
 export function downloadInvoicePDF(invoice: InvoiceData, template: InvoiceTemplate = 'classic') {
+  // Classic uses pdfmake (flow-based layout), others still use jsPDF
+  if (template === 'classic') {
+    downloadClassicPDF(invoice)
+    return
+  }
   const doc = generateInvoicePDF(invoice, template)
   const filename = `${invoice.invoiceNumber}_${invoice.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
   doc.save(filename)
