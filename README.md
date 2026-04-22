@@ -13,11 +13,12 @@ A powerful, offline-first desktop invoicing application with seamless Google Dri
 ### Modules
 
 #### 📊 Dashboard
-- Real-time business metrics (receivables, payables, sales)
-- Sales trend visualization
-- Low stock alerts
-- Recent invoice overview
+- Real-time metric cards: Total Receivables, Total Payables, Total Sales (YTD), Low Stock Alerts, Cash & Bank, Overdue Invoices
+- Sales trend chart (last 6 months)
+- Recent invoices panel
+- Latest transactions feed (invoices + payments, sorted by date)
 - Quick action buttons
+- Light / dark mode toggle
 
 #### 👥 Party Management
 - Customer and Supplier management
@@ -33,9 +34,9 @@ A powerful, offline-first desktop invoicing application with seamless Google Dri
 - Tax rate configuration per item
 
 #### 💰 Sales Module
-- Professional invoice creation
+- Professional invoice creation with PDF export (jsPDF + pdfmake, including a Classic GST template)
 - Quotation generation with one-click conversion
-- Automatic invoice numbering
+- Editable invoice numbering with duplicate validation and zero-padding normalization
 - Partial payment tracking
 - Multiple tax rates support
 
@@ -44,11 +45,27 @@ A powerful, offline-first desktop invoicing application with seamless Google Dri
 - Automatic stock updates
 - Supplier payment tracking
 
+#### 🚚 Delivery Challans
+- Challan creation against parties
+- Transport mode and vehicle number tracking
+- PDF generation for dispatch
+- Auto-numbering
+
+#### 📝 Credit / Debit Notes
+- Issue credit and debit notes linked to invoices or bills
+- Automatic ledger adjustments
+- Separate numbering series
+
 #### 💳 Payment Tracking
 - Payment In (from customers)
 - Payment Out (to suppliers)
 - Multiple payment modes (Cash, Bank, Card, UPI, Cheque)
 - Automatic balance reconciliation
+
+#### 🏦 Cash & Bank
+- Manage cash and bank accounts
+- Record deposits, withdrawals, and inter-account transfers
+- Per-account statement view and combined balance on dashboard
 
 #### 📈 Reports
 - Sales Report (filterable by date, party, status)
@@ -56,6 +73,13 @@ A powerful, offline-first desktop invoicing application with seamless Google Dri
 - Outstanding Receivables
 - Outstanding Payables
 - Tax Report (collected vs paid)
+- Excel export via ExcelJS
+
+#### 🧾 GST Reports
+- GSTR-1 (outward supplies) and GSTR-3B summary
+- HSN-wise tax breakdown
+- GSTIN validation with state code mapping
+- Cached GST lookups via local `GstCache` table
 
 #### ⚙️ Settings
 - Company profile management
@@ -100,11 +124,13 @@ A powerful, offline-first desktop invoicing application with seamless Google Dri
 
    g. Add authorized redirect URI: `http://localhost:3000/oauth/callback`
 
-   h. Update credentials in `electron/main/auth.ts`:
-      ```typescript
-      const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID'
-      const GOOGLE_CLIENT_SECRET = 'YOUR_GOOGLE_CLIENT_SECRET'
+   h. Copy `.env.example` to `.env` in the project root and fill in your credentials:
+      ```env
+      GOOGLE_CLIENT_ID=your-client-id
+      GOOGLE_CLIENT_SECRET=your-client-secret
+      REDIRECT_URI=http://localhost:3000/oauth/callback
       ```
+      Vite reads `.env` at build time and injects the values into the main-process bundle via `define` — no hardcoding in `auth.ts` is needed.
 
 4. **Initialize Prisma**
    ```bash
@@ -138,23 +164,29 @@ Executables will be in the `release` folder.
 neu-invoicing/
 ├── electron/
 │   ├── main/
-│   │   ├── index.ts           # Main Electron process
-│   │   ├── database.ts        # Prisma SQLite setup
+│   │   ├── index.ts           # Main Electron process, registers IPC handlers
+│   │   ├── database.ts        # Prisma SQLite setup (userData/neuinvoicing.db)
 │   │   ├── auth.ts            # Google OAuth handler
-│   │   ├── sync.ts            # Google Drive sync
-│   │   └── handlers/          # IPC handlers for all modules
+│   │   ├── sync.ts            # Google Drive appDataFolder sync
+│   │   └── handlers/          # IPC handlers (one file per domain)
 │   │       ├── company.ts
+│   │       ├── settings.ts
 │   │       ├── party.ts
 │   │       ├── item.ts
 │   │       ├── sales.ts
 │   │       ├── purchase.ts
+│   │       ├── challan.ts
+│   │       ├── creditNote.ts
 │   │       ├── payment.ts
+│   │       ├── cashBank.ts
 │   │       ├── dashboard.ts
-│   │       └── report.ts
+│   │       ├── report.ts
+│   │       ├── gstReport.ts
+│   │       └── gst.ts
 │   └── preload/
-│       └── index.ts           # Preload script (context bridge)
+│       └── index.ts           # Preload script (contextBridge → window.electronAPI)
 ├── src/
-│   ├── pages/                 # React pages
+│   ├── pages/                 # React pages (one per module)
 │   │   ├── Login.tsx
 │   │   ├── Onboarding.tsx
 │   │   ├── Dashboard.tsx
@@ -162,20 +194,34 @@ neu-invoicing/
 │   │   ├── Items.tsx
 │   │   ├── Sales.tsx
 │   │   ├── Purchase.tsx
+│   │   ├── DeliveryChallan.tsx
+│   │   ├── CreditNotes.tsx
 │   │   ├── Payments.tsx
+│   │   ├── CashBank.tsx
 │   │   ├── Reports.tsx
+│   │   ├── GSTReports.tsx
 │   │   └── Settings.tsx
 │   ├── components/
-│   │   └── Layout.tsx         # Main app layout with sidebar
+│   │   └── Layout.tsx         # App layout: sidebar + outlet
 │   ├── store/
-│   │   └── useStore.ts        # Zustand state management
+│   │   └── useStore.ts        # Zustand state (auth, company, sync, UI flags)
+│   ├── utils/                 # Formatters, validators, PDF generators
+│   │   ├── currency.ts
+│   │   ├── gstValidation.ts
+│   │   ├── generateInvoicePDF.ts
+│   │   ├── generateChallanPDF.ts
+│   │   ├── pdfmakeInvoice.ts
+│   │   └── pdfHelpers.ts
 │   ├── types/
-│   │   └── index.ts           # TypeScript definitions
-│   ├── App.tsx                # Main React component
-│   ├── main.tsx               # React entry point
-│   └── index.css              # Global styles (Tailwind)
+│   │   └── index.ts           # Shared TypeScript interfaces
+│   ├── App.tsx                # Routing + auth gate (HashRouter)
+│   ├── main.tsx               # React entry
+│   └── index.css              # Global styles + Tailwind
 ├── prisma/
 │   └── schema.prisma          # Database schema
+├── scripts/
+│   └── import-invoices.js     # Bulk invoice import
+├── .env.example               # OAuth credential template
 ├── package.json
 ├── vite.config.ts
 └── README.md
@@ -201,13 +247,17 @@ neu-invoicing/
 
 ## 🛠️ Tech Stack
 
-- **Framework**: Electron.js
+- **Framework**: Electron 32
 - **Frontend**: React 18 + TypeScript
+- **Routing**: React Router (HashRouter)
 - **Styling**: Tailwind CSS
 - **State Management**: Zustand
 - **Database**: SQLite + Prisma ORM
+- **PDF Generation**: jsPDF + jspdf-autotable, pdfmake (Classic GST template)
+- **Excel Export**: ExcelJS
 - **Charts**: Recharts
-- **Build Tool**: Vite
+- **Google Integration**: googleapis (Drive appDataFolder scope)
+- **Build Tool**: Vite (+ vite-plugin-electron)
 - **Bundler**: electron-builder
 
 ## 📱 Usage Guide
@@ -303,18 +353,27 @@ MIT License - Use freely for personal or commercial purposes
 
 ## 🎯 Roadmap
 
-### v1.1 (Planned)
-- [ ] PDF Invoice generation with templates
-- [ ] Email invoices directly
+### Shipped
+- [x] PDF invoice generation with templates (jsPDF + pdfmake, Classic GST)
+- [x] GST compliance (GSTR-1, GSTR-3B, HSN summary, GSTIN validation)
+- [x] Delivery challans with PDF
+- [x] Credit / debit notes
+- [x] Cash & bank account management
+- [x] Dark mode
+- [x] Editable invoice numbering with duplicate validation
+- [x] Excel export for reports
+
+### Planned
+- [ ] Email invoices directly from the app
 - [ ] Recurring invoices
 - [ ] Multi-currency support
-- [ ] Advanced tax configurations (GST, VAT)
+- [ ] VAT support (non-India markets)
 
-### v2.0 (Future)
+### Future
 - [ ] Mobile app (React Native)
 - [ ] Multi-company support
 - [ ] User roles and permissions
-- [ ] Advanced reporting with charts
+- [ ] Advanced reporting with richer charts
 - [ ] Integration with accounting software
 
 ## 📧 Support
