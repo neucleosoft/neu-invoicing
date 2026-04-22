@@ -13,6 +13,14 @@ interface LatestTransaction {
   amount: number
 }
 
+const amountFontSize = (value: string | number): string => {
+  const len = String(value).length
+  if (len >= 15) return 'text-sm'
+  if (len >= 13) return 'text-base'
+  if (len >= 11) return 'text-lg'
+  return 'text-xl'
+}
+
 const Dashboard = () => {
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
   const [recentInvoices, setRecentInvoices] = useState<SalesInvoice[]>([])
@@ -162,9 +170,9 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
         <div className="card bg-gradient-to-br from-green-50 to-green-100">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-green-600 font-medium">Total Receivables</p>
-              <p className="text-3xl font-bold text-green-700 mt-2">
+              <p className={`${amountFontSize(formatCurrency(metrics?.totalReceivables || 0))} font-bold text-green-700 mt-2`}>
                 {formatCurrency(metrics?.totalReceivables || 0)}
               </p>
             </div>
@@ -174,9 +182,9 @@ const Dashboard = () => {
 
         <div className="card bg-gradient-to-br from-red-50 to-red-100">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-red-600 font-medium">Total Payables</p>
-              <p className="text-3xl font-bold text-red-700 mt-2">
+              <p className={`${amountFontSize(formatCurrency(metrics?.totalPayables || 0))} font-bold text-red-700 mt-2`}>
                 {formatCurrency(metrics?.totalPayables || 0)}
               </p>
             </div>
@@ -186,9 +194,9 @@ const Dashboard = () => {
 
         <div className="card bg-gradient-to-br from-blue-50 to-blue-100">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-blue-600 font-medium">Total Sales (YTD)</p>
-              <p className="text-3xl font-bold text-blue-700 mt-2">
+              <p className={`${amountFontSize(formatCurrency(metrics?.totalSales || 0))} font-bold text-blue-700 mt-2`}>
                 {formatCurrency(metrics?.totalSales || 0)}
               </p>
             </div>
@@ -198,9 +206,9 @@ const Dashboard = () => {
 
         <div className="card bg-gradient-to-br from-orange-50 to-orange-100">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-orange-600 font-medium">Low Stock Alerts</p>
-              <p className="text-3xl font-bold text-orange-700 mt-2">
+              <p className={`${amountFontSize(metrics?.lowStockCount || 0)} font-bold text-orange-700 mt-2`}>
                 {metrics?.lowStockCount || 0}
               </p>
             </div>
@@ -210,9 +218,9 @@ const Dashboard = () => {
 
         <div className="card bg-gradient-to-br from-indigo-50 to-indigo-100">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-indigo-600 font-medium">Cash & Bank</p>
-              <p className="text-3xl font-bold text-indigo-700 mt-2">
+              <p className={`${amountFontSize(formatCurrency(cashBankBalance))} font-bold text-indigo-700 mt-2`}>
                 {formatCurrency(cashBankBalance)}
               </p>
             </div>
@@ -222,9 +230,9 @@ const Dashboard = () => {
 
         <div className="card bg-gradient-to-br from-rose-50 to-rose-100">
           <div className="flex items-center justify-between">
-            <div>
+            <div className="min-w-0">
               <p className="text-sm text-rose-600 font-medium">Overdue Invoices</p>
-              <p className="text-3xl font-bold text-rose-700 mt-2">
+              <p className={`${amountFontSize(overdueCount)} font-bold text-rose-700 mt-2`}>
                 {overdueCount}
               </p>
             </div>
