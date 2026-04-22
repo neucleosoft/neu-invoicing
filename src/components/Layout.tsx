@@ -43,8 +43,8 @@ const Layout = () => {
   return (
     <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
       {/* Sidebar */}
-      <div className="w-64 bg-white shadow-lg dark:bg-gray-800">
-        <div className="p-6 border-b dark:border-gray-700">
+      <div className="w-64 bg-white shadow-lg dark:bg-gray-800 flex flex-col h-screen">
+        <div className="p-6 border-b dark:border-gray-700 shrink-0">
           <div className="flex items-center justify-between">
             <h1 className="text-2xl font-bold text-primary-600">neuInvoicing</h1>
             <button
@@ -66,7 +66,7 @@ const Layout = () => {
           {company && <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">{company.name}</p>}
         </div>
 
-        <nav className="p-4 space-y-2">
+        <nav className="flex-1 overflow-y-auto p-4 space-y-2">
           {navigation.map((item) => (
             <Link
               key={item.path}
@@ -84,7 +84,7 @@ const Layout = () => {
         </nav>
 
         {/* User Info and Sync Status */}
-        <div className="absolute bottom-0 w-64 p-4 border-t bg-white dark:bg-gray-800 dark:border-gray-700">
+        <div className="shrink-0 p-4 border-t bg-white dark:bg-gray-800 dark:border-gray-700">
           {/* Sync Status */}
           <div className="mb-3">
             <button

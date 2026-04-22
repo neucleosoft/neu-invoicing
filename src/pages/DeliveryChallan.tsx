@@ -184,7 +184,7 @@ const DeliveryChallan = () => {
       setEditingChallan(fullChallan)
       setFormData({
         partyId: fullChallan.party?.id || fullChallan.partyId || '',
-        challanDate: fullChallan.challanDate.split('T')[0],
+        challanDate: new Date(fullChallan.challanDate).toISOString().split('T')[0],
         transportMode: fullChallan.transportMode || '',
         vehicleNumber: fullChallan.vehicleNumber || '',
         notes: fullChallan.notes || ''
