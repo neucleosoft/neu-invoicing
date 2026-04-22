@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
-import { downloadChallanPDF } from '../utils/generateChallanPDF'
+import { downloadChallanPDF } from '../utils/pdfmakeChallan'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
