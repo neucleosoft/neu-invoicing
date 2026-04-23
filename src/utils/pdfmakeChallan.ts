@@ -46,7 +46,7 @@ function buildDocDefinition(ch: ChallanData): any {
       buildTitle(),
       buildCompanySection(ch, logo),
       buildBillShipSection(ch),
-      ...buildTransportSection(ch),
+      ...buildAdditionalDetailsSection(ch),
       buildItemsSection(ch, isInter, taxGroups),
       buildHSNSection(hsnGroups, isInter),
       buildAmountInWords(ch.totalAmount),
@@ -221,13 +221,19 @@ function buildBillShipSection(ch: ChallanData): Content {
   }
 }
 
-// ─── Transport Details (between Bill-To and Items) ───────────────────────────
+// ─── Additional Details (between Bill-To and Items) ──────────────────────────
 
-/** Returns an array — empty if no transport info, or [section] if any exists */
-function buildTransportSection(ch: ChallanData): Content[] {
+/** Returns an array — empty if no fields filled, or [section] if any exists.
+ * Shows transport info + documents + commercial terms in 2-column pair rows. */
+function buildAdditionalDetailsSection(ch: ChallanData): Content[] {
   const fields: { label: string; value: string }[] = []
+  // Order: movement → documents → commercial terms
   if (ch.transportMode) fields.push({ label: 'Transport Mode', value: ch.transportMode })
   if (ch.vehicleNumber) fields.push({ label: 'Vehicle Number', value: ch.vehicleNumber })
+  if (ch.poNumber) fields.push({ label: 'P.O. Number', value: ch.poNumber })
+  if (ch.ewayBillNo) fields.push({ label: 'e-Way Bill No', value: ch.ewayBillNo })
+  if (ch.dispatchedThrough) fields.push({ label: 'Dispatched Through', value: ch.dispatchedThrough })
+  if (ch.warrantyPeriod) fields.push({ label: 'Warranty Period', value: ch.warrantyPeriod })
 
   if (fields.length === 0) return []
 
@@ -337,9 +343,13 @@ function buildItemsSection(ch: ChallanData, isInter: boolean, taxGroups: ReturnT
   ]
 
   // Filler rows — stretch the items table to fill the page.
-  // Shrink when transport details exist (they take space above items).
-  const hasTransport = !!(ch.transportMode || ch.vehicleNumber)
-  const TARGET_ROWS = hasTransport ? 12 : 14
+  // Shrink when additional details exist (they take space above items).
+  const hasAdditionalDetails = !!(
+    ch.transportMode || ch.vehicleNumber ||
+    ch.poNumber || ch.ewayBillNo ||
+    ch.warrantyPeriod || ch.dispatchedThrough
+  )
+  const TARGET_ROWS = hasAdditionalDetails ? 12 : 14
   const usedRows = itemRows.length + taxRows.length
   const fillerCount = Math.max(0, TARGET_ROWS - usedRows)
   const emptyCell = { text: ' ', fontSize: 6, margin: [0, 3, 0, 3] as [number, number, number, number] }
