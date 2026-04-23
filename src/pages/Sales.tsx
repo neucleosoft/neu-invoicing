@@ -36,10 +36,20 @@ interface InvoiceItem {
   amount: number
 }
 
+type DocKind = 'INVOICE' | 'QUOTATION' | 'PROFORMA_INVOICE'
+
+function kindNames(kind: DocKind) {
+  switch (kind) {
+    case 'QUOTATION': return { singular: 'Quotation', plural: 'Quotations', short: 'quotation' }
+    case 'PROFORMA_INVOICE': return { singular: 'Proforma Invoice', plural: 'Proforma Invoices', short: 'PI' }
+    default: return { singular: 'Invoice', plural: 'Invoices', short: 'invoice' }
+  }
+}
+
 const Sales = () => {
   const [invoices, setInvoices] = useState<SalesInvoice[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'ALL' | 'INVOICE' | 'QUOTATION'>('ALL')
+  const [filter, setFilter] = useState<'ALL' | DocKind>('ALL')
   const [showModal, setShowModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [viewingInvoice, setViewingInvoice] = useState<SalesInvoice | null>(null)
@@ -54,7 +64,7 @@ const Sales = () => {
   // Form state
   const [formData, setFormData] = useState({
     partyId: '',
-    type: 'INVOICE' as 'INVOICE' | 'QUOTATION',
+    type: 'INVOICE' as DocKind,
     status: 'DRAFT' as string,
     invoiceDate: new Date().toISOString().split('T')[0],
     invoiceNo: '',
@@ -405,7 +415,11 @@ const Sales = () => {
   const handleNewInvoice = async () => {
     const result = await window.electronAPI.sales.generateInvoiceNumber()
     if (result.success) {
-      setFormData(prev => ({ ...prev, invoiceNumber: result.data }))
+      setFormData(prev => ({
+        ...prev,
+        invoiceNumber: result.data,
+        type: filter === 'ALL' ? 'INVOICE' : (filter as DocKind),
+      }))
     }
     setShowModal(true)
   }
@@ -443,26 +457,28 @@ const Sales = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Sales & Invoices</h1>
-        <button
-          onClick={handleNewInvoice}
-          className="btn btn-primary"
-        >
-          + New Invoice
-        </button>
+        <h1 className="text-3xl font-bold">Sales & {kindNames(filter === 'ALL' ? 'INVOICE' : filter).plural}</h1>
+        {filter !== 'ALL' && (
+          <button
+            onClick={handleNewInvoice}
+            className="btn btn-primary"
+          >
+            + New {kindNames(filter).singular}
+          </button>
+        )}
       </div>
 
       {/* Filter Tabs */}
       <div className="flex space-x-2">
-        {['ALL', 'INVOICE', 'QUOTATION'].map((tab) => (
+        {(['ALL', 'INVOICE', 'QUOTATION', 'PROFORMA_INVOICE'] as const).map((tab) => (
           <button
             key={tab}
-            onClick={() => setFilter(tab as any)}
+            onClick={() => setFilter(tab)}
             className={`px-4 py-2 rounded-lg font-medium ${
               filter === tab ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700'
             }`}
           >
-            {tab}
+            {tab === 'PROFORMA_INVOICE' ? 'PI' : tab}
           </button>
         ))}
       </div>
@@ -472,7 +488,7 @@ const Sales = () => {
         <input
           type="text"
           className="input max-w-md"
-          placeholder="Search by invoice number or party name..."
+          placeholder={`Search by ${kindNames(filter === 'ALL' ? 'INVOICE' : filter).short} number or party name...`}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
@@ -490,12 +506,25 @@ const Sales = () => {
               description={`Nothing matched "${searchQuery}".`}
             />
           ) : (
-            <EmptyState
-              icon={Wallet}
-              title="No invoices yet"
-              description="Create your first sales invoice to start billing customers and tracking payments."
-              action={{ label: '+ Create your first invoice', onClick: handleNewInvoice }}
-            />
+            (() => {
+              const k = kindNames(filter === 'ALL' ? 'INVOICE' : filter)
+              const title =
+                filter === 'PROFORMA_INVOICE' ? 'No Proforma yet' : `No ${k.plural.toLowerCase()} yet`
+              const description =
+                filter === 'QUOTATION'
+                  ? 'Create your first quotation to share pricing with customers before billing.'
+                  : filter === 'PROFORMA_INVOICE'
+                    ? 'Create your first proforma invoice to share expected pricing with customers.'
+                    : 'Create your first sales invoice to start billing customers and tracking payments.'
+              return (
+                <EmptyState
+                  icon={Wallet}
+                  title={title}
+                  description={description}
+                  action={{ label: `+ Create your first ${k.singular.toLowerCase()}`, onClick: handleNewInvoice }}
+                />
+              )
+            })()
           )
         ) : (
           <div className="overflow-auto max-h-[calc(100vh-280px)]">
@@ -585,7 +614,9 @@ const Sales = () => {
           <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold">{editingInvoice ? 'Edit Invoice' : 'Create New Invoice'}</h2>
+                <h2 className="text-2xl font-bold">
+                  {editingInvoice ? 'Edit' : 'Create New'} {kindNames(formData.type).singular}
+                </h2>
                 <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 hover:text-gray-700 text-2xl">
                   ×
                 </button>
@@ -626,10 +657,11 @@ const Sales = () => {
                     <select
                       className="input"
                       value={formData.type}
-                      onChange={(e) => setFormData({...formData, type: e.target.value as 'INVOICE' | 'QUOTATION'})}
+                      onChange={(e) => setFormData({...formData, type: e.target.value as DocKind})}
                     >
                       <option value="INVOICE">Invoice</option>
                       <option value="QUOTATION">Quotation</option>
+                      <option value="PROFORMA_INVOICE">Proforma Invoice</option>
                     </select>
                   </div>
 
