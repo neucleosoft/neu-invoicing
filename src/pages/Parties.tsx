@@ -292,17 +292,17 @@ const Parties = () => {
             )}
           </div>
         ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[calc(100vh-280px)]">
           <table className="table">
             <thead>
               <tr>
-                <th className="table-header">Name</th>
-                <th className="table-header">Type</th>
-                <th className="table-header">GSTIN</th>
-                <th className="table-header">Phone</th>
-                <th className="table-header">State</th>
-                <th className="table-header">Balance</th>
-                <th className="table-header">Actions</th>
+                <th className="table-header sticky top-0 z-10">Name</th>
+                <th className="table-header sticky top-0 z-10">Type</th>
+                <th className="table-header sticky top-0 z-10">GSTIN</th>
+                <th className="table-header sticky top-0 z-10">Phone</th>
+                <th className="table-header sticky top-0 z-10">State</th>
+                <th className="table-header sticky top-0 z-10">Balance</th>
+                <th className="table-header sticky top-0 z-10">Actions</th>
               </tr>
             </thead>
             <tbody>

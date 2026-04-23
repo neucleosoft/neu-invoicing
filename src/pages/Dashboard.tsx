@@ -298,15 +298,15 @@ const Dashboard = () => {
         {latestTransactions.length === 0 ? (
           <p className="text-gray-500 text-center py-8">No transactions yet</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">
               <thead>
                 <tr>
-                  <th className="table-header">Date</th>
-                  <th className="table-header">Type</th>
-                  <th className="table-header">Number</th>
-                  <th className="table-header">Party</th>
-                  <th className="table-header">Amount</th>
+                  <th className="table-header sticky top-0 z-10">Date</th>
+                  <th className="table-header sticky top-0 z-10">Type</th>
+                  <th className="table-header sticky top-0 z-10">Number</th>
+                  <th className="table-header sticky top-0 z-10">Party</th>
+                  <th className="table-header sticky top-0 z-10">Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -338,15 +338,15 @@ const Dashboard = () => {
               View All Items →
             </Link>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">
               <thead>
                 <tr>
-                  <th className="table-header">Item Name</th>
-                  <th className="table-header">SKU/HSN</th>
-                  <th className="table-header">Current Stock</th>
-                  <th className="table-header">Warning Level</th>
-                  <th className="table-header">Unit</th>
+                  <th className="table-header sticky top-0 z-10">Item Name</th>
+                  <th className="table-header sticky top-0 z-10">SKU/HSN</th>
+                  <th className="table-header sticky top-0 z-10">Current Stock</th>
+                  <th className="table-header sticky top-0 z-10">Warning Level</th>
+                  <th className="table-header sticky top-0 z-10">Unit</th>
                 </tr>
               </thead>
               <tbody>
