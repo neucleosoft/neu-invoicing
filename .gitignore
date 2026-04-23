@@ -37,10 +37,6 @@ release
 *.db-wal
 *.db-shm
 
-# Prisma
-prisma/migrations/*
-!prisma/migrations/.gitkeep
-
 # Environment
 .env
 .env.local
