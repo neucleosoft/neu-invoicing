@@ -428,7 +428,7 @@ const DeliveryChallan = () => {
               icon={Truck}
               title="No delivery challans yet"
               description="Generate challans for dispatched goods with transport details and vehicle tracking."
-              action={{ label: '+ Create your first challan', onClick={handleNewChallan} }}
+              action={{ label: '+ Create your first challan', onClick: handleNewChallan }}
             />
           )
         ) : (
