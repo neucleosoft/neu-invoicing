@@ -7,9 +7,9 @@ export interface Company {
   phone?: string
   email?: string
   taxId?: string
-  logoPath?: string
+  logoPath?: string | null
   logoBase64?: string
-  signaturePath?: string
+  signaturePath?: string | null
   fiscalYearStart: number
   currency: string
   invoicePrefix: string

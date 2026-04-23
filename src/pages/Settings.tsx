@@ -24,6 +24,8 @@ const Settings = () => {
   const [saving, setSaving] = useState(false)
   const [selectedTemplate, setSelectedTemplate] = useState<InvoiceTemplate>('classic')
   const [templateLoading, setTemplateLoading] = useState(true)
+  const [logoMissing, setLogoMissing] = useState(false)
+  const [logoLoading, setLogoLoading] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
@@ -35,6 +37,21 @@ const Settings = () => {
   useEffect(() => {
     loadTemplate()
   }, [])
+
+  // Check whether the logo file exists on disk (Drive syncs DB but not upload folders,
+  // so on a new device the logoPath may point nowhere)
+  useEffect(() => {
+    const checkLogo = async () => {
+      if (!company?.logoPath) { setLogoMissing(false); return }
+      try {
+        const res = await fetch(`local-resource://${company.logoPath.replace(/\\/g, '/')}`)
+        setLogoMissing(!res.ok)
+      } catch {
+        setLogoMissing(true)
+      }
+    }
+    checkLogo()
+  }, [company])
 
   const loadTemplate = async () => {
     try {
@@ -65,6 +82,38 @@ const Settings = () => {
       toast.error('Error updating settings')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleChangeLogo = async () => {
+    if (!company?.id) return
+    setLogoLoading(true)
+    try {
+      const img = await window.electronAPI.company.selectImage()
+      if (img.success && img.path) {
+        const upd = await window.electronAPI.company.update(company.id, { logoPath: img.path })
+        if (upd.success && upd.data) {
+          setCompany(upd.data)
+          toast.success('Logo updated')
+        }
+      }
+    } catch {
+      toast.error('Failed to update logo')
+    } finally {
+      setLogoLoading(false)
+    }
+  }
+
+  const handleRemoveLogo = async () => {
+    if (!company?.id) return
+    try {
+      const upd = await window.electronAPI.company.update(company.id, { logoPath: null })
+      if (upd.success && upd.data) {
+        setCompany(upd.data)
+        toast.success('Logo removed')
+      }
+    } catch {
+      toast.error('Failed to remove logo')
     }
   }
 
@@ -119,6 +168,45 @@ const Settings = () => {
             <>
               <h2 className="text-2xl font-bold mb-6">Company Profile</h2>
               <form onSubmit={handleSubmit} className="space-y-6">
+                <div>
+                  <label className="label">Company Logo</label>
+                  <div className="flex items-start gap-4">
+                    <div className="w-32 h-32 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 overflow-hidden">
+                      {company?.logoPath && !logoMissing ? (
+                        <img
+                          src={`local-resource://${company.logoPath.replace(/\\/g, '/')}`}
+                          alt="Logo"
+                          className="max-w-full max-h-full object-contain"
+                        />
+                      ) : (
+                        <span className="text-xs text-gray-400">No logo</span>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      {logoMissing && company?.logoPath && (
+                        <p className="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded p-2 mb-2">
+                          Logo file is missing on this device. Re-upload to fix.
+                        </p>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleChangeLogo}
+                          disabled={logoLoading}
+                          className="btn btn-secondary"
+                        >
+                          {logoLoading ? 'Uploading...' : company?.logoPath ? 'Change Logo' : 'Upload Logo'}
+                        </button>
+                        {company?.logoPath && (
+                          <button type="button" onClick={handleRemoveLogo} className="btn btn-danger">
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div>
                   <label className="label">Business Name</label>
                   <input
