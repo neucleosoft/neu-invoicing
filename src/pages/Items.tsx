@@ -4,9 +4,14 @@ import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
+import EmptyState from '../components/EmptyState'
+import { TableSkeleton } from '../components/Skeleton'
+import { Package, Search as SearchIcon, Loader2 } from 'lucide-react'
 
 const Items = () => {
   const [items, setItems] = useState<Item[]>([])
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editingItem, setEditingItem] = useState<Item | null>(null)
@@ -30,9 +35,14 @@ const Items = () => {
   }, [])
 
   const loadItems = async () => {
-    const result = await window.electronAPI.item.getAll()
-    if (result.success && result.data) {
-      setItems(result.data)
+    setLoading(true)
+    try {
+      const result = await window.electronAPI.item.getAll()
+      if (result.success && result.data) {
+        setItems(result.data)
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -49,17 +59,20 @@ const Items = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-
-    if (editingItem) {
-      await window.electronAPI.item.update(editingItem.id, formData)
-    } else {
-      await window.electronAPI.item.create(formData)
+    setSubmitting(true)
+    try {
+      if (editingItem) {
+        await window.electronAPI.item.update(editingItem.id, formData)
+      } else {
+        await window.electronAPI.item.create(formData)
+      }
+      setShowModal(false)
+      setEditingItem(null)
+      resetForm()
+      loadItems()
+    } finally {
+      setSubmitting(false)
     }
-
-    setShowModal(false)
-    setEditingItem(null)
-    resetForm()
-    loadItems()
   }
 
   const handleEdit = (item: Item) => {
@@ -136,22 +149,23 @@ const Items = () => {
 
       {/* Items Table */}
       <div className="card">
-        {filteredItems.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            {searchQuery.trim() ? (
-              <p className="text-lg mb-4">No items match your search</p>
-            ) : (
-              <>
-                <p className="text-lg mb-4">No items yet</p>
-                <button
-                  onClick={() => setShowModal(true)}
-                  className="btn btn-primary"
-                >
-                  Add Your First Item
-                </button>
-              </>
-            )}
-          </div>
+        {loading ? (
+          <TableSkeleton rows={6} columns={7} />
+        ) : filteredItems.length === 0 ? (
+          searchQuery.trim() ? (
+            <EmptyState
+              icon={SearchIcon}
+              title="No items match your search"
+              description={`Nothing matched "${searchQuery}".`}
+            />
+          ) : (
+            <EmptyState
+              icon={Package}
+              title="No items yet"
+              description="Add products and services to your catalog to use them on invoices and bills."
+              action={{ label: '+ Add your first item', onClick: () => setShowModal(true) }}
+            />
+          )
         ) : (
         <div className="overflow-auto max-h-[calc(100vh-280px)]">
           <table className="table">
@@ -173,7 +187,7 @@ const Items = () => {
                   <td className="table-cell">{item.skuHsn || '-'}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-1 rounded-full text-xs ${
-                      item.type === 'PRODUCT' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'
+                      item.type === 'PRODUCT' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
                     }`}>
                       {item.type}
                     </span>
@@ -334,8 +348,13 @@ const Items = () => {
                 <button type="button" onClick={() => { setShowModal(false); setEditingItem(null); resetForm() }} className="btn btn-secondary">
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  {editingItem ? 'Update' : 'Create'}
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="btn btn-primary inline-flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {editingItem ? (submitting ? 'Updating…' : 'Update') : (submitting ? 'Creating…' : 'Create')}
                 </button>
               </div>
             </form>

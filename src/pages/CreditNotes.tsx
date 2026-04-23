@@ -3,6 +3,8 @@ import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
+import EmptyState from '../components/EmptyState'
+import { FileText } from 'lucide-react'
 
 interface CreditDebitNote {
   id: string
@@ -381,15 +383,12 @@ const CreditNotes = () => {
       {/* Notes Table */}
       <div className="card">
         {filteredNotes.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <p className="text-lg mb-4">No credit/debit notes yet</p>
-            <button
-              onClick={() => setShowModal(true)}
-              className="btn btn-primary"
-            >
-              Create Your First Note
-            </button>
-          </div>
+          <EmptyState
+            icon={FileText}
+            title="No credit/debit notes yet"
+            description="Issue credit or debit notes to adjust invoices and bills with automatic ledger entries."
+            action={{ label: '+ Create your first note', onClick: () => setShowModal(true) }}
+          />
         ) : (
           <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">
@@ -412,7 +411,7 @@ const CreditNotes = () => {
                     <td className="table-cell">{new Date(note.noteDate).toLocaleDateString()}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
-                        note.type === 'CREDIT_NOTE' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                        note.type === 'CREDIT_NOTE' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                       }`}>
                         {note.type === 'CREDIT_NOTE' ? 'CREDIT NOTE' : 'DEBIT NOTE'}
                       </span>
@@ -424,7 +423,7 @@ const CreditNotes = () => {
                     <td className="table-cell">{formatCurrency(note.totalAmount)}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
-                        note.status === 'ACTIVE' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                        note.status === 'ACTIVE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                       }`}>
                         {note.status}
                       </span>
@@ -716,7 +715,7 @@ const CreditNotes = () => {
                 <div>
                   <p className="text-sm text-gray-500">Type</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
-                    viewingNote.type === 'CREDIT_NOTE' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                    viewingNote.type === 'CREDIT_NOTE' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                   }`}>
                     {viewingNote.type === 'CREDIT_NOTE' ? 'CREDIT NOTE' : 'DEBIT NOTE'}
                   </span>
@@ -728,7 +727,7 @@ const CreditNotes = () => {
                 <div>
                   <p className="text-sm text-gray-500">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
-                    viewingNote.status === 'ACTIVE' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-700'
+                    viewingNote.status === 'ACTIVE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                   }`}>
                     {viewingNote.status}
                   </span>
