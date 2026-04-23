@@ -144,15 +144,15 @@ const Dashboard = () => {
   const getTypeBadgeClass = (type: LatestTransaction['type']) => {
     switch (type) {
       case 'Invoice':
-        return 'bg-blue-100 text-blue-700'
+        return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
       case 'Payment In':
-        return 'bg-green-100 text-green-700'
+        return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
       case 'Payment Out':
-        return 'bg-red-100 text-red-700'
+        return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
       case 'Challan':
-        return 'bg-purple-100 text-purple-700'
+        return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
       default:
-        return 'bg-gray-100 text-gray-700'
+        return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
     }
   }
 
@@ -278,9 +278,9 @@ const Dashboard = () => {
                   <div className="text-right">
                     <p className="font-medium">{formatCurrency(invoice.totalAmount)}</p>
                     <span className={`text-xs px-2 py-1 rounded-full ${
-                      invoice.status === 'PAID' ? 'bg-green-100 text-green-700' :
-                      invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-red-100 text-red-700'
+                      invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                      invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                      'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                     }`}>
                       {invoice.status}
                     </span>

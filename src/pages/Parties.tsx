@@ -5,6 +5,11 @@ import { validateGSTIN, INDIAN_STATE_CODES } from '../utils/gstValidation'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
+import EmptyState from '../components/EmptyState'
+import { TableSkeleton } from '../components/Skeleton'
+import SortHeader from '../components/SortHeader'
+import { useSortable } from '../hooks/useSortable'
+import { Users, Search as SearchIcon, Loader2 } from 'lucide-react'
 
 // Avatar color palette (6 colors)
 const AVATAR_COLORS = [
@@ -31,6 +36,8 @@ function getAvatarColor(name: string): string {
 
 const Parties = () => {
   const [parties, setParties] = useState<Party[]>([])
+  const [loading, setLoading] = useState(true)
+  const [submitting, setSubmitting] = useState(false)
   const [filter, setFilter] = useState<'ALL' | 'CUSTOMER' | 'SUPPLIER'>('ALL')
   const [searchQuery, setSearchQuery] = useState('')
   const [showModal, setShowModal] = useState(false)
@@ -75,9 +82,14 @@ const Parties = () => {
   }, [formData.taxId])
 
   const loadParties = async () => {
-    const result = await window.electronAPI.party.getAll(filter === 'ALL' ? undefined : filter)
-    if (result.success && result.data) {
-      setParties(result.data)
+    setLoading(true)
+    try {
+      const result = await window.electronAPI.party.getAll(filter === 'ALL' ? undefined : filter)
+      if (result.success && result.data) {
+        setParties(result.data)
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -93,6 +105,15 @@ const Parties = () => {
     )
   }, [parties, searchQuery])
 
+  const { sortedItems: sortedParties, sortKey, sortDir, toggleSort } = useSortable(filteredParties, [
+    { key: 'name', accessor: (p) => p.name },
+    { key: 'type', accessor: (p) => p.type },
+    { key: 'taxId', accessor: (p) => p.taxId || '' },
+    { key: 'phone', accessor: (p) => p.phone || '' },
+    { key: 'state', accessor: (p) => p.stateName || p.stateCode || '' },
+    { key: 'balance', accessor: (p) => p.currentBalance },
+  ])
+
   // Auto-fill state when GSTIN is validated
   useEffect(() => {
     if (gstValidation?.valid && gstValidation.stateCode && gstValidation.stateName) {
@@ -106,6 +127,7 @@ const Parties = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setSubmitting(true)
 
     const partyData = {
       name: formData.name,
@@ -129,16 +151,19 @@ const Parties = () => {
       lastGstFetch: formData.legalName ? new Date().toISOString() : undefined
     }
 
-    if (editingParty) {
-      await window.electronAPI.party.update(editingParty.id, partyData)
-    } else {
-      await window.electronAPI.party.create(partyData)
+    try {
+      if (editingParty) {
+        await window.electronAPI.party.update(editingParty.id, partyData)
+      } else {
+        await window.electronAPI.party.create(partyData)
+      }
+      setShowModal(false)
+      setEditingParty(null)
+      resetForm()
+      loadParties()
+    } finally {
+      setSubmitting(false)
     }
-
-    setShowModal(false)
-    setEditingParty(null)
-    resetForm()
-    loadParties()
   }
 
   const handleEdit = (party: Party) => {
@@ -275,38 +300,39 @@ const Parties = () => {
 
       {/* Parties Table */}
       <div className="card">
-        {filteredParties.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            {searchQuery.trim() ? (
-              <p className="text-lg mb-4">No parties match your search</p>
-            ) : (
-              <>
-                <p className="text-lg mb-4">No parties yet</p>
-                <button
-                  onClick={handleOpenModal}
-                  className="btn btn-primary"
-                >
-                  Add Your First Party
-                </button>
-              </>
-            )}
-          </div>
+        {loading ? (
+          <TableSkeleton rows={6} columns={7} />
+        ) : filteredParties.length === 0 ? (
+          searchQuery.trim() ? (
+            <EmptyState
+              icon={SearchIcon}
+              title="No parties match your search"
+              description={`Nothing matched "${searchQuery}". Try a different name, phone, or GSTIN.`}
+            />
+          ) : (
+            <EmptyState
+              icon={Users}
+              title="No parties yet"
+              description="Add customers and suppliers to start tracking balances, invoices, and payments."
+              action={{ label: '+ Add your first party', onClick: handleOpenModal }}
+            />
+          )
         ) : (
         <div className="overflow-auto max-h-[calc(100vh-280px)]">
           <table className="table">
             <thead>
               <tr>
-                <th className="table-header sticky top-0 z-10">Name</th>
-                <th className="table-header sticky top-0 z-10">Type</th>
-                <th className="table-header sticky top-0 z-10">GSTIN</th>
-                <th className="table-header sticky top-0 z-10">Phone</th>
-                <th className="table-header sticky top-0 z-10">State</th>
-                <th className="table-header sticky top-0 z-10">Balance</th>
+                <SortHeader label="Name" sortKey="name" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                <SortHeader label="Type" sortKey="type" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                <SortHeader label="GSTIN" sortKey="taxId" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                <SortHeader label="Phone" sortKey="phone" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                <SortHeader label="State" sortKey="state" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                <SortHeader label="Balance" sortKey="balance" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                 <th className="table-header sticky top-0 z-10">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {filteredParties.map((party) => {
+              {sortedParties.map((party) => {
                 const balanceDisplay = getBalanceDisplay(party)
                 return (
                   <tr key={party.id} className="border-t">
@@ -329,7 +355,7 @@ const Parties = () => {
                     </td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
-                        party.type === 'CUSTOMER' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                        party.type === 'CUSTOMER' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
                       }`}>
                         {party.type}
                       </span>
@@ -339,7 +365,7 @@ const Parties = () => {
                         <div className="flex items-center gap-1">
                           <span className="font-mono text-sm">{party.taxId}</span>
                           {party.gstStatus === 'Cancelled' && (
-                            <span className="px-1 py-0.5 rounded text-xs bg-red-100 text-red-700">
+                            <span className="px-1 py-0.5 rounded text-xs bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300">
                               Cancelled
                             </span>
                           )}
@@ -581,8 +607,13 @@ const Parties = () => {
                 >
                   Cancel
                 </button>
-                <button type="submit" className="btn btn-primary">
-                  {editingParty ? 'Update' : 'Create'} Party
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="btn btn-primary inline-flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {editingParty ? (submitting ? 'Updating…' : 'Update Party') : (submitting ? 'Creating…' : 'Create Party')}
                 </button>
               </div>
             </form>
