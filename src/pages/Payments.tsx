@@ -130,16 +130,16 @@ const Payments = () => {
 
       {/* Payments Table */}
       <div className="card">
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[calc(100vh-280px)]">
           <table className="table">
             <thead>
               <tr>
-                <th className="table-header">Date</th>
-                <th className="table-header">Type</th>
-                <th className="table-header">Party</th>
-                <th className="table-header">Amount</th>
-                <th className="table-header">Mode</th>
-                <th className="table-header">Notes</th>
+                <th className="table-header sticky top-0 z-10">Date</th>
+                <th className="table-header sticky top-0 z-10">Type</th>
+                <th className="table-header sticky top-0 z-10">Party</th>
+                <th className="table-header sticky top-0 z-10">Amount</th>
+                <th className="table-header sticky top-0 z-10">Mode</th>
+                <th className="table-header sticky top-0 z-10">Notes</th>
               </tr>
             </thead>
             <tbody>
@@ -148,7 +148,7 @@ const Payments = () => {
                   <td className="table-cell">{new Date(payment.paymentDate).toLocaleDateString()}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-1 rounded-full text-xs ${
-                      payment.type === 'PAYMENT_IN' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                      payment.type === 'PAYMENT_IN' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                     }`}>
                       {payment.type}
                     </span>

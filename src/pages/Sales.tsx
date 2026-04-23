@@ -5,6 +5,11 @@ import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
+import EmptyState from '../components/EmptyState'
+import { TableSkeleton } from '../components/Skeleton'
+import SortHeader from '../components/SortHeader'
+import { useSortable } from '../hooks/useSortable'
+import { Wallet, Search as SearchIcon } from 'lucide-react'
 
 interface Party {
   id: string
@@ -33,6 +38,7 @@ interface InvoiceItem {
 
 const Sales = () => {
   const [invoices, setInvoices] = useState<SalesInvoice[]>([])
+  const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<'ALL' | 'INVOICE' | 'QUOTATION'>('ALL')
   const [showModal, setShowModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
@@ -86,9 +92,14 @@ const Sales = () => {
   }
 
   const loadInvoices = async () => {
-    const result = await window.electronAPI.sales.getAll(filter === 'ALL' ? undefined : filter)
-    if (result.success && result.data) {
-      setInvoices(result.data)
+    setLoading(true)
+    try {
+      const result = await window.electronAPI.sales.getAll(filter === 'ALL' ? undefined : filter)
+      if (result.success && result.data) {
+        setInvoices(result.data)
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -420,6 +431,15 @@ const Sales = () => {
     return matchesNumber || matchesParty
   })
 
+  const { sortedItems: sortedInvoices, sortKey, sortDir, toggleSort } = useSortable(filteredInvoices, [
+    { key: 'invoiceNumber', accessor: (i) => i.invoiceNumber },
+    { key: 'invoiceDate', accessor: (i) => new Date(i.invoiceDate).getTime() },
+    { key: 'party', accessor: (i) => i.party?.name || '' },
+    { key: 'type', accessor: (i) => i.type },
+    { key: 'totalAmount', accessor: (i) => i.totalAmount },
+    { key: 'status', accessor: (i) => i.status || '' },
+  ])
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -460,45 +480,46 @@ const Sales = () => {
 
       {/* Invoices Table */}
       <div className="card">
-        {filteredInvoices.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            {searchQuery.trim() ? (
-              <p className="text-lg mb-4">No invoices match your search</p>
-            ) : (
-              <>
-                <p className="text-lg mb-4">No invoices yet</p>
-                <button
-                  onClick={handleNewInvoice}
-                  className="btn btn-primary"
-                >
-                  Create Your First Invoice
-                </button>
-              </>
-            )}
-          </div>
+        {loading ? (
+          <TableSkeleton rows={6} columns={7} />
+        ) : filteredInvoices.length === 0 ? (
+          searchQuery.trim() ? (
+            <EmptyState
+              icon={SearchIcon}
+              title="No invoices match your search"
+              description={`Nothing matched "${searchQuery}".`}
+            />
+          ) : (
+            <EmptyState
+              icon={Wallet}
+              title="No invoices yet"
+              description="Create your first sales invoice to start billing customers and tracking payments."
+              action={{ label: '+ Create your first invoice', onClick: handleNewInvoice }}
+            />
+          )
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">
               <thead>
                 <tr>
-                  <th className="table-header">Invoice #</th>
-                  <th className="table-header">Date</th>
-                  <th className="table-header">Party</th>
-                  <th className="table-header">Type</th>
-                  <th className="table-header">Amount</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header">Actions</th>
+                  <SortHeader label="Invoice #" sortKey="invoiceNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                  <SortHeader label="Date" sortKey="invoiceDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                  <SortHeader label="Party" sortKey="party" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                  <SortHeader label="Type" sortKey="type" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                  <SortHeader label="Amount" sortKey="totalAmount" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                  <SortHeader label="Status" sortKey="status" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                  <th className="table-header sticky top-0 z-10">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredInvoices.map((invoice) => (
+                {sortedInvoices.map((invoice) => (
                   <tr key={invoice.id} className="border-t">
                     <td className="table-cell font-medium">{invoice.invoiceNumber}</td>
                     <td className="table-cell">{new Date(invoice.invoiceDate).toLocaleDateString()}</td>
                     <td className="table-cell">{invoice.party?.name}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
-                        invoice.type === 'INVOICE' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                        invoice.type === 'INVOICE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
                       }`}>
                         {invoice.type}
                       </span>
@@ -511,9 +532,9 @@ const Sales = () => {
                         </span>
                       ) : (
                         <span className={`px-2 py-1 rounded-full text-xs ${
-                          invoice.status === 'PAID' ? 'bg-green-100 text-green-700' :
-                          invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700' :
-                          'bg-red-100 text-red-700'
+                          invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                          invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                          'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                         }`}>
                           {invoice.status}
                         </span>
@@ -925,7 +946,7 @@ const Sales = () => {
                 <div>
                   <p className="text-sm text-gray-500">Type</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
-                    viewingInvoice.type === 'INVOICE' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'
+                    viewingInvoice.type === 'INVOICE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
                   }`}>
                     {viewingInvoice.type}
                   </span>
@@ -937,9 +958,9 @@ const Sales = () => {
                 <div>
                   <p className="text-sm text-gray-500">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
-                    viewingInvoice.status === 'PAID' ? 'bg-green-100 text-green-700' :
-                    viewingInvoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-red-100 text-red-700'
+                    viewingInvoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                    viewingInvoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                    'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                   }`}>
                     {viewingInvoice.status}
                   </span>
@@ -961,12 +982,12 @@ const Sales = () => {
                 <table className="table w-full">
                   <thead>
                     <tr>
-                      <th className="table-header">Item</th>
-                      <th className="table-header">HSN/SKU</th>
-                      <th className="table-header">Qty</th>
-                      <th className="table-header">Rate</th>
-                      <th className="table-header">Tax %</th>
-                      <th className="table-header">Total</th>
+                      <th className="table-header sticky top-0 z-10">Item</th>
+                      <th className="table-header sticky top-0 z-10">HSN/SKU</th>
+                      <th className="table-header sticky top-0 z-10">Qty</th>
+                      <th className="table-header sticky top-0 z-10">Rate</th>
+                      <th className="table-header sticky top-0 z-10">Tax %</th>
+                      <th className="table-header sticky top-0 z-10">Total</th>
                     </tr>
                   </thead>
                   <tbody>

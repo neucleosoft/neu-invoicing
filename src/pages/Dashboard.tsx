@@ -144,15 +144,15 @@ const Dashboard = () => {
   const getTypeBadgeClass = (type: LatestTransaction['type']) => {
     switch (type) {
       case 'Invoice':
-        return 'bg-blue-100 text-blue-700'
+        return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
       case 'Payment In':
-        return 'bg-green-100 text-green-700'
+        return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
       case 'Payment Out':
-        return 'bg-red-100 text-red-700'
+        return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
       case 'Challan':
-        return 'bg-purple-100 text-purple-700'
+        return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
       default:
-        return 'bg-gray-100 text-gray-700'
+        return 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
     }
   }
 
@@ -278,9 +278,9 @@ const Dashboard = () => {
                   <div className="text-right">
                     <p className="font-medium">{formatCurrency(invoice.totalAmount)}</p>
                     <span className={`text-xs px-2 py-1 rounded-full ${
-                      invoice.status === 'PAID' ? 'bg-green-100 text-green-700' :
-                      invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-red-100 text-red-700'
+                      invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                      invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                      'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                     }`}>
                       {invoice.status}
                     </span>
@@ -298,15 +298,15 @@ const Dashboard = () => {
         {latestTransactions.length === 0 ? (
           <p className="text-gray-500 text-center py-8">No transactions yet</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">
               <thead>
                 <tr>
-                  <th className="table-header">Date</th>
-                  <th className="table-header">Type</th>
-                  <th className="table-header">Number</th>
-                  <th className="table-header">Party</th>
-                  <th className="table-header">Amount</th>
+                  <th className="table-header sticky top-0 z-10">Date</th>
+                  <th className="table-header sticky top-0 z-10">Type</th>
+                  <th className="table-header sticky top-0 z-10">Number</th>
+                  <th className="table-header sticky top-0 z-10">Party</th>
+                  <th className="table-header sticky top-0 z-10">Amount</th>
                 </tr>
               </thead>
               <tbody>
@@ -338,15 +338,15 @@ const Dashboard = () => {
               View All Items →
             </Link>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">
               <thead>
                 <tr>
-                  <th className="table-header">Item Name</th>
-                  <th className="table-header">SKU/HSN</th>
-                  <th className="table-header">Current Stock</th>
-                  <th className="table-header">Warning Level</th>
-                  <th className="table-header">Unit</th>
+                  <th className="table-header sticky top-0 z-10">Item Name</th>
+                  <th className="table-header sticky top-0 z-10">SKU/HSN</th>
+                  <th className="table-header sticky top-0 z-10">Current Stock</th>
+                  <th className="table-header sticky top-0 z-10">Warning Level</th>
+                  <th className="table-header sticky top-0 z-10">Unit</th>
                 </tr>
               </thead>
               <tbody>

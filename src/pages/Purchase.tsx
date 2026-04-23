@@ -4,6 +4,9 @@ import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
+import EmptyState from '../components/EmptyState'
+import { TableSkeleton } from '../components/Skeleton'
+import { ShoppingCart, Search as SearchIcon } from 'lucide-react'
 
 interface Party {
   id: string
@@ -29,6 +32,7 @@ interface BillItem {
 
 const Purchase = () => {
   const [bills, setBills] = useState<PurchaseBill[]>([])
+  const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [viewingBill, setViewingBill] = useState<PurchaseBill | null>(null)
@@ -56,9 +60,14 @@ const Purchase = () => {
   const confirm = useConfirm()
 
   const loadBills = async () => {
-    const result = await window.electronAPI.purchase.getAll()
-    if (result.success && result.data) {
-      setBills(result.data)
+    setLoading(true)
+    try {
+      const result = await window.electronAPI.purchase.getAll()
+      if (result.success && result.data) {
+        setBills(result.data)
+      }
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -289,33 +298,34 @@ const Purchase = () => {
 
       {/* Bills Table */}
       <div className="card">
-        {filteredBills.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            {searchQuery.trim() ? (
-              <p className="text-lg mb-4">No bills match your search</p>
-            ) : (
-              <>
-                <p className="text-lg mb-4">No purchase bills yet</p>
-                <button
-                  onClick={() => setShowModal(true)}
-                  className="btn btn-primary"
-                >
-                  Create Your First Purchase Bill
-                </button>
-              </>
-            )}
-          </div>
+        {loading ? (
+          <TableSkeleton rows={6} columns={6} />
+        ) : filteredBills.length === 0 ? (
+          searchQuery.trim() ? (
+            <EmptyState
+              icon={SearchIcon}
+              title="No bills match your search"
+              description={`Nothing matched "${searchQuery}".`}
+            />
+          ) : (
+            <EmptyState
+              icon={ShoppingCart}
+              title="No purchase bills yet"
+              description="Record purchases from suppliers to track payables and stock additions."
+              action={{ label: '+ Create your first purchase bill', onClick: () => setShowModal(true) }}
+            />
+          )
         ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[calc(100vh-280px)]">
           <table className="table">
             <thead>
               <tr>
-                <th className="table-header">Bill #</th>
-                <th className="table-header">Date</th>
-                <th className="table-header">Supplier</th>
-                <th className="table-header">Amount</th>
-                <th className="table-header">Status</th>
-                <th className="table-header">Actions</th>
+                <th className="table-header sticky top-0 z-10">Bill #</th>
+                <th className="table-header sticky top-0 z-10">Date</th>
+                <th className="table-header sticky top-0 z-10">Supplier</th>
+                <th className="table-header sticky top-0 z-10">Amount</th>
+                <th className="table-header sticky top-0 z-10">Status</th>
+                <th className="table-header sticky top-0 z-10">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -327,9 +337,9 @@ const Purchase = () => {
                   <td className="table-cell">{formatCurrency(bill.totalAmount)}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-1 rounded-full text-xs ${
-                      bill.status === 'PAID' ? 'bg-green-100 text-green-700' :
-                      bill.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700' :
-                      'bg-red-100 text-red-700'
+                      bill.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                      bill.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                      'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                     }`}>
                       {bill.status}
                     </span>
@@ -576,9 +586,9 @@ const Purchase = () => {
                 <div>
                   <p className="text-sm text-gray-500">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
-                    viewingBill.status === 'PAID' ? 'bg-green-100 text-green-700' :
-                    viewingBill.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700' :
-                    'bg-red-100 text-red-700'
+                    viewingBill.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                    viewingBill.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                    'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                   }`}>
                     {viewingBill.status}
                   </span>
@@ -603,11 +613,11 @@ const Purchase = () => {
                 <table className="table w-full">
                   <thead>
                     <tr>
-                      <th className="table-header">Item</th>
-                      <th className="table-header">Qty</th>
-                      <th className="table-header">Rate</th>
-                      <th className="table-header">Tax %</th>
-                      <th className="table-header">Total</th>
+                      <th className="table-header sticky top-0 z-10">Item</th>
+                      <th className="table-header sticky top-0 z-10">Qty</th>
+                      <th className="table-header sticky top-0 z-10">Rate</th>
+                      <th className="table-header sticky top-0 z-10">Tax %</th>
+                      <th className="table-header sticky top-0 z-10">Total</th>
                     </tr>
                   </thead>
                   <tbody>
