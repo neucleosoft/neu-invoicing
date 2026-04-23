@@ -119,6 +119,7 @@ const Sales = () => {
           try {
             const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
             const response = await fetch(logoUrl)
+            if (!response.ok) throw new Error('Logo file not found')
             const blob = await response.blob()
             // Resize using canvas — 200x200 is plenty for a 22mm logo on PDF
             const img = new Image()

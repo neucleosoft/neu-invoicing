@@ -169,6 +169,7 @@ const DeliveryChallan = () => {
         try {
           const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
           const response = await fetch(logoUrl)
+          if (!response.ok) throw new Error('Logo file not found')
           const blob = await response.blob()
           const img = new Image()
           const imgUrl = URL.createObjectURL(blob)

@@ -87,10 +87,15 @@ app.whenReady().then(async () => {
       ? `${url.host.toUpperCase()}:${decodeURIComponent(url.pathname)}`
       : decodeURIComponent(url.pathname)
 
-    const data = fs.readFileSync(filePath)
-    const ext = path.extname(filePath).toLowerCase()
-    const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg'
-    return new Response(data, { headers: { 'Content-Type': mimeType } })
+    try {
+      const data = fs.readFileSync(filePath)
+      const ext = path.extname(filePath).toLowerCase()
+      const mimeType = ext === '.png' ? 'image/png' : 'image/jpeg'
+      return new Response(data, { headers: { 'Content-Type': mimeType } })
+    } catch {
+      // File missing or unreadable — return 404 silently (renderer will fall back)
+      return new Response('Not found', { status: 404 })
+    }
   })
 
   // Setup IPC handlers
