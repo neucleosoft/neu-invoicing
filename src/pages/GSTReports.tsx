@@ -393,9 +393,9 @@ const GSTReports = () => {
           {/* Sections */}
           <div className="card">
             <h3 className="text-lg font-semibold mb-4">Section-wise Breakup</h3>
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50">
                     <th className="px-4 py-3 text-left font-semibold">Section</th>
                     <th className="px-4 py-3 text-right font-semibold">Invoices</th>
@@ -436,9 +436,9 @@ const GSTReports = () => {
           {gstr1Data.hsnSummary.length > 0 && (
             <div className="card">
               <h3 className="text-lg font-semibold mb-4">HSN Summary</h3>
-              <div className="overflow-x-auto">
+              <div className="overflow-auto max-h-[calc(100vh-280px)]">
                 <table className="w-full">
-                  <thead>
+                  <thead className="sticky top-0 z-10">
                     <tr className="bg-gray-50">
                       <th className="px-4 py-3 text-left font-semibold">HSN Code</th>
                       <th className="px-4 py-3 text-left font-semibold">Description</th>
@@ -493,9 +493,9 @@ const GSTReports = () => {
           {/* 3.1 - Outward Supplies */}
           <div className="card">
             <h3 className="text-lg font-semibold mb-4">3.1 - Details of Outward Supplies and Inward Supplies Liable to Reverse Charge</h3>
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50">
                     <th className="px-4 py-3 text-left font-semibold">Nature of Supplies</th>
                     <th className="px-4 py-3 text-right font-semibold">Taxable Value</th>
@@ -546,9 +546,9 @@ const GSTReports = () => {
           {/* 4 - Eligible ITC */}
           <div className="card">
             <h3 className="text-lg font-semibold mb-4">4 - Eligible ITC</h3>
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50">
                     <th className="px-4 py-3 text-left font-semibold">Details</th>
                     <th className="px-4 py-3 text-right font-semibold">IGST</th>
@@ -587,9 +587,9 @@ const GSTReports = () => {
           {/* 6 - Tax Payable */}
           <div className="card">
             <h3 className="text-lg font-semibold mb-4">6 - Payment of Tax</h3>
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50">
                     <th className="px-4 py-3 text-left font-semibold">Description</th>
                     <th className="px-4 py-3 text-right font-semibold">IGST</th>
@@ -711,9 +711,9 @@ const GSTReports = () => {
           {/* Part II - Outward Supplies */}
           <div className="card">
             <h3 className="text-lg font-semibold mb-4">Part II - Details of Outward Supplies Made During the FY</h3>
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50">
                     <th className="px-4 py-3 text-left font-semibold">Nature of Supplies</th>
                     <th className="px-4 py-3 text-right font-semibold">Taxable Value</th>
@@ -759,9 +759,9 @@ const GSTReports = () => {
           {/* Part III - Inward Supplies */}
           <div className="card">
             <h3 className="text-lg font-semibold mb-4">Part III - Details of Inward Supplies During the FY</h3>
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50">
                     <th className="px-4 py-3 text-left font-semibold">Nature of Supplies</th>
                     <th className="px-4 py-3 text-right font-semibold">Taxable Value</th>
@@ -826,9 +826,9 @@ const GSTReports = () => {
           </div>
 
           <div className="card">
-            <div className="overflow-x-auto">
+            <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50">
                     <th className="px-4 py-3 text-left font-semibold">HSN Code</th>
                     <th className="px-4 py-3 text-left font-semibold">Description</th>
@@ -886,7 +886,7 @@ const GSTReports = () => {
             </div>
             <div className="p-4 overflow-auto max-h-[60vh]">
               <table className="w-full">
-                <thead>
+                <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50">
                     <th className="px-4 py-2 text-left">Invoice No.</th>
                     <th className="px-4 py-2 text-left">Date</th>

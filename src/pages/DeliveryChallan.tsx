@@ -4,6 +4,8 @@ import { downloadChallanPDF } from '../utils/pdfmakeChallan'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
+import EmptyState from '../components/EmptyState'
+import { Truck, Search as SearchIcon } from 'lucide-react'
 
 interface Challan {
   id: string
@@ -366,28 +368,31 @@ const DeliveryChallan = () => {
       {/* Challans Table */}
       <div className="card">
         {filteredChallans.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <p className="text-lg mb-4">{searchTerm ? 'No challans match your search' : 'No delivery challans yet'}</p>
-            {!searchTerm && (
-              <button
-                onClick={() => setShowModal(true)}
-                className="btn btn-primary"
-              >
-                Create Your First Delivery Challan
-              </button>
-            )}
-          </div>
+          searchTerm ? (
+            <EmptyState
+              icon={SearchIcon}
+              title="No challans match your search"
+              description={`Nothing matched "${searchTerm}".`}
+            />
+          ) : (
+            <EmptyState
+              icon={Truck}
+              title="No delivery challans yet"
+              description="Generate challans for dispatched goods with transport details and vehicle tracking."
+              action={{ label: '+ Create your first challan', onClick: () => setShowModal(true) }}
+            />
+          )
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">
               <thead>
                 <tr>
-                  <th className="table-header">Challan #</th>
-                  <th className="table-header">Date</th>
-                  <th className="table-header">Party</th>
-                  <th className="table-header">Amount</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header">Actions</th>
+                  <th className="table-header sticky top-0 z-10">Challan #</th>
+                  <th className="table-header sticky top-0 z-10">Date</th>
+                  <th className="table-header sticky top-0 z-10">Party</th>
+                  <th className="table-header sticky top-0 z-10">Amount</th>
+                  <th className="table-header sticky top-0 z-10">Status</th>
+                  <th className="table-header sticky top-0 z-10">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -399,9 +404,9 @@ const DeliveryChallan = () => {
                     <td className="table-cell">{formatCurrency(challan.totalAmount)}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
-                        challan.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700' :
-                        challan.status === 'DELIVERED' ? 'bg-green-100 text-green-700' :
-                        'bg-blue-100 text-blue-700'
+                        challan.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                        challan.status === 'DELIVERED' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                        'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                       }`}>
                         {challan.status}
                       </span>
@@ -687,9 +692,9 @@ const DeliveryChallan = () => {
                 <div>
                   <p className="text-sm text-gray-500">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
-                    viewingChallan.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700' :
-                    viewingChallan.status === 'DELIVERED' ? 'bg-green-100 text-green-700' :
-                    'bg-blue-100 text-blue-700'
+                    viewingChallan.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                    viewingChallan.status === 'DELIVERED' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                    'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                   }`}>
                     {viewingChallan.status}
                   </span>
@@ -731,11 +736,11 @@ const DeliveryChallan = () => {
                 <table className="table w-full">
                   <thead>
                     <tr>
-                      <th className="table-header">Item</th>
-                      <th className="table-header">Qty</th>
-                      <th className="table-header">Rate</th>
-                      <th className="table-header">Tax %</th>
-                      <th className="table-header">Total</th>
+                      <th className="table-header sticky top-0 z-10">Item</th>
+                      <th className="table-header sticky top-0 z-10">Qty</th>
+                      <th className="table-header sticky top-0 z-10">Rate</th>
+                      <th className="table-header sticky top-0 z-10">Tax %</th>
+                      <th className="table-header sticky top-0 z-10">Total</th>
                     </tr>
                   </thead>
                   <tbody>

@@ -3,6 +3,8 @@ import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
 import { useConfirm } from '../components/ConfirmDialog'
+import EmptyState from '../components/EmptyState'
+import { Landmark, Search as SearchIcon } from 'lucide-react'
 
 interface BankAccount {
   id: string
@@ -230,30 +232,31 @@ const CashBank = () => {
       {/* Accounts Table */}
       <div className="card">
         {filteredAccounts.length === 0 ? (
-          <div className="text-center py-12 text-gray-500">
-            <p className="text-lg mb-4">
-              {searchQuery ? 'No accounts match your search' : 'No accounts yet'}
-            </p>
-            {!searchQuery && (
-              <button
-                onClick={handleOpenModal}
-                className="btn btn-primary"
-              >
-                Add Your First Account
-              </button>
-            )}
-          </div>
+          searchQuery ? (
+            <EmptyState
+              icon={SearchIcon}
+              title="No accounts match your search"
+              description={`Nothing matched "${searchQuery}".`}
+            />
+          ) : (
+            <EmptyState
+              icon={Landmark}
+              title="No accounts yet"
+              description="Add your cash box and bank accounts to record deposits, withdrawals, and transfers."
+              action={{ label: '+ Add your first account', onClick: handleOpenModal }}
+            />
+          )
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">
               <thead>
                 <tr>
-                  <th className="table-header">Name</th>
-                  <th className="table-header">Type</th>
-                  <th className="table-header">Account Number</th>
-                  <th className="table-header">Bank Name</th>
-                  <th className="table-header">Current Balance</th>
-                  <th className="table-header">Actions</th>
+                  <th className="table-header sticky top-0 z-10">Name</th>
+                  <th className="table-header sticky top-0 z-10">Type</th>
+                  <th className="table-header sticky top-0 z-10">Account Number</th>
+                  <th className="table-header sticky top-0 z-10">Bank Name</th>
+                  <th className="table-header sticky top-0 z-10">Current Balance</th>
+                  <th className="table-header sticky top-0 z-10">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -263,8 +266,8 @@ const CashBank = () => {
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
                         account.type === 'CASH'
-                          ? 'bg-green-100 text-green-700'
-                          : 'bg-blue-100 text-blue-700'
+                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                       }`}>
                         {account.type}
                       </span>
