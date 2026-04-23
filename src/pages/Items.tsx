@@ -153,17 +153,17 @@ const Items = () => {
             )}
           </div>
         ) : (
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[calc(100vh-280px)]">
           <table className="table">
             <thead>
               <tr>
-                <th className="table-header">Name</th>
-                <th className="table-header">SKU/HSN</th>
-                <th className="table-header">Type</th>
-                <th className="table-header">Sale Price</th>
-                <th className="table-header">Stock</th>
-                <th className="table-header">Unit</th>
-                <th className="table-header">Actions</th>
+                <th className="table-header sticky top-0 z-10">Name</th>
+                <th className="table-header sticky top-0 z-10">SKU/HSN</th>
+                <th className="table-header sticky top-0 z-10">Type</th>
+                <th className="table-header sticky top-0 z-10">Sale Price</th>
+                <th className="table-header sticky top-0 z-10">Stock</th>
+                <th className="table-header sticky top-0 z-10">Unit</th>
+                <th className="table-header sticky top-0 z-10">Actions</th>
               </tr>
             </thead>
             <tbody>

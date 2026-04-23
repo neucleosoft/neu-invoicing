@@ -244,16 +244,16 @@ const CashBank = () => {
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">
               <thead>
                 <tr>
-                  <th className="table-header">Name</th>
-                  <th className="table-header">Type</th>
-                  <th className="table-header">Account Number</th>
-                  <th className="table-header">Bank Name</th>
-                  <th className="table-header">Current Balance</th>
-                  <th className="table-header">Actions</th>
+                  <th className="table-header sticky top-0 z-10">Name</th>
+                  <th className="table-header sticky top-0 z-10">Type</th>
+                  <th className="table-header sticky top-0 z-10">Account Number</th>
+                  <th className="table-header sticky top-0 z-10">Bank Name</th>
+                  <th className="table-header sticky top-0 z-10">Current Balance</th>
+                  <th className="table-header sticky top-0 z-10">Actions</th>
                 </tr>
               </thead>
               <tbody>

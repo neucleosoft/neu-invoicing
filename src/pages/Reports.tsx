@@ -154,13 +154,13 @@ const Reports = () => {
                   </div>
                 )}
                 {activeReport === 'stock' && Array.isArray(reportData) && (
-                  <div className="overflow-x-auto">
+                  <div className="overflow-auto max-h-[calc(100vh-280px)]">
                     <table className="table w-full">
                       <thead>
                         <tr>
-                          <th className="table-header">Item</th>
-                          <th className="table-header">Current Stock</th>
-                          <th className="table-header">Low Stock Warning</th>
+                          <th className="table-header sticky top-0 z-10">Item</th>
+                          <th className="table-header sticky top-0 z-10">Current Stock</th>
+                          <th className="table-header sticky top-0 z-10">Low Stock Warning</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -176,12 +176,12 @@ const Reports = () => {
                   </div>
                 )}
                 {activeReport === 'receivables' && Array.isArray(reportData) && (
-                  <div className="overflow-x-auto">
+                  <div className="overflow-auto max-h-[calc(100vh-280px)]">
                     <table className="table w-full">
                       <thead>
                         <tr>
-                          <th className="table-header">Customer</th>
-                          <th className="table-header">Balance Due</th>
+                          <th className="table-header sticky top-0 z-10">Customer</th>
+                          <th className="table-header sticky top-0 z-10">Balance Due</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -196,12 +196,12 @@ const Reports = () => {
                   </div>
                 )}
                 {activeReport === 'payables' && Array.isArray(reportData) && (
-                  <div className="overflow-x-auto">
+                  <div className="overflow-auto max-h-[calc(100vh-280px)]">
                     <table className="table w-full">
                       <thead>
                         <tr>
-                          <th className="table-header">Supplier</th>
-                          <th className="table-header">Balance Due</th>
+                          <th className="table-header sticky top-0 z-10">Supplier</th>
+                          <th className="table-header sticky top-0 z-10">Balance Due</th>
                         </tr>
                       </thead>
                       <tbody>

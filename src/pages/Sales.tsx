@@ -477,17 +477,17 @@ const Sales = () => {
             )}
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">
               <thead>
                 <tr>
-                  <th className="table-header">Invoice #</th>
-                  <th className="table-header">Date</th>
-                  <th className="table-header">Party</th>
-                  <th className="table-header">Type</th>
-                  <th className="table-header">Amount</th>
-                  <th className="table-header">Status</th>
-                  <th className="table-header">Actions</th>
+                  <th className="table-header sticky top-0 z-10">Invoice #</th>
+                  <th className="table-header sticky top-0 z-10">Date</th>
+                  <th className="table-header sticky top-0 z-10">Party</th>
+                  <th className="table-header sticky top-0 z-10">Type</th>
+                  <th className="table-header sticky top-0 z-10">Amount</th>
+                  <th className="table-header sticky top-0 z-10">Status</th>
+                  <th className="table-header sticky top-0 z-10">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -961,12 +961,12 @@ const Sales = () => {
                 <table className="table w-full">
                   <thead>
                     <tr>
-                      <th className="table-header">Item</th>
-                      <th className="table-header">HSN/SKU</th>
-                      <th className="table-header">Qty</th>
-                      <th className="table-header">Rate</th>
-                      <th className="table-header">Tax %</th>
-                      <th className="table-header">Total</th>
+                      <th className="table-header sticky top-0 z-10">Item</th>
+                      <th className="table-header sticky top-0 z-10">HSN/SKU</th>
+                      <th className="table-header sticky top-0 z-10">Qty</th>
+                      <th className="table-header sticky top-0 z-10">Rate</th>
+                      <th className="table-header sticky top-0 z-10">Tax %</th>
+                      <th className="table-header sticky top-0 z-10">Total</th>
                     </tr>
                   </thead>
                   <tbody>

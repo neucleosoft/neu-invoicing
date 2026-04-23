@@ -130,16 +130,16 @@ const Payments = () => {
 
       {/* Payments Table */}
       <div className="card">
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[calc(100vh-280px)]">
           <table className="table">
             <thead>
               <tr>
-                <th className="table-header">Date</th>
-                <th className="table-header">Type</th>
-                <th className="table-header">Party</th>
-                <th className="table-header">Amount</th>
-                <th className="table-header">Mode</th>
-                <th className="table-header">Notes</th>
+                <th className="table-header sticky top-0 z-10">Date</th>
+                <th className="table-header sticky top-0 z-10">Type</th>
+                <th className="table-header sticky top-0 z-10">Party</th>
+                <th className="table-header sticky top-0 z-10">Amount</th>
+                <th className="table-header sticky top-0 z-10">Mode</th>
+                <th className="table-header sticky top-0 z-10">Notes</th>
               </tr>
             </thead>
             <tbody>
