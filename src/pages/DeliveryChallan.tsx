@@ -19,6 +19,10 @@ interface Challan {
   vehicleNumber?: string
   notes?: string
   convertedToInvoiceId?: string
+  poNumber?: string
+  ewayBillNo?: string
+  warrantyPeriod?: string
+  dispatchedThrough?: string
   party?: {
     name: string
     email?: string
@@ -35,6 +39,7 @@ interface Challan {
     taxRate: number
     discount: number
     total: number
+    hsnCode?: string
   }>
 }
 
@@ -49,13 +54,17 @@ interface Item {
   name: string
   salePrice: number
   taxRate: number
+  hsnCode?: string
+  skuHsn?: string
 }
 
 interface ChallanItem {
   itemId: string
+  hsnCode: string
   quantity: number
   rate: number
   taxRate: number
+  discount: number
   amount: number
 }
 
@@ -72,11 +81,18 @@ const DeliveryChallan = () => {
   // Form state
   const [formData, setFormData] = useState({
     partyId: '',
+    challanNumber: '',
     challanDate: new Date().toISOString().split('T')[0],
+    status: 'PENDING' as string,
     transportMode: '',
     vehicleNumber: '',
-    notes: ''
+    notes: '',
+    poNumber: '',
+    ewayBillNo: '',
+    warrantyPeriod: '',
+    dispatchedThrough: '',
   })
+  const [showAdditionalFields, setShowAdditionalFields] = useState(false)
 
   const [challanItems, setChallanItems] = useState<ChallanItem[]>([])
   const toast = useToast()
@@ -179,6 +195,14 @@ const DeliveryChallan = () => {
     }
   }
 
+  const handleNewChallan = async () => {
+    const result = await window.electronAPI.challan.generateChallanNumber()
+    if (result.success) {
+      setFormData(prev => ({ ...prev, challanNumber: result.data || '' }))
+    }
+    setShowModal(true)
+  }
+
   const handleEdit = async (challan: Challan) => {
     const result = await window.electronAPI.challan.getById(challan.id)
     if (result.success && result.data) {
@@ -186,17 +210,36 @@ const DeliveryChallan = () => {
       setEditingChallan(fullChallan)
       setFormData({
         partyId: fullChallan.party?.id || fullChallan.partyId || '',
+        challanNumber: fullChallan.challanNumber || '',
         challanDate: new Date(fullChallan.challanDate).toISOString().split('T')[0],
+        status: fullChallan.status || 'PENDING',
         transportMode: fullChallan.transportMode || '',
         vehicleNumber: fullChallan.vehicleNumber || '',
-        notes: fullChallan.notes || ''
+        notes: fullChallan.notes || '',
+        poNumber: fullChallan.poNumber || '',
+        ewayBillNo: fullChallan.ewayBillNo || '',
+        warrantyPeriod: fullChallan.warrantyPeriod || '',
+        dispatchedThrough: fullChallan.dispatchedThrough || '',
       })
+      // Auto-expand additional fields if any of them have values
+      if (
+        fullChallan.transportMode ||
+        fullChallan.vehicleNumber ||
+        fullChallan.poNumber ||
+        fullChallan.ewayBillNo ||
+        fullChallan.warrantyPeriod ||
+        fullChallan.dispatchedThrough
+      ) {
+        setShowAdditionalFields(true)
+      }
       setChallanItems(fullChallan.items?.map((item: any) => ({
         itemId: item.item?.id || item.itemId,
+        hsnCode: item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '',
         quantity: item.quantity,
         rate: item.rate,
         taxRate: item.taxRate,
-        amount: item.total
+        discount: item.discount || 0,
+        amount: item.total,
       })) || [])
       setShowModal(true)
     }
@@ -209,10 +252,12 @@ const DeliveryChallan = () => {
     }
     setChallanItems([...challanItems, {
       itemId: '',
+      hsnCode: '',
       quantity: 1,
       rate: 0,
       taxRate: 0,
-      amount: 0
+      discount: 0,
+      amount: 0,
     }])
   }
 
@@ -220,20 +265,22 @@ const DeliveryChallan = () => {
     const newItems = [...challanItems]
     newItems[index] = { ...newItems[index], [field]: value }
 
-    // If item selected, populate rate and tax
+    // If item selected, populate rate, tax, and HSN code
     if (field === 'itemId') {
       const item = items.find(i => i.id === value)
       if (item) {
         newItems[index].rate = item.salePrice
         newItems[index].taxRate = item.taxRate
+        newItems[index].hsnCode = item.hsnCode || item.skuHsn || ''
       }
     }
 
-    // Calculate amount
+    // Calculate amount: (qty * rate - discount) * (1 + taxRate/100)
     const qty = newItems[index].quantity || 0
     const rate = newItems[index].rate || 0
+    const discount = newItems[index].discount || 0
     const taxRate = newItems[index].taxRate || 0
-    newItems[index].amount = qty * rate * (1 + taxRate / 100)
+    newItems[index].amount = (qty * rate - discount) * (1 + taxRate / 100)
 
     setChallanItems(newItems)
   }
@@ -246,14 +293,16 @@ const DeliveryChallan = () => {
     const subtotal = challanItems.reduce((sum, item) => {
       const qty = item.quantity || 0
       const rate = item.rate || 0
-      return sum + (qty * rate)
+      const discount = item.discount || 0
+      return sum + (qty * rate - discount)
     }, 0)
 
     const taxAmount = challanItems.reduce((sum, item) => {
       const qty = item.quantity || 0
       const rate = item.rate || 0
+      const discount = item.discount || 0
       const taxRate = item.taxRate || 0
-      return sum + (qty * rate * taxRate / 100)
+      return sum + ((qty * rate - discount) * taxRate / 100)
     }, 0)
 
     const total = subtotal + taxAmount
@@ -278,7 +327,7 @@ const DeliveryChallan = () => {
       // Update existing challan
       const challanData = {
         ...formData,
-        items: challanItems
+        items: challanItems,
       }
 
       const result = await window.electronAPI.challan.update(editingChallan.id, challanData)
@@ -292,17 +341,10 @@ const DeliveryChallan = () => {
         toast.error('Failed to update challan: ' + (result.error || 'Unknown error'))
       }
     } else {
-      // Create new challan
-      const challanNumResult = await window.electronAPI.challan.generateChallanNumber()
-      if (!challanNumResult.success) {
-        toast.error('Failed to generate challan number')
-        return
-      }
-
+      // Create new challan — challanNumber already in formData (pre-filled or user-edited)
       const challanData = {
         ...formData,
-        challanNumber: challanNumResult.data,
-        items: challanItems
+        items: challanItems,
       }
 
       const result = await window.electronAPI.challan.create(challanData)
@@ -321,13 +363,20 @@ const DeliveryChallan = () => {
   const resetForm = () => {
     setFormData({
       partyId: '',
+      challanNumber: '',
       challanDate: new Date().toISOString().split('T')[0],
+      status: 'PENDING',
       transportMode: '',
       vehicleNumber: '',
-      notes: ''
+      notes: '',
+      poNumber: '',
+      ewayBillNo: '',
+      warrantyPeriod: '',
+      dispatchedThrough: '',
     })
     setChallanItems([])
     setEditingChallan(null)
+    setShowAdditionalFields(false)
   }
 
   const totals = calculateTotals()
@@ -347,7 +396,7 @@ const DeliveryChallan = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Delivery Challans</h1>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={handleNewChallan}
           className="btn btn-primary"
         >
           + New Challan
@@ -379,7 +428,7 @@ const DeliveryChallan = () => {
               icon={Truck}
               title="No delivery challans yet"
               description="Generate challans for dispatched goods with transport details and vehicle tracking."
-              action={{ label: '+ Create your first challan', onClick: () => setShowModal(true) }}
+              action={{ label: '+ Create your first challan', onClick: handleNewChallan }}
             />
           )
         ) : (
@@ -462,7 +511,7 @@ const DeliveryChallan = () => {
       {/* Create/Edit Challan Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">{editingChallan ? 'Edit Delivery Challan' : 'Create New Delivery Challan'}</h2>
@@ -474,6 +523,18 @@ const DeliveryChallan = () => {
               <form onSubmit={handleSubmit} className="space-y-6">
                 {/* Basic Info */}
                 <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Challan Number *</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={formData.challanNumber}
+                      onChange={(e) => setFormData({...formData, challanNumber: e.target.value})}
+                      placeholder="Auto-generated"
+                      required
+                    />
+                  </div>
+
                   <div>
                     <label className="label">Customer *</label>
                     <select
@@ -490,6 +551,18 @@ const DeliveryChallan = () => {
                   </div>
 
                   <div>
+                    <label className="label">Status *</label>
+                    <select
+                      className="input"
+                      value={formData.status}
+                      onChange={(e) => setFormData({...formData, status: e.target.value})}
+                    >
+                      <option value="PENDING">Pending</option>
+                      <option value="DELIVERED">Delivered</option>
+                    </select>
+                  </div>
+
+                  <div>
                     <label className="label">Challan Date *</label>
                     <input
                       type="date"
@@ -497,32 +570,6 @@ const DeliveryChallan = () => {
                       value={formData.challanDate}
                       onChange={(e) => setFormData({...formData, challanDate: e.target.value})}
                       required
-                    />
-                  </div>
-
-                  <div>
-                    <label className="label">Transport Mode</label>
-                    <select
-                      className="input"
-                      value={formData.transportMode}
-                      onChange={(e) => setFormData({...formData, transportMode: e.target.value})}
-                    >
-                      <option value="">Select Mode</option>
-                      <option value="Road">Road</option>
-                      <option value="Rail">Rail</option>
-                      <option value="Air">Air</option>
-                      <option value="Ship">Ship</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="label">Vehicle Number</label>
-                    <input
-                      type="text"
-                      className="input"
-                      value={formData.vehicleNumber}
-                      onChange={(e) => setFormData({...formData, vehicleNumber: e.target.value})}
-                      placeholder="e.g., MH-12-AB-1234"
                     />
                   </div>
                 </div>
@@ -562,6 +609,17 @@ const DeliveryChallan = () => {
                             </select>
                           </div>
 
+                          <div className="w-32">
+                            <label className="label text-xs">HSN/SKU</label>
+                            <input
+                              type="text"
+                              className="input"
+                              value={item.hsnCode}
+                              onChange={(e) => updateChallanItem(index, 'hsnCode', e.target.value)}
+                              placeholder="HSN/SKU"
+                            />
+                          </div>
+
                           <div className="w-24">
                             <label className="label text-xs">Qty</label>
                             <NumberInput
@@ -581,6 +639,16 @@ const DeliveryChallan = () => {
                               onChange={(val) => updateChallanItem(index, 'rate', val)}
                               min={0}
                               required
+                            />
+                          </div>
+
+                          <div className="w-24">
+                            <label className="label text-xs">Disc</label>
+                            <NumberInput
+                              className="input"
+                              value={item.discount}
+                              onChange={(val) => updateChallanItem(index, 'discount', val)}
+                              min={0}
                             />
                           </div>
 
@@ -647,6 +715,69 @@ const DeliveryChallan = () => {
                     onChange={(e) => setFormData({...formData, notes: e.target.value})}
                     placeholder="Internal notes..."
                   />
+                </div>
+
+                {/* Additional Fields (collapsible) */}
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdditionalFields(!showAdditionalFields)}
+                    className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-800"
+                  >
+                    <span className={`transform transition-transform ${showAdditionalFields ? 'rotate-180' : ''}`}>
+                      ▼
+                    </span>
+                    Additional Fields
+                  </button>
+
+                  {showAdditionalFields && (
+                    <div className="grid grid-cols-2 gap-4 mt-3 p-4 bg-gray-50 rounded-lg">
+                      <div>
+                        <label className="label">P.O. Number</label>
+                        <input type="text" className="input" value={formData.poNumber}
+                          onChange={(e) => setFormData({...formData, poNumber: e.target.value})}
+                          placeholder="Customer's purchase order number" />
+                      </div>
+                      <div>
+                        <label className="label">e-Way Bill No</label>
+                        <input type="text" className="input" value={formData.ewayBillNo}
+                          onChange={(e) => setFormData({...formData, ewayBillNo: e.target.value})}
+                          placeholder="e-Way Bill number" />
+                      </div>
+                      <div>
+                        <label className="label">Vehicle Number</label>
+                        <input type="text" className="input" value={formData.vehicleNumber}
+                          onChange={(e) => setFormData({...formData, vehicleNumber: e.target.value})}
+                          placeholder="e.g., MH-12-AB-1234" />
+                      </div>
+                      <div>
+                        <label className="label">Warranty Period</label>
+                        <input type="text" className="input" value={formData.warrantyPeriod}
+                          onChange={(e) => setFormData({...formData, warrantyPeriod: e.target.value})}
+                          placeholder="e.g. 12 Months" />
+                      </div>
+                      <div>
+                        <label className="label">Dispatched Through</label>
+                        <input type="text" className="input" value={formData.dispatchedThrough}
+                          onChange={(e) => setFormData({...formData, dispatchedThrough: e.target.value})}
+                          placeholder="Transport company / courier" />
+                      </div>
+                      <div>
+                        <label className="label">Transport Mode</label>
+                        <select
+                          className="input"
+                          value={formData.transportMode}
+                          onChange={(e) => setFormData({...formData, transportMode: e.target.value})}
+                        >
+                          <option value="">Select Mode</option>
+                          <option value="Road">Road</option>
+                          <option value="Rail">Rail</option>
+                          <option value="Air">Air</option>
+                          <option value="Ship">Ship</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* Actions */}
