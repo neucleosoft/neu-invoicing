@@ -76,8 +76,8 @@ const Reports = () => {
                 onClick={() => setActiveReport(report.id as any)}
                 className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
                   activeReport === report.id
-                    ? 'bg-primary-50 text-primary-700 font-medium'
-                    : 'text-gray-700 hover:bg-gray-50'
+                    ? 'bg-primary-50 text-primary-700 font-medium dark:bg-primary-900/30 dark:text-primary-300'
+                    : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/50'
                 }`}
               >
                 <span className="text-xl">{report.icon}</span>
@@ -136,10 +136,10 @@ const Reports = () => {
           </div>
 
           {/* Report Preview Area */}
-          <div className="mt-6 p-6 bg-gray-50 rounded-lg">
+          <div className="mt-6 p-6 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
             {!reportData ? (
               <div className="text-center py-8">
-                <p className="text-gray-600">
+                <p className="text-gray-600 dark:text-gray-400">
                   Configure filters above and click "Generate Report" to view the report.
                 </p>
               </div>

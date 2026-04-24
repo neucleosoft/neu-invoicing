@@ -76,7 +76,7 @@ export default function CommandPalette({ open, onOpenChange }: CommandPalettePro
             className="w-full px-4 py-3 text-sm bg-transparent border-b border-gray-200 dark:border-gray-700 focus:outline-none text-gray-900 dark:text-gray-100 placeholder-gray-400"
           />
           <Command.List className="max-h-80 overflow-y-auto p-2">
-            <Command.Empty className="px-3 py-6 text-sm text-center text-gray-500">
+            <Command.Empty className="px-3 py-6 text-sm text-center text-gray-500 dark:text-gray-400">
               No results found.
             </Command.Empty>
 

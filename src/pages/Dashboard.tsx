@@ -159,7 +159,7 @@ const Dashboard = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
+        <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
         <div className="flex space-x-3">
           <Link to="/sales" className="btn btn-primary">+ New Invoice</Link>
           <Link to="/purchase" className="btn btn-secondary">+ New Purchase</Link>
@@ -270,10 +270,10 @@ const Dashboard = () => {
               <p className="text-gray-500 text-center py-8">No invoices yet</p>
             ) : (
               recentInvoices.map((invoice) => (
-                <div key={invoice.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div key={invoice.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                   <div>
                     <p className="font-medium">{invoice.invoiceNumber}</p>
-                    <p className="text-sm text-gray-600">{invoice.party?.name}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{invoice.party?.name}</p>
                   </div>
                   <div className="text-right">
                     <p className="font-medium">{formatCurrency(invoice.totalAmount)}</p>
@@ -371,19 +371,19 @@ const Dashboard = () => {
       <div className="card">
         <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Link to="/parties" className="flex flex-col items-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+          <Link to="/parties" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <span className="text-3xl mb-2">👥</span>
             <span className="text-sm font-medium">Add Party</span>
           </Link>
-          <Link to="/items" className="flex flex-col items-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+          <Link to="/items" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <span className="text-3xl mb-2">📦</span>
             <span className="text-sm font-medium">Add Item</span>
           </Link>
-          <Link to="/payments" className="flex flex-col items-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+          <Link to="/payments" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <span className="text-3xl mb-2">💳</span>
             <span className="text-sm font-medium">Record Payment</span>
           </Link>
-          <Link to="/reports" className="flex flex-col items-center p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+          <Link to="/reports" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <span className="text-3xl mb-2">📊</span>
             <span className="text-sm font-medium">View Reports</span>
           </Link>

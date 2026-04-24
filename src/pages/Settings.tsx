@@ -151,8 +151,8 @@ const Settings = () => {
                 onClick={() => setActiveTab(tab.id)}
                 className={`w-full text-left px-4 py-3 font-medium rounded-lg transition-colors ${
                   activeTab === tab.id
-                    ? 'bg-primary-50 text-primary-700'
-                    : 'text-gray-700 hover:bg-gray-50'
+                    ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
+                    : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/50'
                 }`}
               >
                 {tab.label}
@@ -334,7 +334,7 @@ const Settings = () => {
           {activeTab === 'templates' && (
             <>
               <h2 className="text-2xl font-bold mb-2">Invoice Templates</h2>
-              <p className="text-gray-600 mb-6">Choose a template style for your invoices and quotations</p>
+              <p className="text-gray-600 dark:text-gray-400 mb-6">Choose a template style for your invoices and quotations</p>
 
               {templateLoading ? (
                 <div className="text-center py-8">Loading templates...</div>
@@ -393,7 +393,7 @@ const Settings = () => {
                               </span>
                             )}
                           </div>
-                          <p className="text-sm text-gray-500">{info.description}</p>
+                          <p className="text-sm text-gray-500 dark:text-gray-400">{info.description}</p>
                         </div>
 
                         {/* Selected indicator */}
@@ -410,9 +410,9 @@ const Settings = () => {
                 </div>
               )}
 
-              <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                <h3 className="font-semibold text-blue-800 mb-1">Template Preview</h3>
-                <p className="text-sm text-blue-600">
+              <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <h3 className="font-semibold text-blue-800 dark:text-blue-300 mb-1">Template Preview</h3>
+                <p className="text-sm text-blue-600 dark:text-blue-400">
                   The selected template will be used when you download or preview invoices from the Sales page.
                   Each template has a unique design to match your business style.
                 </p>
@@ -425,10 +425,10 @@ const Settings = () => {
             <>
               <h2 className="text-2xl font-bold mb-6">Tax Settings</h2>
               <div className="space-y-4">
-                <p className="text-gray-600">
+                <p className="text-gray-600 dark:text-gray-400">
                   Tax rates are configured per item. Go to the Items page to set tax rates for individual products and services.
                 </p>
-                <div className="bg-gray-50 p-4 rounded-lg">
+                <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Common GST Rates in India</h3>
                   <div className="grid grid-cols-2 gap-2 text-sm">
                     <div className="flex justify-between">
@@ -458,9 +458,9 @@ const Settings = () => {
             <>
               <h2 className="text-2xl font-bold mb-6">Data & Backup</h2>
               <div className="space-y-6">
-                <div className="bg-gray-50 p-4 rounded-lg">
+                <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Google Drive Sync</h3>
-                  <p className="text-sm text-gray-600 mb-4">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
                     Your data is automatically synced to Google Drive when you're signed in.
                     This ensures your data is backed up and accessible across devices.
                   </p>
@@ -469,9 +469,9 @@ const Settings = () => {
                   </button>
                 </div>
 
-                <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-                  <h3 className="font-semibold text-yellow-800 mb-2">Local Database</h3>
-                  <p className="text-sm text-yellow-700">
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                  <h3 className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Local Database</h3>
+                  <p className="text-sm text-yellow-700 dark:text-yellow-300">
                     Your data is stored locally in the app's data folder. The Google Drive sync provides an additional
                     backup layer for your important business data.
                   </p>

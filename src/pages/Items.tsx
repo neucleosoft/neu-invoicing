@@ -138,7 +138,7 @@ const Items = () => {
           className="input w-full pl-10"
         />
         <svg
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -195,11 +195,11 @@ const Items = () => {
                   <td className="table-cell">{formatCurrency(item.salePrice)}</td>
                   <td className="table-cell">
                     {item.trackStock ? (
-                      <span className={item.currentStock <= item.lowStockWarning ? 'text-red-600 font-medium' : ''}>
+                      <span className={item.currentStock <= item.lowStockWarning ? 'text-red-600 dark:text-red-400 font-medium' : ''}>
                         {item.currentStock}
                       </span>
                     ) : (
-                      <span className="text-gray-400">N/A</span>
+                      <span className="text-gray-400 dark:text-gray-500">N/A</span>
                     )}
                   </td>
                   <td className="table-cell">{item.unit}</td>
@@ -222,7 +222,7 @@ const Items = () => {
       {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold mb-4">{editingItem ? 'Edit' : 'Add'} Item</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
