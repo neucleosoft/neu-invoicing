@@ -908,10 +908,10 @@ const Sales = () => {
                           placeholder="Customer's purchase order number" />
                       </div>
                       <div>
-                        <label className="label">e-Way Bill No</label>
+                        <label className="label">E-Way Bill No</label>
                         <input type="text" className="input" value={formData.ewayBillNo}
                           onChange={(e) => setFormData({...formData, ewayBillNo: e.target.value})}
-                          placeholder="e-Way Bill number" />
+                          placeholder="E-Way Bill number" />
                       </div>
                       <div>
                         <label className="label">Vehicle Number</label>
