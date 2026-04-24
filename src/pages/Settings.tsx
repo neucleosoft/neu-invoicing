@@ -171,7 +171,7 @@ const Settings = () => {
                 <div>
                   <label className="label">Company Logo</label>
                   <div className="flex items-start gap-4">
-                    <div className="w-32 h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg flex items-center justify-center bg-gray-50 dark:bg-gray-900/40 overflow-hidden">
+                    <div className="w-32 h-32 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 overflow-hidden">
                       {company?.logoPath && !logoMissing ? (
                         <img
                           src={`local-resource://${company.logoPath.replace(/\\/g, '/')}`}
@@ -179,12 +179,12 @@ const Settings = () => {
                           className="max-w-full max-h-full object-contain"
                         />
                       ) : (
-                        <span className="text-xs text-gray-400 dark:text-gray-500">No logo</span>
+                        <span className="text-xs text-gray-400">No logo</span>
                       )}
                     </div>
                     <div className="flex-1">
                       {logoMissing && company?.logoPath && (
-                        <p className="text-sm text-yellow-700 dark:text-yellow-300 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded p-2 mb-2">
+                        <p className="text-sm text-yellow-700 bg-yellow-50 border border-yellow-200 rounded p-2 mb-2">
                           Logo file is missing on this device. Re-upload to fix.
                         </p>
                       )}

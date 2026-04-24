@@ -62,6 +62,11 @@ export interface ChallanData extends PDFDocumentData {
   status: 'PENDING' | 'DELIVERED' | 'CONVERTED'
   transportMode?: string
   vehicleNumber?: string
+  // Additional fields (all optional)
+  poNumber?: string
+  ewayBillNo?: string
+  warrantyPeriod?: string
+  dispatchedThrough?: string
 }
 
 export interface InvoiceData extends PDFDocumentData {

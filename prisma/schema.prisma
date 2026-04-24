@@ -297,6 +297,11 @@ model DeliveryChallan {
   convertedToInvoiceId String?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
+  // Additional fields (all optional)
+  poNumber             String?
+  ewayBillNo           String?
+  warrantyPeriod       String?
+  dispatchedThrough    String?
   items                DeliveryChallanItem[]
 }
 
@@ -311,6 +316,7 @@ model DeliveryChallanItem {
   taxRate           Float           @default(0)
   discount          Float           @default(0)
   total             Float
+  hsnCode           String?
   createdAt         DateTime        @default(now())
 }
 

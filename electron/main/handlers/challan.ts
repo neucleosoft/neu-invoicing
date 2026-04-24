@@ -14,6 +14,18 @@ const getFiscalYear = (): string => {
   }
 }
 
+// Normalize challan number — pad last numeric segment to 2 digits
+// NS/DC/26-27/6 → NS/DC/26-27/06, NS/DC/26-27/06 stays NS/DC/26-27/06
+const normalizeChallanNumber = (num: string): string => {
+  const parts = num.trim().split('/')
+  const last = parts[parts.length - 1]
+  const parsed = parseInt(last)
+  if (!isNaN(parsed)) {
+    parts[parts.length - 1] = String(parsed).padStart(2, '0')
+  }
+  return parts.join('/')
+}
+
 export const setupChallanHandlers = () => {
   const prisma = getPrisma()
 
@@ -66,7 +78,14 @@ export const setupChallanHandlers = () => {
   // Create delivery challan
   ipcMain.handle('challan:create', async (_, data) => {
     try {
+      // Normalize challan number — pad last numeric segment to 2 digits
+      data.challanNumber = normalizeChallanNumber(data.challanNumber)
+
       const challan = await prisma.$transaction(async (tx: any) => {
+        // Check for duplicate challan number
+        const existing = await tx.deliveryChallan.findUnique({ where: { challanNumber: data.challanNumber } })
+        if (existing) throw new Error(`Challan number ${data.challanNumber} already exists`)
+
         // Calculate totals
         let subtotal = 0
         let taxAmount = 0
@@ -90,7 +109,11 @@ export const setupChallanHandlers = () => {
             transportMode: data.transportMode || null,
             vehicleNumber: data.vehicleNumber || null,
             notes: data.notes || null,
-            status: 'PENDING',
+            status: data.status || 'PENDING',
+            poNumber: data.poNumber || null,
+            ewayBillNo: data.ewayBillNo || null,
+            warrantyPeriod: data.warrantyPeriod || null,
+            dispatchedThrough: data.dispatchedThrough || null,
             items: {
               create: data.items.map((item: any) => {
                 const taxableAmount = item.quantity * item.rate - (item.discount || 0)
@@ -100,6 +123,7 @@ export const setupChallanHandlers = () => {
                   rate: item.rate,
                   discount: item.discount || 0,
                   taxRate: item.taxRate || 0,
+                  hsnCode: item.hsnCode || null,
                   total: taxableAmount + (taxableAmount * (item.taxRate || 0)) / 100
                 }
               })
@@ -150,6 +174,11 @@ export const setupChallanHandlers = () => {
   // Update delivery challan
   ipcMain.handle('challan:update', async (_, id: string, data) => {
     try {
+      // Normalize challan number if provided
+      if (data.challanNumber) {
+        data.challanNumber = normalizeChallanNumber(data.challanNumber)
+      }
+
       const existingChallan = await prisma.deliveryChallan.findUnique({
         where: { id },
         include: { items: true }
@@ -157,6 +186,12 @@ export const setupChallanHandlers = () => {
 
       if (!existingChallan) {
         throw new Error('Delivery challan not found')
+      }
+
+      // Check for duplicate if challan number changed
+      if (data.challanNumber && data.challanNumber !== existingChallan.challanNumber) {
+        const duplicate = await prisma.deliveryChallan.findUnique({ where: { challanNumber: data.challanNumber } })
+        if (duplicate) throw new Error(`Challan number ${data.challanNumber} already exists`)
       }
 
       // Calculate new totals
@@ -180,6 +215,7 @@ export const setupChallanHandlers = () => {
       const challan = await prisma.deliveryChallan.update({
         where: { id },
         data: {
+          challanNumber: data.challanNumber || existingChallan.challanNumber,
           challanDate: new Date(data.challanDate),
           partyId: data.partyId,
           subtotal,
@@ -189,6 +225,10 @@ export const setupChallanHandlers = () => {
           vehicleNumber: data.vehicleNumber || null,
           notes: data.notes || null,
           status: data.status || existingChallan.status,
+          poNumber: data.poNumber || null,
+          ewayBillNo: data.ewayBillNo || null,
+          warrantyPeriod: data.warrantyPeriod || null,
+          dispatchedThrough: data.dispatchedThrough || null,
           items: {
             create: data.items.map((item: any) => {
               const taxableAmount = item.quantity * item.rate - (item.discount || 0)
@@ -198,6 +238,7 @@ export const setupChallanHandlers = () => {
                 rate: item.rate,
                 discount: item.discount || 0,
                 taxRate: item.taxRate || 0,
+                hsnCode: item.hsnCode || null,
                 total: taxableAmount + (taxableAmount * (item.taxRate || 0)) / 100
               }
             })
