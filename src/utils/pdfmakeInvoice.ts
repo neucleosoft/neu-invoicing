@@ -374,9 +374,9 @@ function buildItemsSection(inv: InvoiceData, isInter: boolean, taxGroups: Return
 /** Returns an array — empty if no fields, or [section] if fields exist */
 function buildAdditionalFieldsSection(inv: InvoiceData): Content[] {
   const fields: { label: string; value: string }[] = []
-  if (inv.ewayBillNo) fields.push({ label: 'e-Way Bill No', value: inv.ewayBillNo })
-  if (inv.vehicleNumber) fields.push({ label: 'Vehicle Number', value: inv.vehicleNumber })
+  if (inv.ewayBillNo) fields.push({ label: 'E-Way Bill No', value: inv.ewayBillNo })
   if (inv.warrantyPeriod) fields.push({ label: 'Warranty Period', value: inv.warrantyPeriod })
+  if (inv.vehicleNumber) fields.push({ label: 'Vehicle Number', value: inv.vehicleNumber })
   if (inv.dispatchedThrough) fields.push({ label: 'Dispatched Through', value: inv.dispatchedThrough })
 
   if (fields.length === 0) return []
@@ -404,7 +404,7 @@ function buildAdditionalFieldsSection(inv: InvoiceData): Content[] {
     },
     layout: {
       hLineWidth: (i: number) => i === 0 ? 0 : 0.5,
-      vLineWidth: (i: number) => (i === 0 || i === 4) ? 0.5 : 0,
+      vLineWidth: (i: number) => (i === 0 || i === 2 || i === 4) ? 0.5 : 0,
       hLineColor: () => '#000',
       vLineColor: () => '#000',
       paddingLeft: () => 4,
