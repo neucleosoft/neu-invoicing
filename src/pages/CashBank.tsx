@@ -275,7 +275,7 @@ const CashBank = () => {
                     <td className="table-cell">{account.accountNumber || '-'}</td>
                     <td className="table-cell">{account.bankName || '-'}</td>
                     <td className="table-cell font-medium">
-                      <span className={account.currentBalance >= 0 ? 'text-green-600' : 'text-red-600'}>
+                      <span className={account.currentBalance >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
                         {formatCurrency(Math.abs(account.currentBalance))}
                         {account.currentBalance < 0 && ' (-)'}
                       </span>
@@ -311,7 +311,7 @@ const CashBank = () => {
       {/* Add/Edit Account Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg w-full max-w-lg max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">
@@ -319,7 +319,7 @@ const CashBank = () => {
                 </h2>
                 <button
                   onClick={() => { setShowModal(false); setEditingAccount(null); resetForm() }}
-                  className="text-gray-500 hover:text-gray-700 text-2xl"
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl"
                 >
                   x
                 </button>
@@ -421,24 +421,24 @@ const CashBank = () => {
       {/* Adjust Balance Modal */}
       {showAdjustModal && adjustingAccount && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg w-full max-w-md">
+          <div className="bg-white dark:bg-gray-800 rounded-lg w-full max-w-md">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">Adjust Balance</h2>
                 <button
                   onClick={() => { setShowAdjustModal(false); setAdjustingAccount(null) }}
-                  className="text-gray-500 hover:text-gray-700 text-2xl"
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl"
                 >
                   x
                 </button>
               </div>
 
-              <div className="mb-4 p-3 bg-gray-50 rounded-lg">
-                <p className="text-sm text-gray-600">Account</p>
+              <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
+                <p className="text-sm text-gray-600 dark:text-gray-400">Account</p>
                 <p className="font-medium">{adjustingAccount.name}</p>
-                <p className="text-sm text-gray-500 mt-1">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                   Current Balance:{' '}
-                  <span className={adjustingAccount.currentBalance >= 0 ? 'text-green-600' : 'text-red-600'}>
+                  <span className={adjustingAccount.currentBalance >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
                     {formatCurrency(Math.abs(adjustingAccount.currentBalance))}
                   </span>
                 </p>
@@ -453,7 +453,7 @@ const CashBank = () => {
                     onChange={(val) => setAdjustData({ ...adjustData, amount: val })}
                     placeholder="Positive to add, negative to subtract"
                   />
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                     Use positive value to add funds, negative to subtract.
                   </p>
                 </div>
@@ -470,13 +470,13 @@ const CashBank = () => {
                 </div>
 
                 {adjustData.amount !== 0 && (
-                  <div className="p-3 bg-gray-50 rounded-lg text-sm">
-                    <p className="text-gray-600">
+                  <div className="p-3 bg-gray-50 dark:bg-gray-900/40 rounded-lg text-sm">
+                    <p className="text-gray-600 dark:text-gray-400">
                       New Balance:{' '}
                       <span className={
                         (adjustingAccount.currentBalance + adjustData.amount) >= 0
-                          ? 'text-green-600 font-medium'
-                          : 'text-red-600 font-medium'
+                          ? 'text-green-600 dark:text-green-400 font-medium'
+                          : 'text-red-600 dark:text-red-400 font-medium'
                       }>
                         {formatCurrency(Math.abs(adjustingAccount.currentBalance + adjustData.amount))}
                       </span>

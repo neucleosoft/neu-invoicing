@@ -70,14 +70,14 @@ const Onboarding = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-primary-100 py-12 px-4">
+    <div className="min-h-screen bg-gradient-to-br from-primary-50 to-primary-100 dark:from-gray-900 dark:to-gray-800 py-12 px-4">
       <div className="max-w-2xl mx-auto">
         <div className="card">
           <div className="mb-8">
-            <h1 className="text-3xl font-bold text-gray-900 mb-2">
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-2">
               Welcome to neuInvoicing!
             </h1>
-            <p className="text-gray-600">
+            <p className="text-gray-600 dark:text-gray-400">
               Let's set up your business profile to get started
             </p>
           </div>
@@ -100,7 +100,7 @@ const Onboarding = () => {
               <label className="label">Business Logo</label>
               <div
                 onClick={handleLogoUpload}
-                className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-colors"
+                className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-4 text-center cursor-pointer hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
               >
                 {formData.logoPath ? (
                   <img
@@ -109,7 +109,7 @@ const Onboarding = () => {
                     className="max-h-24 mx-auto"
                   />
                 ) : (
-                  <div className="text-gray-500">
+                  <div className="text-gray-500 dark:text-gray-400">
                     <p className="text-sm">Click to upload logo</p>
                     <p className="text-xs mt-1">PNG, JPG (displayed on invoices)</p>
                   </div>
@@ -172,7 +172,7 @@ const Onboarding = () => {
               <label className="label">Signature</label>
               <div
                 onClick={handleSignatureUpload}
-                className="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-colors"
+                className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-4 text-center cursor-pointer hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-colors"
               >
                 {formData.signaturePath ? (
                   <img
@@ -181,7 +181,7 @@ const Onboarding = () => {
                     className="max-h-24 mx-auto"
                   />
                 ) : (
-                  <div className="text-gray-500">
+                  <div className="text-gray-500 dark:text-gray-400">
                     <p className="text-sm">Click to upload signature</p>
                     <p className="text-xs mt-1">PNG, JPG (used on invoices)</p>
                   </div>
@@ -244,7 +244,7 @@ const Onboarding = () => {
             </div>
 
             {error && (
-              <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+              <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
                 {error}
               </div>
             )}

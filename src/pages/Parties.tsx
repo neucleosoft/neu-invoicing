@@ -235,22 +235,22 @@ const Parties = () => {
     const balance = party.currentBalance
 
     if (balance === 0) {
-      return { label: '', color: 'text-gray-500', arrow: '' }
+      return { label: '', color: 'text-gray-500 dark:text-gray-400', arrow: '' }
     }
 
     if (party.type === 'CUSTOMER') {
       // Customer: positive = they owe us (To Collect), negative = we owe them (To Pay)
       if (balance > 0) {
-        return { label: 'To Collect', color: 'text-green-600', arrow: '\u2191' }
+        return { label: 'To Collect', color: 'text-green-600 dark:text-green-400', arrow: '\u2191' }
       } else {
-        return { label: 'To Pay', color: 'text-red-600', arrow: '\u2193' }
+        return { label: 'To Pay', color: 'text-red-600 dark:text-red-400', arrow: '\u2193' }
       }
     } else {
       // Supplier: positive = we owe them (To Pay), negative = they owe us (To Collect)
       if (balance > 0) {
-        return { label: 'To Pay', color: 'text-red-600', arrow: '\u2193' }
+        return { label: 'To Pay', color: 'text-red-600 dark:text-red-400', arrow: '\u2193' }
       } else {
-        return { label: 'To Collect', color: 'text-green-600', arrow: '\u2191' }
+        return { label: 'To Collect', color: 'text-green-600 dark:text-green-400', arrow: '\u2191' }
       }
     }
   }
@@ -271,7 +271,7 @@ const Parties = () => {
             key={tab}
             onClick={() => setFilter(tab as any)}
             className={`px-4 py-2 rounded-lg font-medium ${
-              filter === tab ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700'
+              filter === tab ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
             }`}
           >
             {tab}
@@ -289,7 +289,7 @@ const Parties = () => {
           className="input w-full pl-10"
         />
         <svg
-          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400"
+          className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -348,7 +348,7 @@ const Parties = () => {
                         <div>
                           <span className="font-medium">{party.name}</span>
                           {party.legalName && party.legalName !== party.name && (
-                            <span className="block text-xs text-gray-500">{party.legalName}</span>
+                            <span className="block text-xs text-gray-500 dark:text-gray-400">{party.legalName}</span>
                           )}
                         </div>
                       </div>
@@ -371,7 +371,7 @@ const Parties = () => {
                           )}
                         </div>
                       ) : (
-                        <span className="text-gray-400">-</span>
+                        <span className="text-gray-400 dark:text-gray-500">-</span>
                       )}
                     </td>
                     <td className="table-cell">{party.phone || '-'}</td>
@@ -409,12 +409,12 @@ const Parties = () => {
       {/* Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <h2 className="text-2xl font-bold mb-4">{editingParty ? 'Edit' : 'Add'} Party</h2>
             <form onSubmit={handleSubmit} className="space-y-4">
 
               {/* GST Lookup Section */}
-              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+              <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg border border-gray-200 dark:border-gray-700">
                 <label className="label font-semibold">GSTIN (GST Number)</label>
                 <div className="flex gap-2">
                   <div className="flex-1">
@@ -431,7 +431,7 @@ const Parties = () => {
                     />
                     {/* Validation feedback */}
                     {gstValidation && (
-                      <div className={`text-xs mt-1 ${gstValidation.valid ? 'text-green-600' : 'text-red-600'}`}>
+                      <div className={`text-xs mt-1 ${gstValidation.valid ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                         {gstValidation.valid
                           ? `Valid format - ${gstValidation.stateName}`
                           : gstValidation.error}
@@ -442,7 +442,7 @@ const Parties = () => {
 
                 {/* State auto-selection when GSTIN is valid */}
                 {gstValidation?.valid && gstValidation.stateCode && (
-                  <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-blue-700 text-sm flex items-center gap-2">
+                  <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded text-blue-700 dark:text-blue-300 text-sm flex items-center gap-2">
                     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                       <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                     </svg>

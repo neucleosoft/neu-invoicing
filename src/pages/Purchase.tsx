@@ -372,11 +372,11 @@ const Purchase = () => {
       {/* Create/Edit Purchase Bill Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">{editingBill ? 'Edit Purchase Bill' : 'Create New Purchase Bill'}</h2>
-                <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 hover:text-gray-700 text-2xl">
+                <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">
                   ×
                 </button>
               </div>
@@ -421,16 +421,16 @@ const Purchase = () => {
                   </div>
 
                   {billItems.length === 0 ? (
-                    <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed">
-                      <p className="text-gray-500 mb-2">No items added yet</p>
-                      <button type="button" onClick={addBillItem} className="text-primary-600 hover:text-primary-700">
+                    <div className="text-center py-8 bg-gray-50 dark:bg-gray-900/40 rounded-lg border-2 border-dashed">
+                      <p className="text-gray-500 dark:text-gray-400 mb-2">No items added yet</p>
+                      <button type="button" onClick={addBillItem} className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300">
                         Click "+ Add Item" to add your first item
                       </button>
                     </div>
                   ) : (
                     <div className="space-y-3">
                       {billItems.map((item, index) => (
-                        <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 rounded-lg">
+                        <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                           <div className="flex-1">
                             <label className="label text-xs">Item</label>
                             <select
@@ -492,7 +492,7 @@ const Purchase = () => {
                             <label className="label text-xs">Amount</label>
                             <input
                               type="text"
-                              className="input bg-gray-100"
+                              className="input bg-gray-100 dark:bg-gray-700"
                               value={formatCurrency(item.amount)}
                               readOnly
                             />
@@ -513,14 +513,14 @@ const Purchase = () => {
 
                 {/* Totals */}
                 {billItems.length > 0 && (
-                  <div className="bg-gray-50 p-4 rounded-lg">
+                  <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                     <div className="space-y-2 max-w-sm ml-auto">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Subtotal:</span>
+                        <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
                         <span className="font-medium">{formatCurrency(totals.subtotal)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Tax:</span>
+                        <span className="text-gray-600 dark:text-gray-400">Tax:</span>
                         <span className="font-medium">{formatCurrency(totals.taxAmount)}</span>
                       </div>
                       <div className="flex justify-between text-lg font-bold border-t pt-2">
@@ -568,11 +568,11 @@ const Purchase = () => {
       {/* View Purchase Bill Modal */}
       {showViewModal && viewingBill && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">Purchase Bill Details</h2>
-                <button onClick={() => { setShowViewModal(false); setViewingBill(null); }} className="text-gray-500 hover:text-gray-700 text-2xl">
+                <button onClick={() => { setShowViewModal(false); setViewingBill(null); }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">
                   ×
                 </button>
               </div>
@@ -580,11 +580,11 @@ const Purchase = () => {
               {/* Bill Header */}
               <div className="grid grid-cols-2 gap-6 mb-6">
                 <div>
-                  <p className="text-sm text-gray-500">Bill Number</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Bill Number</p>
                   <p className="font-semibold text-lg">{viewingBill.billNumber}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Status</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
                     viewingBill.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
                     viewingBill.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
@@ -594,17 +594,17 @@ const Purchase = () => {
                   </span>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Date</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Date</p>
                   <p className="font-medium">{new Date(viewingBill.billDate).toLocaleDateString()}</p>
                 </div>
               </div>
 
               {/* Supplier Info */}
-              <div className="bg-gray-50 p-4 rounded-lg mb-6">
-                <p className="text-sm text-gray-500 mb-1">Supplier</p>
+              <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Supplier</p>
                 <p className="font-semibold">{viewingBill.party?.name}</p>
-                {viewingBill.party?.phone && <p className="text-sm text-gray-600">{viewingBill.party.phone}</p>}
-                {viewingBill.party?.email && <p className="text-sm text-gray-600">{viewingBill.party.email}</p>}
+                {viewingBill.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingBill.party.phone}</p>}
+                {viewingBill.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingBill.party.email}</p>}
               </div>
 
               {/* Items */}
@@ -635,14 +635,14 @@ const Purchase = () => {
               </div>
 
               {/* Totals */}
-              <div className="bg-gray-50 p-4 rounded-lg mb-6">
+              <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
                 <div className="space-y-2 max-w-sm ml-auto">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Subtotal:</span>
+                    <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
                     <span className="font-medium">{formatCurrency(viewingBill.subtotal || 0)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Tax:</span>
+                    <span className="text-gray-600 dark:text-gray-400">Tax:</span>
                     <span className="font-medium">{formatCurrency(viewingBill.taxAmount || 0)}</span>
                   </div>
                   <div className="flex justify-between text-lg font-bold border-t pt-2">
@@ -651,11 +651,11 @@ const Purchase = () => {
                   </div>
                   {viewingBill.amountPaid !== undefined && viewingBill.amountPaid > 0 && (
                     <>
-                      <div className="flex justify-between text-green-600">
+                      <div className="flex justify-between text-green-600 dark:text-green-400">
                         <span>Paid:</span>
                         <span>{formatCurrency(viewingBill.amountPaid)}</span>
                       </div>
-                      <div className="flex justify-between text-red-600 font-bold">
+                      <div className="flex justify-between text-red-600 dark:text-red-400 font-bold">
                         <span>Balance Due:</span>
                         <span>{formatCurrency(viewingBill.balanceDue || 0)}</span>
                       </div>
@@ -667,8 +667,8 @@ const Purchase = () => {
               {/* Notes */}
               {viewingBill.notes && (
                 <div className="mb-4">
-                  <p className="text-sm text-gray-500 mb-1">Notes</p>
-                  <p className="text-gray-700">{viewingBill.notes}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Notes</p>
+                  <p className="text-gray-700 dark:text-gray-300">{viewingBill.notes}</p>
                 </div>
               )}
 

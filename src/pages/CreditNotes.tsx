@@ -372,7 +372,7 @@ const CreditNotes = () => {
             key={tab}
             onClick={() => setFilter(tab)}
             className={`px-4 py-2 rounded-lg font-medium ${
-              filter === tab ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700'
+              filter === tab ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
             }`}
           >
             {tab === 'ALL' ? 'ALL' : tab === 'CREDIT_NOTE' ? 'CREDIT NOTE' : 'DEBIT NOTE'}
@@ -461,11 +461,11 @@ const CreditNotes = () => {
       {/* Create/Edit Note Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">{editingNote ? 'Edit Note' : 'Create New Note'}</h2>
-                <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 hover:text-gray-700 text-2xl">
+                <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">
                   ×
                 </button>
               </div>
@@ -550,16 +550,16 @@ const CreditNotes = () => {
                   </div>
 
                   {noteItems.length === 0 ? (
-                    <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed">
-                      <p className="text-gray-500 mb-2">No items added yet</p>
-                      <button type="button" onClick={addNoteItem} className="text-primary-600 hover:text-primary-700">
+                    <div className="text-center py-8 bg-gray-50 dark:bg-gray-900/40 rounded-lg border-2 border-dashed">
+                      <p className="text-gray-500 dark:text-gray-400 mb-2">No items added yet</p>
+                      <button type="button" onClick={addNoteItem} className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300">
                         Click "+ Add Item" to add your first item
                       </button>
                     </div>
                   ) : (
                     <div className="space-y-3">
                       {noteItems.map((item, index) => (
-                        <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 rounded-lg">
+                        <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                           <div className="flex-1">
                             <label className="label text-xs">Item</label>
                             <select
@@ -621,7 +621,7 @@ const CreditNotes = () => {
                             <label className="label text-xs">Amount</label>
                             <input
                               type="text"
-                              className="input bg-gray-100"
+                              className="input bg-gray-100 dark:bg-gray-700"
                               value={formatCurrency(item.amount)}
                               readOnly
                             />
@@ -642,14 +642,14 @@ const CreditNotes = () => {
 
                 {/* Totals */}
                 {noteItems.length > 0 && (
-                  <div className="bg-gray-50 p-4 rounded-lg">
+                  <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                     <div className="space-y-2 max-w-sm ml-auto">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Subtotal:</span>
+                        <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
                         <span className="font-medium">{formatCurrency(totals.subtotal)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Tax:</span>
+                        <span className="text-gray-600 dark:text-gray-400">Tax:</span>
                         <span className="font-medium">{formatCurrency(totals.taxAmount)}</span>
                       </div>
                       <div className="flex justify-between text-lg font-bold border-t pt-2">
@@ -697,11 +697,11 @@ const CreditNotes = () => {
       {/* View Note Modal */}
       {showViewModal && viewingNote && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">Note Details</h2>
-                <button onClick={() => { setShowViewModal(false); setViewingNote(null); }} className="text-gray-500 hover:text-gray-700 text-2xl">
+                <button onClick={() => { setShowViewModal(false); setViewingNote(null); }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">
                   ×
                 </button>
               </div>
@@ -709,11 +709,11 @@ const CreditNotes = () => {
               {/* Note Header */}
               <div className="grid grid-cols-2 gap-6 mb-6">
                 <div>
-                  <p className="text-sm text-gray-500">Note Number</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Note Number</p>
                   <p className="font-semibold text-lg">{viewingNote.noteNumber}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Type</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Type</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
                     viewingNote.type === 'CREDIT_NOTE' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                   }`}>
@@ -721,11 +721,11 @@ const CreditNotes = () => {
                   </span>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Date</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Date</p>
                   <p className="font-medium">{new Date(viewingNote.noteDate).toLocaleDateString()}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Status</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
                     viewingNote.status === 'ACTIVE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                   }`}>
@@ -735,20 +735,20 @@ const CreditNotes = () => {
               </div>
 
               {/* Party Info */}
-              <div className="bg-gray-50 p-4 rounded-lg mb-6">
-                <p className="text-sm text-gray-500 mb-1">Party</p>
+              <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Party</p>
                 <p className="font-semibold">{viewingNote.party?.name}</p>
-                {viewingNote.party?.phone && <p className="text-sm text-gray-600">{viewingNote.party.phone}</p>}
-                {viewingNote.party?.email && <p className="text-sm text-gray-600">{viewingNote.party.email}</p>}
-                {viewingNote.party?.billingAddress && <p className="text-sm text-gray-600">{viewingNote.party.billingAddress}</p>}
+                {viewingNote.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingNote.party.phone}</p>}
+                {viewingNote.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingNote.party.email}</p>}
+                {viewingNote.party?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingNote.party.billingAddress}</p>}
               </div>
 
               {/* Reference Invoice */}
               {viewingNote.referenceInvoice && (
-                <div className="bg-blue-50 p-4 rounded-lg mb-6">
-                  <p className="text-sm text-blue-600 mb-1">Reference Invoice</p>
+                <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg mb-6">
+                  <p className="text-sm text-blue-600 dark:text-blue-400 mb-1">Reference Invoice</p>
                   <p className="font-semibold">{viewingNote.referenceInvoice.invoiceNumber}</p>
-                  <div className="flex gap-4 mt-1 text-sm text-blue-700">
+                  <div className="flex gap-4 mt-1 text-sm text-blue-700 dark:text-blue-300">
                     <span>Total: {formatCurrency(viewingNote.referenceInvoice.totalAmount)}</span>
                     <span>Balance Due: {formatCurrency(viewingNote.referenceInvoice.balanceDue)}</span>
                   </div>
@@ -758,8 +758,8 @@ const CreditNotes = () => {
               {/* Reason */}
               {viewingNote.reason && (
                 <div className="mb-6">
-                  <p className="text-sm text-gray-500 mb-1">Reason</p>
-                  <p className="text-gray-700">{viewingNote.reason}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Reason</p>
+                  <p className="text-gray-700 dark:text-gray-300">{viewingNote.reason}</p>
                 </div>
               )}
 
@@ -793,14 +793,14 @@ const CreditNotes = () => {
               </div>
 
               {/* Totals */}
-              <div className="bg-gray-50 p-4 rounded-lg mb-6">
+              <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
                 <div className="space-y-2 max-w-sm ml-auto">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Subtotal:</span>
+                    <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
                     <span className="font-medium">{formatCurrency(viewingNote.subtotal || 0)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Tax:</span>
+                    <span className="text-gray-600 dark:text-gray-400">Tax:</span>
                     <span className="font-medium">{formatCurrency(viewingNote.taxAmount || 0)}</span>
                   </div>
                   <div className="flex justify-between text-lg font-bold border-t pt-2">
@@ -813,8 +813,8 @@ const CreditNotes = () => {
               {/* Notes */}
               {viewingNote.notes && (
                 <div className="mb-4">
-                  <p className="text-sm text-gray-500 mb-1">Notes</p>
-                  <p className="text-gray-700">{viewingNote.notes}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Notes</p>
+                  <p className="text-gray-700 dark:text-gray-300">{viewingNote.notes}</p>
                 </div>
               )}
 

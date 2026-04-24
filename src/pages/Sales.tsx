@@ -475,7 +475,7 @@ const Sales = () => {
             key={tab}
             onClick={() => setFilter(tab)}
             className={`px-4 py-2 rounded-lg font-medium ${
-              filter === tab ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700'
+              filter === tab ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
             }`}
           >
             {tab === 'PROFORMA_INVOICE' ? 'PI' : tab}
@@ -573,29 +573,29 @@ const Sales = () => {
                       <div className="flex items-center space-x-2">
                         <button
                           onClick={() => handleView(invoice.id)}
-                          className="text-primary-600 hover:text-primary-700"
+                          className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
                         >
                           View
                         </button>
                         <button
                           onClick={() => handleEdit(invoice)}
-                          className="text-green-600 hover:text-green-700"
+                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
                         >
                           Edit
                         </button>
                         <button
                           onClick={() => handleDownloadPDF(invoice.id)}
-                          className="text-blue-600 hover:text-blue-700 font-medium"
+                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
                           title="Download PDF"
                         >
                           PDF
                         </button>
                         {invoice.type === 'QUOTATION' && (
-                          <button onClick={() => handleConvertToInvoice(invoice.id)} className="text-purple-600 hover:text-purple-700">
+                          <button onClick={() => handleConvertToInvoice(invoice.id)} className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300">
                             Convert
                           </button>
                         )}
-                        <button onClick={() => handleDelete(invoice.id)} className="text-red-600 hover:text-red-700">
+                        <button onClick={() => handleDelete(invoice.id)} className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
                           Delete
                         </button>
                       </div>
@@ -611,13 +611,13 @@ const Sales = () => {
       {/* Create/Edit Invoice Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">
                   {editingInvoice ? 'Edit' : 'Create New'} {kindNames(formData.type).singular}
                 </h2>
-                <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 hover:text-gray-700 text-2xl">
+                <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-2xl">
                   ×
                 </button>
               </div>
@@ -711,8 +711,8 @@ const Sales = () => {
                   </div>
 
                   {invoiceItems.length === 0 ? (
-                    <div className="text-center py-8 bg-gray-50 rounded-lg border-2 border-dashed">
-                      <p className="text-gray-500 mb-2">No items added yet</p>
+                    <div className="text-center py-8 bg-gray-50 dark:bg-gray-900/40 rounded-lg border-2 border-dashed">
+                      <p className="text-gray-500 dark:text-gray-400 mb-2">No items added yet</p>
                       <button type="button" onClick={addInvoiceItem} className="text-primary-600 hover:text-primary-700">
                         Click "+ Add Item" to add your first item
                       </button>
@@ -720,7 +720,7 @@ const Sales = () => {
                   ) : (
                     <div className="space-y-3">
                       {invoiceItems.map((item, index) => (
-                        <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 rounded-lg">
+                        <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                           <div className="flex-1">
                             <label className="label text-xs">Item</label>
                             <select
@@ -793,7 +793,7 @@ const Sales = () => {
                             <label className="label text-xs">Amount</label>
                             <input
                               type="text"
-                              className="input bg-gray-100"
+                              className="input bg-gray-100 dark:bg-gray-700"
                               value={formatCurrency(item.amount)}
                               readOnly
                             />
@@ -814,14 +814,14 @@ const Sales = () => {
 
                 {/* Totals */}
                 {invoiceItems.length > 0 && (
-                  <div className="bg-gray-50 p-4 rounded-lg">
+                  <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                     <div className="space-y-2 max-w-sm ml-auto">
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Subtotal:</span>
+                        <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
                         <span className="font-medium">{formatCurrency(totals.subtotal)}</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-600">Tax:</span>
+                        <span className="text-gray-600 dark:text-gray-400">Tax:</span>
                         <span className="font-medium">{formatCurrency(totals.taxAmount)}</span>
                       </div>
                       <div className="flex justify-between text-lg font-bold border-t pt-2">
@@ -891,7 +891,7 @@ const Sales = () => {
                   <button
                     type="button"
                     onClick={() => setShowAdditionalFields(!showAdditionalFields)}
-                    className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-800"
+                    className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
                   >
                     <span className={`transform transition-transform ${showAdditionalFields ? 'rotate-180' : ''}`}>
                       ▼
@@ -900,7 +900,7 @@ const Sales = () => {
                   </button>
 
                   {showAdditionalFields && (
-                    <div className="grid grid-cols-2 gap-4 mt-3 p-4 bg-gray-50 rounded-lg">
+                    <div className="grid grid-cols-2 gap-4 mt-3 p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                       <div>
                         <label className="label">P.O. Number</label>
                         <input type="text" className="input" value={formData.poNumber}
@@ -960,11 +960,11 @@ const Sales = () => {
       {/* View Invoice Modal */}
       {showViewModal && viewingInvoice && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">Invoice Details</h2>
-                <button onClick={() => { setShowViewModal(false); setViewingInvoice(null); }} className="text-gray-500 hover:text-gray-700 text-2xl">
+                <button onClick={() => { setShowViewModal(false); setViewingInvoice(null); }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">
                   ×
                 </button>
               </div>
@@ -972,11 +972,11 @@ const Sales = () => {
               {/* Invoice Header */}
               <div className="grid grid-cols-2 gap-6 mb-6">
                 <div>
-                  <p className="text-sm text-gray-500">Invoice Number</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Invoice Number</p>
                   <p className="font-semibold text-lg">{viewingInvoice.invoiceNumber}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Type</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Type</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
                     viewingInvoice.type === 'INVOICE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
                   }`}>
@@ -984,11 +984,11 @@ const Sales = () => {
                   </span>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Date</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Date</p>
                   <p className="font-medium">{new Date(viewingInvoice.invoiceDate).toLocaleDateString()}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Status</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
                     viewingInvoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
                     viewingInvoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
@@ -1000,12 +1000,12 @@ const Sales = () => {
               </div>
 
               {/* Customer Info */}
-              <div className="bg-gray-50 p-4 rounded-lg mb-6">
-                <p className="text-sm text-gray-500 mb-1">Customer</p>
+              <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Customer</p>
                 <p className="font-semibold">{viewingInvoice.party?.name}</p>
-                {viewingInvoice.party?.phone && <p className="text-sm text-gray-600">{viewingInvoice.party.phone}</p>}
-                {viewingInvoice.party?.email && <p className="text-sm text-gray-600">{viewingInvoice.party.email}</p>}
-                {viewingInvoice.party?.billingAddress && <p className="text-sm text-gray-600">{viewingInvoice.party.billingAddress}</p>}
+                {viewingInvoice.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingInvoice.party.phone}</p>}
+                {viewingInvoice.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingInvoice.party.email}</p>}
+                {viewingInvoice.party?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingInvoice.party.billingAddress}</p>}
               </div>
 
               {/* Items */}
@@ -1038,14 +1038,14 @@ const Sales = () => {
               </div>
 
               {/* Totals */}
-              <div className="bg-gray-50 p-4 rounded-lg mb-6">
+              <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
                 <div className="space-y-2 max-w-sm ml-auto">
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Subtotal:</span>
+                    <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
                     <span className="font-medium">{formatCurrency(viewingInvoice.subtotal || 0)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-gray-600">Tax:</span>
+                    <span className="text-gray-600 dark:text-gray-400">Tax:</span>
                     <span className="font-medium">{formatCurrency(viewingInvoice.taxAmount || 0)}</span>
                   </div>
                   <div className="flex justify-between text-lg font-bold border-t pt-2">
@@ -1054,11 +1054,11 @@ const Sales = () => {
                   </div>
                   {viewingInvoice.amountPaid !== undefined && viewingInvoice.amountPaid > 0 && (
                     <>
-                      <div className="flex justify-between text-green-600">
+                      <div className="flex justify-between text-green-600 dark:text-green-400">
                         <span>Paid:</span>
                         <span>{formatCurrency(viewingInvoice.amountPaid)}</span>
                       </div>
-                      <div className="flex justify-between text-red-600 font-bold">
+                      <div className="flex justify-between text-red-600 dark:text-red-400 font-bold">
                         <span>Balance Due:</span>
                         <span>{formatCurrency(viewingInvoice.balanceDue || 0)}</span>
                       </div>
@@ -1070,8 +1070,8 @@ const Sales = () => {
               {/* Notes */}
               {viewingInvoice.notes && (
                 <div className="mb-4">
-                  <p className="text-sm text-gray-500 mb-1">Notes</p>
-                  <p className="text-gray-700">{viewingInvoice.notes}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Notes</p>
+                  <p className="text-gray-700 dark:text-gray-300">{viewingInvoice.notes}</p>
                 </div>
               )}
 

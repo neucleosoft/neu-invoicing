@@ -224,8 +224,8 @@ const GSTReports = () => {
       className={`p-6 rounded-xl border-2 text-left transition-all hover:shadow-lg hover:scale-[1.02] ${color}`}
     >
       <div className="text-4xl mb-3">{icon}</div>
-      <h3 className="text-lg font-bold text-gray-900 mb-1">{title}</h3>
-      <p className="text-sm text-gray-600">{description}</p>
+      <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 mb-1">{title}</h3>
+      <p className="text-sm text-gray-600 dark:text-gray-400">{description}</p>
     </button>
   )
 
@@ -239,12 +239,12 @@ const GSTReports = () => {
     value: number
     type?: 'default' | 'positive' | 'negative'
   }) => (
-    <div className="bg-white p-4 rounded-lg border">
-      <p className="text-sm text-gray-500 mb-1">{label}</p>
+    <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border dark:border-gray-700">
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">{label}</p>
       <p className={`text-xl font-bold ${
-        type === 'positive' ? 'text-green-600' :
-        type === 'negative' ? 'text-red-600' :
-        'text-gray-900'
+        type === 'positive' ? 'text-green-600 dark:text-green-400' :
+        type === 'negative' ? 'text-red-600 dark:text-red-400' :
+        'text-gray-900 dark:text-gray-100'
       }`}>
         {formatCurrency(value)}
       </p>
@@ -258,7 +258,7 @@ const GSTReports = () => {
         <div>
           <h1 className="text-3xl font-bold">GST Reports</h1>
           {companyGST?.gstin && (
-            <p className="text-gray-600 mt-1">GSTIN: {companyGST.gstin} | {companyGST.stateName}</p>
+            <p className="text-gray-600 dark:text-gray-400 mt-1">GSTIN: {companyGST.gstin} | {companyGST.stateName}</p>
           )}
         </div>
         <button
@@ -322,35 +322,35 @@ const GSTReports = () => {
             description="Details of outward supplies (Sales)"
             icon="📤"
             reportType="gstr1"
-            color="border-blue-200 bg-blue-50 hover:border-blue-400"
+            color="border-blue-200 bg-blue-50 hover:border-blue-400 dark:border-blue-800 dark:bg-blue-900/30 dark:hover:border-blue-600"
           />
           <ReportCard
             title="GSTR-2"
             description="Details of inward supplies (Purchases)"
             icon="📥"
             reportType="gstr2"
-            color="border-purple-200 bg-purple-50 hover:border-purple-400"
+            color="border-purple-200 bg-purple-50 hover:border-purple-400 dark:border-purple-800 dark:bg-purple-900/30 dark:hover:border-purple-600"
           />
           <ReportCard
             title="GSTR-3B"
             description="Monthly summary return"
             icon="📋"
             reportType="gstr3b"
-            color="border-green-200 bg-green-50 hover:border-green-400"
+            color="border-green-200 bg-green-50 hover:border-green-400 dark:border-green-800 dark:bg-green-900/30 dark:hover:border-green-600"
           />
           <ReportCard
             title="GSTR-9"
             description="Annual return"
             icon="📊"
             reportType="gstr9"
-            color="border-orange-200 bg-orange-50 hover:border-orange-400"
+            color="border-orange-200 bg-orange-50 hover:border-orange-400 dark:border-orange-800 dark:bg-orange-900/30 dark:hover:border-orange-600"
           />
           <ReportCard
             title="HSN Summary"
             description="HSN-wise summary of supplies"
             icon="📑"
             reportType="hsn"
-            color="border-gray-200 bg-gray-50 hover:border-gray-400"
+            color="border-gray-200 bg-gray-50 hover:border-gray-400 dark:border-gray-600 dark:bg-gray-700/50 dark:hover:border-gray-500"
           />
         </div>
       )}
@@ -396,7 +396,7 @@ const GSTReports = () => {
             <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-50">
+                  <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
                     <th className="px-4 py-3 text-left font-semibold">Section</th>
                     <th className="px-4 py-3 text-right font-semibold">Invoices</th>
                     <th className="px-4 py-3 text-right font-semibold">Taxable Value</th>
@@ -408,7 +408,7 @@ const GSTReports = () => {
                 </thead>
                 <tbody>
                   {Object.entries(gstr1Data.sections).map(([key, section]) => (
-                    <tr key={key} className="border-t hover:bg-gray-50">
+                    <tr key={key} className="border-t hover:bg-gray-50 dark:hover:bg-gray-700/50">
                       <td className="px-4 py-3 font-medium">{section.sectionName}</td>
                       <td className="px-4 py-3 text-right">{section.invoiceCount}</td>
                       <td className="px-4 py-3 text-right">{formatCurrency(section.totalTaxableValue)}</td>
@@ -439,7 +439,7 @@ const GSTReports = () => {
               <div className="overflow-auto max-h-[calc(100vh-280px)]">
                 <table className="w-full">
                   <thead className="sticky top-0 z-10">
-                    <tr className="bg-gray-50">
+                    <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
                       <th className="px-4 py-3 text-left font-semibold">HSN Code</th>
                       <th className="px-4 py-3 text-left font-semibold">Description</th>
                       <th className="px-4 py-3 text-right font-semibold">Qty</th>
@@ -496,7 +496,7 @@ const GSTReports = () => {
             <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-50">
+                  <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
                     <th className="px-4 py-3 text-left font-semibold">Nature of Supplies</th>
                     <th className="px-4 py-3 text-right font-semibold">Taxable Value</th>
                     <th className="px-4 py-3 text-right font-semibold">IGST</th>
@@ -512,14 +512,14 @@ const GSTReports = () => {
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr3bData.outwardSupplies.taxable.total.cgst)}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr3bData.outwardSupplies.taxable.total.sgst)}</td>
                   </tr>
-                  <tr className="border-t bg-gray-50">
+                  <tr className="border-t bg-gray-50 dark:bg-gray-700/50">
                     <td className="px-4 py-3 pl-8">- Inter-State supplies</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr3bData.outwardSupplies.taxable.interState.taxableValue)}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr3bData.outwardSupplies.taxable.interState.igst)}</td>
                     <td className="px-4 py-3 text-right">-</td>
                     <td className="px-4 py-3 text-right">-</td>
                   </tr>
-                  <tr className="border-t bg-gray-50">
+                  <tr className="border-t bg-gray-50 dark:bg-gray-700/50">
                     <td className="px-4 py-3 pl-8">- Intra-State supplies</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr3bData.outwardSupplies.taxable.intraState.taxableValue)}</td>
                     <td className="px-4 py-3 text-right">-</td>
@@ -549,7 +549,7 @@ const GSTReports = () => {
             <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-50">
+                  <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
                     <th className="px-4 py-3 text-left font-semibold">Details</th>
                     <th className="px-4 py-3 text-right font-semibold">IGST</th>
                     <th className="px-4 py-3 text-right font-semibold">CGST</th>
@@ -559,20 +559,20 @@ const GSTReports = () => {
                 </thead>
                 <tbody>
                   <tr className="border-t">
-                    <td className="px-4 py-3 text-green-600 font-medium">(A) ITC Available (whether in full or part)</td>
-                    <td className="px-4 py-3 text-right text-green-600">{formatCurrency(gstr3bData.itc.eligible.igst)}</td>
-                    <td className="px-4 py-3 text-right text-green-600">{formatCurrency(gstr3bData.itc.eligible.cgst)}</td>
-                    <td className="px-4 py-3 text-right text-green-600">{formatCurrency(gstr3bData.itc.eligible.sgst)}</td>
-                    <td className="px-4 py-3 text-right text-green-600">{formatCurrency(gstr3bData.itc.eligible.cess)}</td>
+                    <td className="px-4 py-3 text-green-600 dark:text-green-400 font-medium">(A) ITC Available (whether in full or part)</td>
+                    <td className="px-4 py-3 text-right text-green-600 dark:text-green-400">{formatCurrency(gstr3bData.itc.eligible.igst)}</td>
+                    <td className="px-4 py-3 text-right text-green-600 dark:text-green-400">{formatCurrency(gstr3bData.itc.eligible.cgst)}</td>
+                    <td className="px-4 py-3 text-right text-green-600 dark:text-green-400">{formatCurrency(gstr3bData.itc.eligible.sgst)}</td>
+                    <td className="px-4 py-3 text-right text-green-600 dark:text-green-400">{formatCurrency(gstr3bData.itc.eligible.cess)}</td>
                   </tr>
                   <tr className="border-t">
-                    <td className="px-4 py-3 text-red-600">(B) ITC Reversed</td>
-                    <td className="px-4 py-3 text-right text-red-600">{formatCurrency(gstr3bData.itc.ineligible.igst)}</td>
-                    <td className="px-4 py-3 text-right text-red-600">{formatCurrency(gstr3bData.itc.ineligible.cgst)}</td>
-                    <td className="px-4 py-3 text-right text-red-600">{formatCurrency(gstr3bData.itc.ineligible.sgst)}</td>
-                    <td className="px-4 py-3 text-right text-red-600">{formatCurrency(gstr3bData.itc.ineligible.cess)}</td>
+                    <td className="px-4 py-3 text-red-600 dark:text-red-400">(B) ITC Reversed</td>
+                    <td className="px-4 py-3 text-right text-red-600 dark:text-red-400">{formatCurrency(gstr3bData.itc.ineligible.igst)}</td>
+                    <td className="px-4 py-3 text-right text-red-600 dark:text-red-400">{formatCurrency(gstr3bData.itc.ineligible.cgst)}</td>
+                    <td className="px-4 py-3 text-right text-red-600 dark:text-red-400">{formatCurrency(gstr3bData.itc.ineligible.sgst)}</td>
+                    <td className="px-4 py-3 text-right text-red-600 dark:text-red-400">{formatCurrency(gstr3bData.itc.ineligible.cess)}</td>
                   </tr>
-                  <tr className="border-t bg-green-50 font-bold">
+                  <tr className="border-t bg-green-50 dark:bg-green-900/20 font-bold">
                     <td className="px-4 py-3">(C) Net ITC Available (A - B)</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr3bData.itc.net.igst)}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr3bData.itc.net.cgst)}</td>
@@ -590,7 +590,7 @@ const GSTReports = () => {
             <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-50">
+                  <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
                     <th className="px-4 py-3 text-left font-semibold">Description</th>
                     <th className="px-4 py-3 text-right font-semibold">IGST</th>
                     <th className="px-4 py-3 text-right font-semibold">CGST</th>
@@ -606,18 +606,18 @@ const GSTReports = () => {
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr3bData.taxLiability.output.sgst)}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr3bData.taxLiability.output.cess)}</td>
                   </tr>
-                  <tr className="border-t bg-red-50 font-bold">
-                    <td className="px-4 py-3 text-red-700">Tax Payable (After ITC Utilization)</td>
-                    <td className="px-4 py-3 text-right text-red-700">{formatCurrency(gstr3bData.taxLiability.netPayable.igst)}</td>
-                    <td className="px-4 py-3 text-right text-red-700">{formatCurrency(gstr3bData.taxLiability.netPayable.cgst)}</td>
-                    <td className="px-4 py-3 text-right text-red-700">{formatCurrency(gstr3bData.taxLiability.netPayable.sgst)}</td>
-                    <td className="px-4 py-3 text-right text-red-700">{formatCurrency(gstr3bData.taxLiability.netPayable.cess)}</td>
+                  <tr className="border-t bg-red-50 dark:bg-red-900/20 font-bold">
+                    <td className="px-4 py-3 text-red-700 dark:text-red-300">Tax Payable (After ITC Utilization)</td>
+                    <td className="px-4 py-3 text-right text-red-700 dark:text-red-300">{formatCurrency(gstr3bData.taxLiability.netPayable.igst)}</td>
+                    <td className="px-4 py-3 text-right text-red-700 dark:text-red-300">{formatCurrency(gstr3bData.taxLiability.netPayable.cgst)}</td>
+                    <td className="px-4 py-3 text-right text-red-700 dark:text-red-300">{formatCurrency(gstr3bData.taxLiability.netPayable.sgst)}</td>
+                    <td className="px-4 py-3 text-right text-red-700 dark:text-red-300">{formatCurrency(gstr3bData.taxLiability.netPayable.cess)}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
-            <div className="mt-4 p-4 bg-red-100 rounded-lg">
-              <p className="text-xl font-bold text-red-700">
+            <div className="mt-4 p-4 bg-red-100 dark:bg-red-900/30 rounded-lg">
+              <p className="text-xl font-bold text-red-700 dark:text-red-300">
                 Total Tax Payable: {formatCurrency(gstr3bData.taxLiability.totalPayable)}
               </p>
             </div>
@@ -655,35 +655,35 @@ const GSTReports = () => {
           <div className="card">
             <h3 className="text-lg font-semibold mb-4">ITC Summary</h3>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="p-4 bg-green-50 rounded-lg">
-                <h4 className="font-semibold text-green-800 mb-2">Eligible ITC</h4>
+              <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg">
+                <h4 className="font-semibold text-green-800 dark:text-green-300 mb-2">Eligible ITC</h4>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  <span className="text-gray-600">IGST:</span>
-                  <span className="text-right text-green-700 font-medium">{formatCurrency(gstr2Data.eligibleITC.igst)}</span>
-                  <span className="text-gray-600">CGST:</span>
-                  <span className="text-right text-green-700 font-medium">{formatCurrency(gstr2Data.eligibleITC.cgst)}</span>
-                  <span className="text-gray-600">SGST:</span>
-                  <span className="text-right text-green-700 font-medium">{formatCurrency(gstr2Data.eligibleITC.sgst)}</span>
+                  <span className="text-gray-600 dark:text-gray-400">IGST:</span>
+                  <span className="text-right text-green-700 dark:text-green-300 font-medium">{formatCurrency(gstr2Data.eligibleITC.igst)}</span>
+                  <span className="text-gray-600 dark:text-gray-400">CGST:</span>
+                  <span className="text-right text-green-700 dark:text-green-300 font-medium">{formatCurrency(gstr2Data.eligibleITC.cgst)}</span>
+                  <span className="text-gray-600 dark:text-gray-400">SGST:</span>
+                  <span className="text-right text-green-700 dark:text-green-300 font-medium">{formatCurrency(gstr2Data.eligibleITC.sgst)}</span>
                 </div>
               </div>
-              <div className="p-4 bg-red-50 rounded-lg">
-                <h4 className="font-semibold text-red-800 mb-2">Ineligible ITC</h4>
+              <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg">
+                <h4 className="font-semibold text-red-800 dark:text-red-300 mb-2">Ineligible ITC</h4>
                 <div className="grid grid-cols-2 gap-2 text-sm">
-                  <span className="text-gray-600">IGST:</span>
-                  <span className="text-right text-red-700 font-medium">{formatCurrency(gstr2Data.ineligibleITC.igst)}</span>
-                  <span className="text-gray-600">CGST:</span>
-                  <span className="text-right text-red-700 font-medium">{formatCurrency(gstr2Data.ineligibleITC.cgst)}</span>
-                  <span className="text-gray-600">SGST:</span>
-                  <span className="text-right text-red-700 font-medium">{formatCurrency(gstr2Data.ineligibleITC.sgst)}</span>
+                  <span className="text-gray-600 dark:text-gray-400">IGST:</span>
+                  <span className="text-right text-red-700 dark:text-red-300 font-medium">{formatCurrency(gstr2Data.ineligibleITC.igst)}</span>
+                  <span className="text-gray-600 dark:text-gray-400">CGST:</span>
+                  <span className="text-right text-red-700 dark:text-red-300 font-medium">{formatCurrency(gstr2Data.ineligibleITC.cgst)}</span>
+                  <span className="text-gray-600 dark:text-gray-400">SGST:</span>
+                  <span className="text-right text-red-700 dark:text-red-300 font-medium">{formatCurrency(gstr2Data.ineligibleITC.sgst)}</span>
                 </div>
               </div>
             </div>
           </div>
 
           {/* Reconciliation Placeholder */}
-          <div className="card bg-yellow-50 border-yellow-200">
-            <h3 className="text-lg font-semibold mb-2 text-yellow-800">GSTR-2A/2B Reconciliation</h3>
-            <p className="text-yellow-700 mb-4">
+          <div className="card bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800">
+            <h3 className="text-lg font-semibold mb-2 text-yellow-800 dark:text-yellow-300">GSTR-2A/2B Reconciliation</h3>
+            <p className="text-yellow-700 dark:text-yellow-300 mb-4">
               Upload your GSTR-2A/2B data from the GST portal to match with your purchase records.
             </p>
             <button className="btn btn-secondary" disabled>
@@ -714,7 +714,7 @@ const GSTReports = () => {
             <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-50">
+                  <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
                     <th className="px-4 py-3 text-left font-semibold">Nature of Supplies</th>
                     <th className="px-4 py-3 text-right font-semibold">Taxable Value</th>
                     <th className="px-4 py-3 text-right font-semibold">CGST</th>
@@ -744,7 +744,7 @@ const GSTReports = () => {
                     <td className="px-4 py-3 text-right">-</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr9Data.outwardSupplies.exports.igst)}</td>
                   </tr>
-                  <tr className="border-t font-bold bg-gray-50">
+                  <tr className="border-t font-bold bg-gray-50 dark:bg-gray-700/50">
                     <td className="px-4 py-3">Total</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr9Data.outwardSupplies.total.taxableValue)}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr9Data.outwardSupplies.total.cgst)}</td>
@@ -762,7 +762,7 @@ const GSTReports = () => {
             <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-50">
+                  <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
                     <th className="px-4 py-3 text-left font-semibold">Nature of Supplies</th>
                     <th className="px-4 py-3 text-right font-semibold">Taxable Value</th>
                     <th className="px-4 py-3 text-right font-semibold">CGST</th>
@@ -785,7 +785,7 @@ const GSTReports = () => {
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr9Data.inwardSupplies.fromUnregistered.sgst)}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr9Data.inwardSupplies.fromUnregistered.igst)}</td>
                   </tr>
-                  <tr className="border-t font-bold bg-gray-50">
+                  <tr className="border-t font-bold bg-gray-50 dark:bg-gray-700/50">
                     <td className="px-4 py-3">Total</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr9Data.inwardSupplies.total.taxableValue)}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(gstr9Data.inwardSupplies.total.cgst)}</td>
@@ -829,7 +829,7 @@ const GSTReports = () => {
             <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-50">
+                  <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
                     <th className="px-4 py-3 text-left font-semibold">HSN Code</th>
                     <th className="px-4 py-3 text-left font-semibold">Description</th>
                     <th className="px-4 py-3 text-left font-semibold">UQC</th>
@@ -843,7 +843,7 @@ const GSTReports = () => {
                 </thead>
                 <tbody>
                   {hsnData.map((hsn, idx) => (
-                    <tr key={idx} className="border-t hover:bg-gray-50">
+                    <tr key={idx} className="border-t hover:bg-gray-50 dark:hover:bg-gray-700/50">
                       <td className="px-4 py-3 font-mono">{hsn.hsnCode}</td>
                       <td className="px-4 py-3">{hsn.description}</td>
                       <td className="px-4 py-3">{hsn.uqc}</td>
@@ -857,7 +857,7 @@ const GSTReports = () => {
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="bg-gray-100 font-bold">
+                  <tr className="bg-gray-100 dark:bg-gray-700 font-bold">
                     <td colSpan={4} className="px-4 py-3">Total</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(hsnData.reduce((s, h) => s + h.taxableValue, 0))}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(hsnData.reduce((s, h) => s + h.igstAmount, 0))}</td>
@@ -875,10 +875,10 @@ const GSTReports = () => {
       {/* Drill-down Modal */}
       {drillDownSection && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden m-4">
-            <div className="p-4 border-b flex items-center justify-between">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-xl max-w-4xl w-full max-h-[80vh] overflow-hidden m-4">
+            <div className="p-4 border-b dark:border-gray-700 flex items-center justify-between">
               <h3 className="text-lg font-bold">{drillDownSection} Invoices</h3>
-              <button onClick={closeDrillDown} className="text-gray-500 hover:text-gray-700">
+              <button onClick={closeDrillDown} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
                 </svg>
@@ -887,7 +887,7 @@ const GSTReports = () => {
             <div className="p-4 overflow-auto max-h-[60vh]">
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
-                  <tr className="bg-gray-50">
+                  <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
                     <th className="px-4 py-2 text-left">Invoice No.</th>
                     <th className="px-4 py-2 text-left">Date</th>
                     <th className="px-4 py-2 text-left">Party</th>
@@ -919,7 +919,7 @@ const GSTReports = () => {
       {/* Loading Overlay */}
       {loading && (
         <div className="fixed inset-0 bg-black bg-opacity-30 flex items-center justify-center z-50">
-          <div className="bg-white p-6 rounded-xl shadow-xl">
+          <div className="bg-white dark:bg-gray-800 p-6 rounded-xl shadow-xl">
             <div className="flex items-center space-x-3">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
               <span className="text-lg">Generating Report...</span>
