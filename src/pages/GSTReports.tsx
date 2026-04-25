@@ -261,12 +261,14 @@ const GSTReports = () => {
             <p className="text-gray-600 dark:text-gray-400 mt-1">GSTIN: {companyGST.gstin} | {companyGST.stateName}</p>
           )}
         </div>
-        <button
-          onClick={() => setActiveReport('dashboard')}
-          className="btn btn-secondary"
-        >
-          Back to Dashboard
-        </button>
+        {activeReport !== 'dashboard' && (
+          <button
+            onClick={() => setActiveReport('dashboard')}
+            className="btn btn-secondary"
+          >
+            Back to Dashboard
+          </button>
+        )}
       </div>
 
       {/* Date Range Selector */}

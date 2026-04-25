@@ -512,7 +512,7 @@ const DeliveryChallan = () => {
       {/* Create/Edit Challan Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">{editingChallan ? 'Edit Delivery Challan' : 'Create New Delivery Challan'}</h2>
@@ -723,7 +723,7 @@ const DeliveryChallan = () => {
                   <button
                     type="button"
                     onClick={() => setShowAdditionalFields(!showAdditionalFields)}
-                    className="flex items-center gap-2 text-sm font-medium text-gray-600 hover:text-gray-800"
+                    className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
                   >
                     <span className={`transform transition-transform ${showAdditionalFields ? 'rotate-180' : ''}`}>
                       ▼
@@ -732,7 +732,7 @@ const DeliveryChallan = () => {
                   </button>
 
                   {showAdditionalFields && (
-                    <div className="grid grid-cols-2 gap-4 mt-3 p-4 bg-gray-50 rounded-lg">
+                    <div className="grid grid-cols-2 gap-4 mt-3 p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                       <div>
                         <label className="label">P.O. Number</label>
                         <input type="text" className="input" value={formData.poNumber}
