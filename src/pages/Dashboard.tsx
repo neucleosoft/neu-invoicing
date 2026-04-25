@@ -172,8 +172,8 @@ const Dashboard = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
         <div className="flex space-x-3">
-          <Link to="/sales" className="btn btn-primary">+ New Invoice</Link>
-          <Link to="/purchase" className="btn btn-secondary">+ New Purchase</Link>
+          <Link to="/sales" state={{ openNew: true }} className="btn btn-primary dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">+ New Invoice</Link>
+          <Link to="/purchase" state={{ openNew: true }} className="btn btn-primary dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">+ New Purchase</Link>
         </div>
       </div>
 
