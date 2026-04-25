@@ -8,6 +8,7 @@ import { setupSyncHandlers } from './sync'
 import { setupPartyHandlers } from './handlers/party'
 import { setupItemHandlers } from './handlers/item'
 import { setupSalesHandlers } from './handlers/sales'
+import { setupQuotationHandlers } from './handlers/quotation'
 import { setupPurchaseHandlers } from './handlers/purchase'
 import { setupPaymentHandlers } from './handlers/payment'
 import { setupDashboardHandlers } from './handlers/dashboard'
@@ -105,6 +106,7 @@ app.whenReady().then(async () => {
   setupPartyHandlers()
   setupItemHandlers()
   setupSalesHandlers()
+  setupQuotationHandlers()
   setupPurchaseHandlers()
   setupPaymentHandlers()
   setupDashboardHandlers()

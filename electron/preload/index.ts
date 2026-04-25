@@ -66,6 +66,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
     generatePDF: (id: string) => ipcRenderer.invoke("sales:generatePDF", id),
   },
 
+  // Quotations
+  quotation: {
+    getAll: () => ipcRenderer.invoke("quotation:getAll"),
+    getById: (id: string) => ipcRenderer.invoke("quotation:getById", id),
+    create: (data: any) => ipcRenderer.invoke("quotation:create", data),
+    update: (id: string, data: any) =>
+      ipcRenderer.invoke("quotation:update", id, data),
+    delete: (id: string) => ipcRenderer.invoke("quotation:delete", id),
+    convertToInvoice: (id: string) =>
+      ipcRenderer.invoke("quotation:convertToInvoice", id),
+    generateQuotationNumber: () =>
+      ipcRenderer.invoke("quotation:generateQuotationNumber"),
+  },
+
   // Purchase
   purchase: {
     getAll: () => ipcRenderer.invoke("purchase:getAll"),
