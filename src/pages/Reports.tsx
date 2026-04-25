@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { BarChart3, Package, Wallet, CreditCard, Receipt } from 'lucide-react'
 import { formatCurrency } from '../utils/currency'
 import { useToast } from '../components/Toast'
 
@@ -12,11 +13,11 @@ const Reports = () => {
   const toast = useToast()
 
   const reports = [
-    { id: 'sales', name: 'Sales Report', icon: '📊' },
-    { id: 'stock', name: 'Stock Summary', icon: '📦' },
-    { id: 'receivables', name: 'Receivables', icon: '💰' },
-    { id: 'payables', name: 'Payables', icon: '💳' },
-    { id: 'tax', name: 'Tax Report', icon: '📄' }
+    { id: 'sales', name: 'Sales Report', icon: BarChart3 },
+    { id: 'stock', name: 'Stock Summary', icon: Package },
+    { id: 'receivables', name: 'Receivables', icon: Wallet },
+    { id: 'payables', name: 'Payables', icon: CreditCard },
+    { id: 'tax', name: 'Tax Report', icon: Receipt }
   ]
 
   const handleGenerateReport = async () => {
@@ -70,20 +71,23 @@ const Reports = () => {
         <div className="card lg:col-span-1">
           <h2 className="text-lg font-semibold mb-4">Report Types</h2>
           <div className="space-y-2">
-            {reports.map((report) => (
-              <button
-                key={report.id}
-                onClick={() => setActiveReport(report.id as any)}
-                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
-                  activeReport === report.id
-                    ? 'bg-primary-50 text-primary-700 font-medium dark:bg-primary-900/30 dark:text-primary-300'
-                    : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/50'
-                }`}
-              >
-                <span className="text-xl">{report.icon}</span>
-                <span>{report.name}</span>
-              </button>
-            ))}
+            {reports.map((report) => {
+              const Icon = report.icon
+              return (
+                <button
+                  key={report.id}
+                  onClick={() => setActiveReport(report.id as any)}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition-colors ${
+                    activeReport === report.id
+                      ? 'bg-primary-50 text-primary-700 font-medium dark:bg-primary-900/30 dark:text-primary-300'
+                      : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/50'
+                  }`}
+                >
+                  <Icon className="w-5 h-5 shrink-0" />
+                  <span>{report.name}</span>
+                </button>
+              )
+            })}
           </div>
         </div>
 

@@ -1,5 +1,16 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import {
+  Wallet,
+  CreditCard,
+  TrendingUp,
+  AlertTriangle,
+  Landmark,
+  Clock,
+  Users,
+  Package,
+  BarChart3,
+} from 'lucide-react'
 import { DashboardMetrics, SalesInvoice, Item } from '../types'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { formatCurrency } from '../utils/currency'
@@ -168,76 +179,52 @@ const Dashboard = () => {
 
       {/* Metrics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
-        <div className="card bg-gradient-to-br from-green-50 to-green-100">
-          <div className="flex items-center justify-between">
-            <div className="min-w-0">
-              <p className="text-sm text-green-600 font-medium">Total Receivables</p>
-              <p className={`${amountFontSize(formatCurrency(metrics?.totalReceivables || 0))} font-bold text-green-700 mt-2`}>
-                {formatCurrency(metrics?.totalReceivables || 0)}
-              </p>
-            </div>
-            <div className="text-4xl">💰</div>
-          </div>
+        <div className="card bg-gradient-to-br from-green-50 to-green-100 relative">
+          <Wallet className="absolute top-4 right-4 w-6 h-6 text-green-600/60" strokeWidth={1.5} />
+          <p className="text-sm text-green-600 font-medium pr-8">Total Receivables</p>
+          <p className={`${amountFontSize(formatCurrency(metrics?.totalReceivables || 0))} font-bold text-green-700 mt-2`}>
+            {formatCurrency(metrics?.totalReceivables || 0)}
+          </p>
         </div>
 
-        <div className="card bg-gradient-to-br from-red-50 to-red-100">
-          <div className="flex items-center justify-between">
-            <div className="min-w-0">
-              <p className="text-sm text-red-600 font-medium">Total Payables</p>
-              <p className={`${amountFontSize(formatCurrency(metrics?.totalPayables || 0))} font-bold text-red-700 mt-2`}>
-                {formatCurrency(metrics?.totalPayables || 0)}
-              </p>
-            </div>
-            <div className="text-4xl">💳</div>
-          </div>
+        <div className="card bg-gradient-to-br from-red-50 to-red-100 relative">
+          <CreditCard className="absolute top-4 right-4 w-6 h-6 text-red-600/60" strokeWidth={1.5} />
+          <p className="text-sm text-red-600 font-medium pr-8">Total Payables</p>
+          <p className={`${amountFontSize(formatCurrency(metrics?.totalPayables || 0))} font-bold text-red-700 mt-2`}>
+            {formatCurrency(metrics?.totalPayables || 0)}
+          </p>
         </div>
 
-        <div className="card bg-gradient-to-br from-blue-50 to-blue-100">
-          <div className="flex items-center justify-between">
-            <div className="min-w-0">
-              <p className="text-sm text-blue-600 font-medium">Total Sales (YTD)</p>
-              <p className={`${amountFontSize(formatCurrency(metrics?.totalSales || 0))} font-bold text-blue-700 mt-2`}>
-                {formatCurrency(metrics?.totalSales || 0)}
-              </p>
-            </div>
-            <div className="text-4xl">📈</div>
-          </div>
+        <div className="card bg-gradient-to-br from-blue-50 to-blue-100 relative">
+          <TrendingUp className="absolute top-4 right-4 w-6 h-6 text-blue-600/60" strokeWidth={1.5} />
+          <p className="text-sm text-blue-600 font-medium pr-8">Total Sales (YTD)</p>
+          <p className={`${amountFontSize(formatCurrency(metrics?.totalSales || 0))} font-bold text-blue-700 mt-2`}>
+            {formatCurrency(metrics?.totalSales || 0)}
+          </p>
         </div>
 
-        <div className="card bg-gradient-to-br from-orange-50 to-orange-100">
-          <div className="flex items-center justify-between">
-            <div className="min-w-0">
-              <p className="text-sm text-orange-600 font-medium">Low Stock Alerts</p>
-              <p className={`${amountFontSize(metrics?.lowStockCount || 0)} font-bold text-orange-700 mt-2`}>
-                {metrics?.lowStockCount || 0}
-              </p>
-            </div>
-            <div className="text-4xl">⚠️</div>
-          </div>
+        <div className="card bg-gradient-to-br from-orange-50 to-orange-100 relative">
+          <AlertTriangle className="absolute top-4 right-4 w-6 h-6 text-orange-600/60" strokeWidth={1.5} />
+          <p className="text-sm text-orange-600 font-medium pr-8">Low Stock Alerts</p>
+          <p className={`${amountFontSize(metrics?.lowStockCount || 0)} font-bold text-orange-700 mt-2`}>
+            {metrics?.lowStockCount || 0}
+          </p>
         </div>
 
-        <div className="card bg-gradient-to-br from-indigo-50 to-indigo-100">
-          <div className="flex items-center justify-between">
-            <div className="min-w-0">
-              <p className="text-sm text-indigo-600 font-medium">Cash & Bank</p>
-              <p className={`${amountFontSize(formatCurrency(cashBankBalance))} font-bold text-indigo-700 mt-2`}>
-                {formatCurrency(cashBankBalance)}
-              </p>
-            </div>
-            <div className="text-4xl">🏦</div>
-          </div>
+        <div className="card bg-gradient-to-br from-indigo-50 to-indigo-100 relative">
+          <Landmark className="absolute top-4 right-4 w-6 h-6 text-indigo-600/60" strokeWidth={1.5} />
+          <p className="text-sm text-indigo-600 font-medium pr-8">Cash & Bank</p>
+          <p className={`${amountFontSize(formatCurrency(cashBankBalance))} font-bold text-indigo-700 mt-2`}>
+            {formatCurrency(cashBankBalance)}
+          </p>
         </div>
 
-        <div className="card bg-gradient-to-br from-rose-50 to-rose-100">
-          <div className="flex items-center justify-between">
-            <div className="min-w-0">
-              <p className="text-sm text-rose-600 font-medium">Overdue Invoices</p>
-              <p className={`${amountFontSize(overdueCount)} font-bold text-rose-700 mt-2`}>
-                {overdueCount}
-              </p>
-            </div>
-            <div className="text-4xl">🔴</div>
-          </div>
+        <div className="card bg-gradient-to-br from-rose-50 to-rose-100 relative">
+          <Clock className="absolute top-4 right-4 w-6 h-6 text-rose-600/60" strokeWidth={1.5} />
+          <p className="text-sm text-rose-600 font-medium pr-8">Overdue Invoices</p>
+          <p className={`${amountFontSize(overdueCount)} font-bold text-rose-700 mt-2`}>
+            {overdueCount}
+          </p>
         </div>
       </div>
 
@@ -372,19 +359,19 @@ const Dashboard = () => {
         <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <Link to="/parties" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-            <span className="text-3xl mb-2">👥</span>
+            <Users className="w-8 h-8 mb-2 text-primary-600 dark:text-primary-400" strokeWidth={1.5} />
             <span className="text-sm font-medium">Add Party</span>
           </Link>
           <Link to="/items" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-            <span className="text-3xl mb-2">📦</span>
+            <Package className="w-8 h-8 mb-2 text-primary-600 dark:text-primary-400" strokeWidth={1.5} />
             <span className="text-sm font-medium">Add Item</span>
           </Link>
           <Link to="/payments" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-            <span className="text-3xl mb-2">💳</span>
+            <CreditCard className="w-8 h-8 mb-2 text-primary-600 dark:text-primary-400" strokeWidth={1.5} />
             <span className="text-sm font-medium">Record Payment</span>
           </Link>
           <Link to="/reports" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-            <span className="text-3xl mb-2">📊</span>
+            <BarChart3 className="w-8 h-8 mb-2 text-primary-600 dark:text-primary-400" strokeWidth={1.5} />
             <span className="text-sm font-medium">View Reports</span>
           </Link>
         </div>
