@@ -1,5 +1,6 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
+import { Loader2 } from 'lucide-react'
 import { useStore } from './store/useStore'
 import { ToastProvider } from './components/Toast'
 import { ConfirmProvider } from './components/ConfirmDialog'
@@ -21,6 +22,7 @@ import Settings from './pages/Settings'
 
 function App() {
   const { authStatus, setAuthStatus, company, setCompany, setSyncStatus } = useStore()
+  const [initializing, setInitializing] = useState(true)
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -56,6 +58,8 @@ function App() {
         }
       } catch (error) {
         console.error('Error checking auth:', error)
+      } finally {
+        setInitializing(false)
       }
     }
 
@@ -73,11 +77,17 @@ function App() {
     );
   }
 
-  if (authStatus === null) {
+  if (initializing || authStatus === null) {
     return (
       <ToastProvider><ConfirmProvider>
-        <div className="flex items-center justify-center h-screen">
-          <div className="text-lg">Loading...</div>
+        <div className="flex flex-col items-center justify-center h-screen bg-gray-50 dark:bg-gray-900 gap-5">
+          <div className="relative">
+            <div className="absolute inset-0 rounded-full bg-primary-500/20 blur-xl animate-pulse" />
+            <Loader2 className="relative w-16 h-16 text-primary-600 dark:text-primary-400 animate-spin" strokeWidth={2} />
+          </div>
+          <p className="text-sm font-medium text-gray-600 dark:text-gray-400 tracking-wide animate-pulse">
+            Please wait…
+          </p>
         </div>
       </ConfirmProvider></ToastProvider>
     )
