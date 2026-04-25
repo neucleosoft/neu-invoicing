@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { SalesInvoice } from '../types'
 import { downloadInvoicePDF, InvoiceTemplate } from '../utils/generateInvoicePDF'
 import { formatCurrency } from '../utils/currency'
@@ -83,12 +84,24 @@ const Sales = () => {
 
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([])
 
+  const location = useLocation()
+  const navigate = useNavigate()
+
   useEffect(() => {
     loadInvoices()
     loadParties()
     loadItems()
     loadTemplate()
   }, [filter])
+
+  // Auto-open the create-invoice modal when navigated here from Dashboard's "+ New Invoice"
+  useEffect(() => {
+    if ((location.state as { openNew?: boolean } | null)?.openNew) {
+      handleNewInvoice()
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   const loadTemplate = async () => {
     try {

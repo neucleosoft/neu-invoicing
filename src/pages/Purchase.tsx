@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { PurchaseBill } from '../types'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
@@ -50,11 +51,23 @@ const Purchase = () => {
 
   const [billItems, setBillItems] = useState<BillItem[]>([])
 
+  const location = useLocation()
+  const navigate = useNavigate()
+
   useEffect(() => {
     loadBills()
     loadSuppliers()
     loadItems()
   }, [])
+
+  // Auto-open the create-bill modal when navigated here from Dashboard's "+ New Purchase"
+  useEffect(() => {
+    if ((location.state as { openNew?: boolean } | null)?.openNew) {
+      setShowModal(true)
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   const toast = useToast()
   const confirm = useConfirm()
