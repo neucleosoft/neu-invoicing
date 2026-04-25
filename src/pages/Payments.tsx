@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { PaymentTransaction } from '../types'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/ToastContext'
 
 interface Party {
   id: string

@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { Company } from '../types'
 import { InvoiceTemplate, TEMPLATE_INFO } from '../utils/generateInvoicePDF'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/ToastContext'
 
 type SettingsTab = 'company' | 'templates' | 'tax' | 'backup'
 
