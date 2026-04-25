@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { downloadClassicPDF } from './pdfmakeInvoice'
+import { downloadQuotationPDF, previewQuotationPDF } from './pdfmakeQuotation'
 import {
   fmtNum,
   fmtRs,
@@ -629,6 +630,11 @@ export function generateInvoicePDF(invoice: InvoiceData, template: InvoiceTempla
 }
 
 export function downloadInvoicePDF(invoice: InvoiceData, template: InvoiceTemplate = 'classic') {
+  if (invoice.type === 'QUOTATION') {
+    downloadQuotationPDF(invoice)
+    return
+  }
+
   // Classic uses pdfmake (flow-based layout), others still use jsPDF
   if (template === 'classic') {
     downloadClassicPDF(invoice)
@@ -640,6 +646,11 @@ export function downloadInvoicePDF(invoice: InvoiceData, template: InvoiceTempla
 }
 
 export function previewInvoicePDF(invoice: InvoiceData, template: InvoiceTemplate = 'classic') {
+  if (invoice.type === 'QUOTATION') {
+    previewQuotationPDF(invoice)
+    return
+  }
+
   const doc = generateInvoicePDF(invoice, template)
   const pdfBlob = doc.output('blob')
   const pdfUrl = URL.createObjectURL(pdfBlob)

@@ -72,6 +72,7 @@ export const setupQuotationHandlers = () => {
           data: {
             invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
+            dueDate: data.dueDate ? new Date(data.dueDate) : null,
             type: 'QUOTATION',
             partyId: data.partyId,
             subtotal: values.subtotal,
@@ -150,6 +151,7 @@ export const setupQuotationHandlers = () => {
           data: {
             invoiceNumber: data.invoiceNumber || existingQuotation.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
+            dueDate: data.dueDate ? new Date(data.dueDate) : null,
             type: 'QUOTATION',
             partyId: data.partyId,
             subtotal: values.subtotal,

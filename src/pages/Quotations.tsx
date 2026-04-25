@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { SalesInvoice, QuotationStatus } from '../types'
-import { downloadInvoicePDF, InvoiceTemplate } from '../utils/generateInvoicePDF'
+import { downloadInvoicePDF } from '../utils/generateInvoicePDF'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
-import { useConfirm } from '../components/ConfirmDialog'
+import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
 import SortHeader from '../components/SortHeader'
@@ -62,7 +62,6 @@ const Quotations = () => {
   const [editingQuotation, setEditingQuotation] = useState<SalesInvoice | null>(null)
   const [parties, setParties] = useState<Party[]>([])
   const [items, setItems] = useState<Item[]>([])
-  const [selectedTemplate, setSelectedTemplate] = useState<InvoiceTemplate>('classic')
   const [searchQuery, setSearchQuery] = useState('')
   const [showAdditionalFields, setShowAdditionalFields] = useState(false)
   const [quotationItems, setQuotationItems] = useState<QuotationItem[]>([])
@@ -73,6 +72,7 @@ const Quotations = () => {
     partyId: '',
     status: 'DRAFT' as QuotationStatus,
     invoiceDate: new Date().toISOString().split('T')[0],
+    dueDate: '',
     invoiceNumber: '',
     notes: '',
     poNumber: '',
@@ -86,19 +86,7 @@ const Quotations = () => {
     loadQuotations()
     loadParties()
     loadItems()
-    loadTemplate()
   }, [])
-
-  const loadTemplate = async () => {
-    try {
-      const result = await window.electronAPI.settings.get('invoiceTemplate')
-      if (result.success && result.data) {
-        setSelectedTemplate(result.data as InvoiceTemplate)
-      }
-    } catch (error) {
-      console.error('Failed to load template setting:', error)
-    }
-  }
 
   const loadQuotations = async () => {
     setLoading(true)
@@ -166,7 +154,7 @@ const Quotations = () => {
           party: quotation.party,
           items: quotation.items || [],
           company,
-        } as any, selectedTemplate)
+        } as any)
       } else {
         toast.error('Failed to load quotation details')
       }
@@ -218,6 +206,7 @@ const Quotations = () => {
         partyId: fullQuotation.party?.id || '',
         status: (fullQuotation.status as QuotationStatus) || 'DRAFT',
         invoiceDate: new Date(fullQuotation.invoiceDate).toISOString().split('T')[0],
+        dueDate: fullQuotation.dueDate ? new Date(fullQuotation.dueDate).toISOString().split('T')[0] : '',
         notes: fullQuotation.notes || '',
         poNumber: fullQuotation.poNumber || '',
         ewayBillNo: fullQuotation.ewayBillNo || '',
@@ -327,6 +316,7 @@ const Quotations = () => {
       type: 'QUOTATION',
       status: formData.status,
       invoiceDate: formData.invoiceDate,
+      dueDate: formData.dueDate || null,
       notes: formData.notes,
       poNumber: formData.poNumber,
       ewayBillNo: formData.ewayBillNo,
@@ -367,6 +357,7 @@ const Quotations = () => {
       partyId: '',
       status: 'DRAFT',
       invoiceDate: new Date().toISOString().split('T')[0],
+      dueDate: '',
       invoiceNumber: '',
       notes: '',
       poNumber: '',
@@ -405,6 +396,7 @@ const Quotations = () => {
   const { sortedItems: sortedQuotations, sortKey, sortDir, toggleSort } = useSortable(filteredQuotations, [
     { key: 'invoiceNumber', accessor: (i) => i.invoiceNumber },
     { key: 'invoiceDate', accessor: (i) => new Date(i.invoiceDate).getTime() },
+    { key: 'dueDate', accessor: (i) => i.dueDate ? new Date(i.dueDate).getTime() : 0 },
     { key: 'party', accessor: (i) => i.party?.name || '' },
     { key: 'totalAmount', accessor: (i) => i.totalAmount },
     { key: 'status', accessor: (i) => i.status || '' },
@@ -431,7 +423,7 @@ const Quotations = () => {
 
       <div className="card">
         {loading ? (
-          <TableSkeleton rows={6} columns={6} />
+          <TableSkeleton rows={6} columns={7} />
         ) : filteredQuotations.length === 0 ? (
           searchQuery.trim() ? (
             <EmptyState
@@ -454,6 +446,7 @@ const Quotations = () => {
                 <tr>
                   <SortHeader label="Quotation #" sortKey="invoiceNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Date" sortKey="invoiceDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                  <SortHeader label="Expiry" sortKey="dueDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Party" sortKey="party" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Amount" sortKey="totalAmount" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Status" sortKey="status" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
@@ -465,6 +458,7 @@ const Quotations = () => {
                   <tr key={quotation.id} className="border-t">
                     <td className="table-cell font-medium">{quotation.invoiceNumber}</td>
                     <td className="table-cell">{new Date(quotation.invoiceDate).toLocaleDateString()}</td>
+                    <td className="table-cell">{quotation.dueDate ? new Date(quotation.dueDate).toLocaleDateString() : '-'}</td>
                     <td className="table-cell">{quotation.party?.name}</td>
                     <td className="table-cell">{formatCurrency(quotation.totalAmount)}</td>
                     <td className="table-cell">
@@ -580,6 +574,16 @@ const Quotations = () => {
                       value={formData.invoiceDate}
                       onChange={(e) => setFormData({ ...formData, invoiceDate: e.target.value })}
                       required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Expiry Date</label>
+                    <input
+                      type="date"
+                      className="input"
+                      value={formData.dueDate}
+                      onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
                     />
                   </div>
                 </div>
@@ -835,6 +839,10 @@ const Quotations = () => {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Quotation Date</p>
                   <p className="font-medium">{new Date(viewingQuotation.invoiceDate).toLocaleDateString()}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Expiry Date</p>
+                  <p className="font-medium">{viewingQuotation.dueDate ? new Date(viewingQuotation.dueDate).toLocaleDateString() : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Document Type</p>
