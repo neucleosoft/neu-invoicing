@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { BarChart3, Package, Wallet, CreditCard, Receipt } from 'lucide-react'
 import { formatCurrency } from '../utils/currency'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/ToastContext'
 
 const Reports = () => {
   const [activeReport, setActiveReport] = useState<'sales' | 'stock' | 'receivables' | 'payables' | 'tax'>('sales')
