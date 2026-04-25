@@ -1,24 +1,5 @@
-import { createContext, useContext, useState, useCallback, useRef } from 'react'
-
-interface ConfirmOptions {
-  title?: string
-  message: string
-  confirmText?: string
-  cancelText?: string
-  danger?: boolean
-}
-
-interface ConfirmContextValue {
-  confirm: (options: ConfirmOptions | string) => Promise<boolean>
-}
-
-const ConfirmContext = createContext<ConfirmContextValue | null>(null)
-
-export function useConfirm() {
-  const ctx = useContext(ConfirmContext)
-  if (!ctx) throw new Error('useConfirm must be used within ConfirmProvider')
-  return ctx.confirm
-}
+import { useState, useCallback, useRef } from 'react'
+import { ConfirmContext, type ConfirmOptions } from './ConfirmDialogContext'
 
 export function ConfirmProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<{

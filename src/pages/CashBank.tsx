@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
-import { useConfirm } from '../components/ConfirmDialog'
+import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { Landmark, Search as SearchIcon } from 'lucide-react'
 

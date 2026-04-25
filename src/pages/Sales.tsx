@@ -4,7 +4,7 @@ import { downloadInvoicePDF, InvoiceTemplate } from '../utils/generateInvoicePDF
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
-import { useConfirm } from '../components/ConfirmDialog'
+import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
 import SortHeader from '../components/SortHeader'
@@ -36,11 +36,10 @@ interface InvoiceItem {
   amount: number
 }
 
-type DocKind = 'INVOICE' | 'QUOTATION' | 'PROFORMA_INVOICE'
+type DocKind = 'INVOICE' | 'PROFORMA_INVOICE'
 
 function kindNames(kind: DocKind) {
   switch (kind) {
-    case 'QUOTATION': return { singular: 'Quotation', plural: 'Quotations', short: 'quotation' }
     case 'PROFORMA_INVOICE': return { singular: 'Proforma Invoice', plural: 'Proforma Invoices', short: 'PI' }
     default: return { singular: 'Invoice', plural: 'Invoices', short: 'invoice' }
   }
@@ -67,7 +66,7 @@ const Sales = () => {
     type: 'INVOICE' as DocKind,
     status: 'DRAFT' as string,
     invoiceDate: new Date().toISOString().split('T')[0],
-    invoiceNo: '',
+    invoiceNumber: '',
     dueDate: '',
     notes: '',
     termsConditions: '',
@@ -106,7 +105,7 @@ const Sales = () => {
     try {
       const result = await window.electronAPI.sales.getAll(filter === 'ALL' ? undefined : filter)
       if (result.success && result.data) {
-        setInvoices(result.data)
+        setInvoices(result.data.filter(invoice => invoice.type !== 'QUOTATION'))
       }
     } finally {
       setLoading(false)
@@ -197,14 +196,6 @@ const Sales = () => {
     }
   }
 
-  const handleConvertToInvoice = async (id: string) => {
-    const result = await window.electronAPI.sales.convertQuoteToInvoice(id)
-    if (result.success) {
-      toast.success('Quotation converted to invoice successfully!')
-      loadInvoices()
-    }
-  }
-
   const handleView = async (id: string) => {
     const result = await window.electronAPI.sales.getById(id)
     if (result.success && result.data) {
@@ -221,7 +212,7 @@ const Sales = () => {
       setFormData({
         invoiceNumber: fullInvoice.invoiceNumber || '',
         partyId: fullInvoice.party?.id || '',
-        type: fullInvoice.type,
+        type: fullInvoice.type === 'PROFORMA_INVOICE' ? 'PROFORMA_INVOICE' : 'INVOICE',
         status: fullInvoice.status || 'DRAFT',
         invoiceDate: new Date(fullInvoice.invoiceDate).toISOString().split('T')[0],
         dueDate: fullInvoice.dueDate ? new Date(fullInvoice.dueDate).toISOString().split('T')[0] : '',
@@ -397,6 +388,7 @@ const Sales = () => {
       type: 'INVOICE',
       status: 'DRAFT',
       invoiceDate: new Date().toISOString().split('T')[0],
+      invoiceNumber: '',
       dueDate: '',
       notes: '',
       termsConditions: '',
@@ -418,7 +410,7 @@ const Sales = () => {
     if (result.success) {
       setFormData(prev => ({
         ...prev,
-        invoiceNumber: result.data,
+        invoiceNumber: result.data || '',
         type: filter === 'ALL' ? 'INVOICE' : (filter as DocKind),
       }))
     }
@@ -471,7 +463,7 @@ const Sales = () => {
 
       {/* Filter Tabs */}
       <div className="flex space-x-2">
-        {(['ALL', 'INVOICE', 'QUOTATION', 'PROFORMA_INVOICE'] as const).map((tab) => (
+        {(['ALL', 'INVOICE', 'PROFORMA_INVOICE'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setFilter(tab)}
@@ -512,9 +504,7 @@ const Sales = () => {
               const title =
                 filter === 'PROFORMA_INVOICE' ? 'No Proforma yet' : `No ${k.plural.toLowerCase()} yet`
               const description =
-                filter === 'QUOTATION'
-                  ? 'Create your first quotation to share pricing with customers before billing.'
-                  : filter === 'PROFORMA_INVOICE'
+                filter === 'PROFORMA_INVOICE'
                     ? 'Create your first proforma invoice to share expected pricing with customers.'
                     : 'Create your first sales invoice to start billing customers and tracking payments.'
               return (
@@ -591,11 +581,6 @@ const Sales = () => {
                         >
                           PDF
                         </button>
-                        {invoice.type === 'QUOTATION' && (
-                          <button onClick={() => handleConvertToInvoice(invoice.id)} className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300">
-                            Convert
-                          </button>
-                        )}
                         <button onClick={() => handleDelete(invoice.id)} className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
                           Delete
                         </button>
@@ -661,7 +646,6 @@ const Sales = () => {
                       onChange={(e) => setFormData({...formData, type: e.target.value as DocKind})}
                     >
                       <option value="INVOICE">Invoice</option>
-                      <option value="QUOTATION">Quotation</option>
                       <option value="PROFORMA_INVOICE">Proforma Invoice</option>
                     </select>
                   </div>

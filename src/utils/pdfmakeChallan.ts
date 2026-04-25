@@ -601,7 +601,7 @@ function buildFooter(ch: ChallanData, logo: string): Content {
       ]
     },
     layout: {
-      hLineWidth: (i: number, node: any) => i === 0 ? 0 : 0.5,
+      hLineWidth: (i: number, _node: any) => i === 0 ? 0 : 0.5,
       vLineWidth: () => 0.5,
       hLineColor: () => '#000',
       vLineColor: () => '#000',
