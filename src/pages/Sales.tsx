@@ -67,7 +67,7 @@ const Sales = () => {
     type: 'INVOICE' as DocKind,
     status: 'DRAFT' as string,
     invoiceDate: new Date().toISOString().split('T')[0],
-    invoiceNo: '',
+    invoiceNumber: '',
     dueDate: '',
     notes: '',
     termsConditions: '',
@@ -397,6 +397,7 @@ const Sales = () => {
       type: 'INVOICE',
       status: 'DRAFT',
       invoiceDate: new Date().toISOString().split('T')[0],
+      invoiceNumber: '',
       dueDate: '',
       notes: '',
       termsConditions: '',
@@ -418,7 +419,7 @@ const Sales = () => {
     if (result.success) {
       setFormData(prev => ({
         ...prev,
-        invoiceNumber: result.data,
+        invoiceNumber: result.data || '',
         type: filter === 'ALL' ? 'INVOICE' : (filter as DocKind),
       }))
     }

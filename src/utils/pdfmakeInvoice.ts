@@ -32,7 +32,7 @@ export function downloadClassicPDF(invoice: InvoiceData) {
 
 // ─── Document definition ─────────────────────────────────────────────────────
 
-function buildDocDefinition(inv: InvoiceData): TDocumentDefinitions {
+function buildDocDefinition(inv: InvoiceData): any {
   const isInter = inv.isInterState !== false
   const taxGroups = getTaxGroups(inv.items, isInter)
   const hsnGroups = getHSNGroups(inv.items, isInter)
@@ -234,7 +234,7 @@ function buildBillShipSection(inv: InvoiceData): Content {
       ],
     },
     layout: {
-      hLineWidth: (i: number, node: any) => i === 0 ? 0 : 0.5,
+      hLineWidth: (i: number, _node: any) => i === 0 ? 0 : 0.5,
       vLineWidth: () => 0.5,
       hLineColor: () => '#000',
       vLineColor: () => '#000',
@@ -327,9 +327,6 @@ function buildItemsSection(inv: InvoiceData, isInter: boolean, taxGroups: Return
   const fillerRows: TableCell[][] = Array.from({ length: fillerCount }, () => [
     { ...emptyCell }, { ...emptyCell }, { ...emptyCell }, { ...emptyCell }, { ...emptyCell }, { ...emptyCell }
   ])
-
-  // Track where tax rows start so we can control horizontal lines
-  const taxStartIndex = 1 + itemRows.length + fillerCount // 1 for header, fillerCount is 0 or 1
 
   const body: TableCell[][] = [
     headerRow,
@@ -627,7 +624,7 @@ function buildFooter(inv: InvoiceData, logo: string): Content {
       ]
     },
     layout: {
-      hLineWidth: (i: number, node: any) => i === 0 ? 0 : 0.5,
+      hLineWidth: (i: number, _node: any) => i === 0 ? 0 : 0.5,
       vLineWidth: () => 0.5,
       hLineColor: () => '#000',
       vLineColor: () => '#000',
