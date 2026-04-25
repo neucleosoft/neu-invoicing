@@ -25,14 +25,14 @@ const GREEN = '#C6E0B4'
 
 export function downloadClassicPDF(invoice: InvoiceData) {
   if (!invoice.items) invoice.items = []
-  const dd = buildDocDefinition(invoice)
+  const dd = buildClassicPDFDefinition(invoice)
   const filename = `${invoice.invoiceNumber.replace(/\//g, '_')}_${invoice.type === 'QUOTATION' ? 'quotation' : 'sales_invoice'}_${invoice.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
   pdfMake.createPdf(dd).download(filename)
 }
 
 // ─── Document definition ─────────────────────────────────────────────────────
 
-function buildDocDefinition(inv: InvoiceData): TDocumentDefinitions {
+export function buildClassicPDFDefinition(inv: InvoiceData): any {
   const isInter = inv.isInterState !== false
   const taxGroups = getTaxGroups(inv.items, isInter)
   const hsnGroups = getHSNGroups(inv.items, isInter)
@@ -66,6 +66,16 @@ function buildDocDefinition(inv: InvoiceData): TDocumentDefinitions {
 
 function buildTitle(type: string): Content {
   const label = type === 'QUOTATION' ? 'QUOTATION' : 'TAX INVOICE'
+  if (type === 'QUOTATION') {
+    return {
+      columns: [
+        { text: label, bold: true, fontSize: 11, width: 'auto' },
+        { text: '', width: '*' }
+      ],
+      margin: [0, 0, 0, 3]
+    }
+  }
+
   return {
     columns: [
       { text: label, bold: true, fontSize: 11, width: 'auto' },
@@ -87,6 +97,7 @@ function buildTitle(type: string): Content {
 
 function buildCompanySection(inv: InvoiceData, logo: string): Content {
   const company = inv.company
+  const isQuotation = inv.type === 'QUOTATION'
 
   // Build company info lines
   const companyStack: Content[] = [
@@ -103,24 +114,34 @@ function buildCompanySection(inv: InvoiceData, logo: string): Content {
   }
 
   // Build the invoice details grid (right side)
-  // Rows: Invoice No. + Date, then P.O. No. if present
+  // Rows: Number + Date, then document-specific details if present
   const hasPoNumber = !!inv.poNumber
-  // Invoice No. & Date — each label+value in one cell, stacked vertically
-  // P.O. No. gets equal height row below with a horizontal line separating them
+  const hasDueDate = isQuotation && !!inv.dueDate
   const invoiceGridBody: TableCell[][] = [
     [
       { stack: [
-        { text: 'Invoice No.', bold: true, fontSize: 10 },
+        { text: isQuotation ? 'Quotation No.' : 'Invoice No.', bold: true, fontSize: 10 },
         { text: inv.invoiceNumber, fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
       { stack: [
-        { text: 'Invoice Date', bold: true, fontSize: 10 },
+        { text: isQuotation ? 'Quotation Date' : 'Invoice Date', bold: true, fontSize: 10 },
         { text: formatDate(inv.invoiceDate), fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
     ],
   ]
 
-  if (hasPoNumber) {
+  if (isQuotation && (hasDueDate || hasPoNumber)) {
+    invoiceGridBody.push([
+      { stack: [
+        { text: 'Expiry Date', bold: true, fontSize: 10 },
+        { text: hasDueDate && inv.dueDate ? formatDate(inv.dueDate) : '-', fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+      ] },
+      { stack: [
+        { text: 'P.O. No.', bold: true, fontSize: 10 },
+        { text: hasPoNumber ? inv.poNumber : '-', fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+      ] },
+    ])
+  } else if (hasPoNumber) {
     invoiceGridBody.push(
       [{ stack: [
         { text: 'P.O. No.', bold: true, fontSize: 10 },
@@ -145,12 +166,12 @@ function buildCompanySection(inv: InvoiceData, logo: string): Content {
           // Right: invoice number grid
           {
             table: {
-              heights: hasPoNumber ? [35, 35] : [70],
+              heights: (hasPoNumber || hasDueDate) ? [35, 35] : [70],
               widths: ['*', '*'],
               body: invoiceGridBody,
             },
             layout: {
-              hLineWidth: (i: number) => (hasPoNumber && i === 1) ? 0.5 : 0,
+              hLineWidth: (i: number) => ((hasPoNumber || hasDueDate) && i === 1) ? 0.5 : 0,
               vLineWidth: () => 0,
               hLineColor: () => '#000',
               vLineColor: () => '#000',
@@ -234,7 +255,7 @@ function buildBillShipSection(inv: InvoiceData): Content {
       ],
     },
     layout: {
-      hLineWidth: (i: number, node: any) => i === 0 ? 0 : 0.5,
+      hLineWidth: (i: number, _node: any) => i === 0 ? 0 : 0.5,
       vLineWidth: () => 0.5,
       hLineColor: () => '#000',
       vLineColor: () => '#000',
@@ -327,9 +348,6 @@ function buildItemsSection(inv: InvoiceData, isInter: boolean, taxGroups: Return
   const fillerRows: TableCell[][] = Array.from({ length: fillerCount }, () => [
     { ...emptyCell }, { ...emptyCell }, { ...emptyCell }, { ...emptyCell }, { ...emptyCell }, { ...emptyCell }
   ])
-
-  // Track where tax rows start so we can control horizontal lines
-  const taxStartIndex = 1 + itemRows.length + fillerCount // 1 for header, fillerCount is 0 or 1
 
   const body: TableCell[][] = [
     headerRow,
@@ -627,7 +645,7 @@ function buildFooter(inv: InvoiceData, logo: string): Content {
       ]
     },
     layout: {
-      hLineWidth: (i: number, node: any) => i === 0 ? 0 : 0.5,
+      hLineWidth: (i: number, _node: any) => i === 0 ? 0 : 0.5,
       vLineWidth: () => 0.5,
       hLineColor: () => '#000',
       vLineColor: () => '#000',

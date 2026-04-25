@@ -97,12 +97,20 @@ export interface Item {
   updatedAt: string
 }
 
+// Invoices and quotations still share the same Prisma model for now,
+// so we keep the legacy SalesInvoice interface name and extract the
+// document semantics into shared type aliases.
+export type SalesDocumentType = 'INVOICE' | 'QUOTATION' | 'PROFORMA_INVOICE'
+export type InvoiceStatus = 'DRAFT' | 'PAID' | 'PARTIAL' | 'OVERDUE'
+export type QuotationStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'
+export type SalesDocumentStatus = InvoiceStatus | QuotationStatus
+
 export interface SalesInvoice {
   id: string
   invoiceNumber: string
   invoiceDate: string
   dueDate?: string
-  type: 'INVOICE' | 'QUOTATION'
+  type: SalesDocumentType
   partyId: string
   party?: Party
   subtotal: number
@@ -111,10 +119,25 @@ export interface SalesInvoice {
   totalAmount: number
   amountPaid: number
   balanceDue: number
-  status: 'DRAFT' | 'PAID' | 'PARTIAL' | 'OVERDUE'
+  status: SalesDocumentStatus
   convertedFromQuoteId?: string
   notes?: string
   termsConditions?: string
+  placeOfSupply?: string
+  placeOfSupplyName?: string
+  isInterState?: boolean
+  reverseCharge?: boolean
+  cgstAmount?: number
+  sgstAmount?: number
+  igstAmount?: number
+  cessAmount?: number
+  supplyType?: string
+  ecommerceGstin?: string
+  poNumber?: string
+  ewayBillNo?: string
+  vehicleNumber?: string
+  warrantyPeriod?: string
+  dispatchedThrough?: string
   items: SalesInvoiceItem[]
   createdAt: string
   updatedAt: string
@@ -130,6 +153,16 @@ export interface SalesInvoiceItem {
   discount: number
   taxRate: number
   total: number
+  hsnCode?: string
+  taxableAmount?: number
+  cgstRate?: number
+  cgstAmount?: number
+  sgstRate?: number
+  sgstAmount?: number
+  igstRate?: number
+  igstAmount?: number
+  cessRate?: number
+  cessAmount?: number
   createdAt: string
 }
 
@@ -338,7 +371,7 @@ declare global {
         getLowStock: () => Promise<{ success: boolean; data?: Item[]; error?: string }>
       }
       sales: {
-        getAll: (type?: string) => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>
+        getAll: (type?: SalesDocumentType) => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>
         getById: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
@@ -346,6 +379,15 @@ declare global {
         convertQuoteToInvoice: (quoteId: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         generateInvoiceNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
         generatePDF: (id: string) => Promise<{ success: boolean; message?: string; error?: string }>
+      }
+      quotation: {
+        getAll: () => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>
+        getById: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
+        create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
+        update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        convertToInvoice: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
+        generateQuotationNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
       }
       purchase: {
         getAll: () => Promise<{ success: boolean; data?: PurchaseBill[]; error?: string }>

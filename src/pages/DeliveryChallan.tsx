@@ -3,7 +3,7 @@ import { formatCurrency } from '../utils/currency'
 import { downloadChallanPDF } from '../utils/pdfmakeChallan'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/Toast'
-import { useConfirm } from '../components/ConfirmDialog'
+import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { Truck, Search as SearchIcon } from 'lucide-react'
 

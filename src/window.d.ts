@@ -1,3 +1,5 @@
+import type { SalesDocumentType, SalesInvoice } from './types';
+
 export {};
 
 declare global {
@@ -37,14 +39,23 @@ declare global {
         getLowStock: () => Promise<any>;
       };
       sales: {
-        getAll: (type?: string) => Promise<any>;
-        getById: (id: string) => Promise<any>;
-        create: (data: any) => Promise<any>;
-        update: (id: string, data: any) => Promise<any>;
-        delete: (id: string) => Promise<any>;
-        convertQuoteToInvoice: (quoteId: string) => Promise<any>;
-        generateInvoiceNumber: () => Promise<any>;
-        generatePDF: (id: string) => Promise<any>;
+        getAll: (type?: SalesDocumentType) => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>;
+        getById: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
+        create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
+        update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>;
+        convertQuoteToInvoice: (quoteId: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
+        generateInvoiceNumber: () => Promise<{ success: boolean; data?: string; error?: string }>;
+        generatePDF: (id: string) => Promise<{ success: boolean; message?: string; error?: string }>;
+      };
+      quotation: {
+        getAll: () => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>;
+        getById: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
+        create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
+        update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>;
+        convertToInvoice: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
+        generateQuotationNumber: () => Promise<{ success: boolean; data?: string; error?: string }>;
       };
       purchase: {
         getAll: () => Promise<any>;

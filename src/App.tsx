@@ -11,6 +11,7 @@ import Dashboard from './pages/Dashboard'
 import Parties from './pages/Parties'
 import Items from './pages/Items'
 import Sales from './pages/Sales'
+import Quotations from './pages/Quotations'
 import Purchase from './pages/Purchase'
 import Payments from './pages/Payments'
 import Reports from './pages/Reports'
@@ -130,6 +131,7 @@ function App() {
             <Route path="parties" element={<Parties />} />
             <Route path="items" element={<Items />} />
             <Route path="sales" element={<Sales />} />
+            <Route path="quotations" element={<Quotations />} />
             <Route path="purchase" element={<Purchase />} />
             <Route path="payments" element={<Payments />} />
             <Route path="delivery-challan" element={<DeliveryChallan />} />

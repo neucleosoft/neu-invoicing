@@ -18,6 +18,7 @@ export interface PDFDocumentData {
       name: string
       unit?: string
       hsnCode?: string
+      skuHsn?: string
     }
     quantity: number
     rate: number
@@ -45,6 +46,7 @@ export interface PDFDocumentData {
     stateCode?: string
     stateName?: string
     logoPath?: string
+    logoBase64?: string
     signaturePath?: string
   }
   totalAmount: number
@@ -450,11 +452,9 @@ export function drawBillToShipTo(
 export function drawItemsTableHeader(
   doc: jsPDF,
   BILLSHIP_BOTTOM: number, ITEMS_HDR_H: number,
-  ML: number, RE: number, CW: number,
+  ML: number, _RE: number, CW: number,
   IC: number[]
 ) {
-  const ITEMS_HDR_BOTTOM = BILLSHIP_BOTTOM + ITEMS_HDR_H
-
   doc.setFillColor(198, 224, 180)
   doc.rect(ML, BILLSHIP_BOTTOM, CW, ITEMS_HDR_H, 'F')
 
@@ -543,7 +543,6 @@ export function drawAmountInWords(
   WORDS_TOP: number, FOOTER_TOP: number,
   ML: number, CW: number
 ) {
-  const RE = ML + CW
   doc.setFillColor(198, 224, 180)
   doc.setDrawColor(0, 0, 0)
   doc.rect(ML, WORDS_TOP, CW, FOOTER_TOP - WORDS_TOP, 'FD')

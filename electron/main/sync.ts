@@ -184,9 +184,6 @@ export const performInitialSync = async () => {
   await performSync()
 }
 
-// Trigger sync after database changes (properly debounced)
-let syncDebounceTimer: ReturnType<typeof setTimeout> | null = null
-
 // Disabled auto-sync — sync only happens when user clicks sync button
 export const triggerSyncAfterChange = async () => {
   // intentionally empty
