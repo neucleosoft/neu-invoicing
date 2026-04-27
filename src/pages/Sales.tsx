@@ -454,7 +454,7 @@ const Sales = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Sales</h1>
+        <h1 className="text-3xl font-bold">Invoices</h1>
         <button
           onClick={handleNewInvoice}
           className="btn btn-primary"
@@ -489,7 +489,7 @@ const Sales = () => {
             <EmptyState
               icon={Wallet}
               title={`No ${invoiceLabels.plural.toLowerCase()} yet`}
-              description="Create your first sales invoice to start billing customers and tracking payments."
+              description="Create your first invoice to start billing customers and tracking payments."
               action={{ label: `+ Create your first ${invoiceLabels.singular.toLowerCase()}`, onClick: handleNewInvoice }}
             />
           )

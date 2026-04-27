@@ -30,7 +30,7 @@ const navigation = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard },
   { name: 'Parties', path: '/parties', icon: Users },
   { name: 'Items', path: '/items', icon: Package },
-  { name: 'Sales', path: '/sales', icon: Wallet },
+  { name: 'Invoices', path: '/invoices', icon: Wallet },
   { name: 'Quotations', path: '/quotations', icon: FileText },
   { name: 'Proforma Invoices', path: '/proforma-invoices', icon: FileText },
   { name: 'Purchase', path: '/purchase', icon: ShoppingCart },

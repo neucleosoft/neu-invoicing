@@ -24,7 +24,7 @@ const destinations = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, group: 'Navigate' },
   { name: 'Parties', path: '/parties', icon: Users, group: 'Navigate' },
   { name: 'Items', path: '/items', icon: Package, group: 'Navigate' },
-  { name: 'Sales', path: '/sales', icon: Wallet, group: 'Navigate' },
+  { name: 'Invoices', path: '/invoices', icon: Wallet, group: 'Navigate' },
   { name: 'Quotations', path: '/quotations', icon: FileText, group: 'Navigate' },
   { name: 'Proforma Invoices', path: '/proforma-invoices', icon: FileText, group: 'Navigate' },
   { name: 'Purchase', path: '/purchase', icon: ShoppingCart, group: 'Navigate' },

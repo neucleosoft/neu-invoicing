@@ -172,7 +172,7 @@ const Dashboard = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold text-gray-900 dark:text-gray-100">Dashboard</h1>
         <div className="flex space-x-3">
-          <Link to="/sales" state={{ openNew: true }} className="btn btn-primary dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">+ New Invoice</Link>
+          <Link to="/invoices" state={{ openNew: true }} className="btn btn-primary dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">+ New Invoice</Link>
           <Link to="/purchase" state={{ openNew: true }} className="btn btn-primary dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600">+ New Purchase</Link>
         </div>
       </div>
@@ -197,7 +197,7 @@ const Dashboard = () => {
 
         <div className="card bg-gradient-to-br from-blue-50 to-blue-100 relative">
           <TrendingUp className="absolute top-4 right-4 w-6 h-6 text-blue-600/60" strokeWidth={1.5} />
-          <p className="text-sm text-blue-600 font-medium pr-8">Total Sales (YTD)</p>
+          <p className="text-sm text-blue-600 font-medium pr-8">Total Invoiced (YTD)</p>
           <p className={`${amountFontSize(formatCurrency(metrics?.totalSales || 0))} font-bold text-blue-700 mt-2`}>
             {formatCurrency(metrics?.totalSales || 0)}
           </p>
@@ -228,11 +228,11 @@ const Dashboard = () => {
         </div>
       </div>
 
-      {/* Sales Chart and Recent Activity */}
+      {/* Invoice Chart and Recent Activity */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Sales Chart */}
+        {/* Invoice Chart */}
         <div className="card">
-          <h2 className="text-xl font-semibold mb-4">Sales Trend (Last 6 Months)</h2>
+          <h2 className="text-xl font-semibold mb-4">Invoice Trend (Last 6 Months)</h2>
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={salesChart}>
               <CartesianGrid strokeDasharray="3 3" />
@@ -248,7 +248,7 @@ const Dashboard = () => {
         <div className="card">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-xl font-semibold">Recent Invoices</h2>
-            <Link to="/sales" className="text-sm text-primary-600 hover:text-primary-700">
+            <Link to="/invoices" className="text-sm text-primary-600 hover:text-primary-700">
               View All →
             </Link>
           </div>
