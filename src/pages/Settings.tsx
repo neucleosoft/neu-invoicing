@@ -413,7 +413,7 @@ const Settings = () => {
               <div className="mt-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
                 <h3 className="font-semibold text-blue-800 dark:text-blue-300 mb-1">Template Preview</h3>
                 <p className="text-sm text-blue-600 dark:text-blue-400">
-                  The selected template will be used when you download or preview invoices from the Sales page.
+                  The selected template will be used when you download or preview invoices from the Invoices page.
                   Each template has a unique design to match your business style.
                 </p>
               </div>

@@ -131,7 +131,8 @@ function App() {
             <Route index element={<Dashboard />} />
             <Route path="parties" element={<Parties />} />
             <Route path="items" element={<Items />} />
-            <Route path="sales" element={<Sales />} />
+            <Route path="sales" element={<Navigate to="/invoices" replace />} />
+            <Route path="invoices" element={<Sales />} />
             <Route path="quotations" element={<Quotations />} />
             <Route path="proforma-invoices" element={<ProformaInvoices />} />
             <Route path="purchase" element={<Purchase />} />
