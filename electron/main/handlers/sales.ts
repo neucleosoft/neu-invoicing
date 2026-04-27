@@ -3,7 +3,6 @@ import { getPrisma } from '../database'
 import { triggerSyncAfterChange } from '../sync'
 import {
   buildSalesDocumentValues,
-  convertQuotationToInvoice,
   generateNextInvoiceNumber,
   normalizeSalesDocumentNumber,
 } from './salesDocumentHelpers'
@@ -12,11 +11,10 @@ export const setupSalesHandlers = () => {
   const prisma = getPrisma()
 
   // Get all sales invoices
-  ipcMain.handle('sales:getAll', async (_, type?: string) => {
+  ipcMain.handle('sales:getAll', async () => {
     try {
-      const where = type ? { type: type as any } : {}
       const invoices = await prisma.salesInvoice.findMany({
-        where,
+        where: { type: 'INVOICE' },
         include: {
           party: true,
           items: {
@@ -39,8 +37,8 @@ export const setupSalesHandlers = () => {
   // Get invoice by ID
   ipcMain.handle('sales:getById', async (_, id: string) => {
     try {
-      const invoice = await prisma.salesInvoice.findUnique({
-        where: { id },
+      const invoice = await prisma.salesInvoice.findFirst({
+        where: { id, type: 'INVOICE' },
         include: {
           party: true,
           items: {
@@ -82,7 +80,7 @@ export const setupSalesHandlers = () => {
           data: {
             invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
-            type: data.type,
+            type: 'INVOICE',
             partyId: data.partyId,
             subtotal: values.subtotal,
             discount: data.discount || 0,
@@ -123,26 +121,23 @@ export const setupSalesHandlers = () => {
           data: { currentBalance: { increment: balanceDue } }
         })
 
-        // Update stock if invoice (not quotation)
-        if (data.type === 'INVOICE') {
-          for (const item of data.items) {
-            const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
-            if (dbItem && dbItem.trackStock) {
-              await tx.item.update({
-                where: { id: item.itemId },
-                data: { currentStock: { decrement: item.quantity } }
-              })
+        for (const item of data.items) {
+          const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
+          if (dbItem && dbItem.trackStock) {
+            await tx.item.update({
+              where: { id: item.itemId },
+              data: { currentStock: { decrement: item.quantity } }
+            })
 
-              await tx.stockMovement.create({
-                data: {
-                  itemId: item.itemId,
-                  movementType: 'SALE',
-                  quantity: -item.quantity,
-                  referenceType: 'INVOICE',
-                  referenceId: created.id
-                }
-              })
-            }
+            await tx.stockMovement.create({
+              data: {
+                itemId: item.itemId,
+                movementType: 'SALE',
+                quantity: -item.quantity,
+                referenceType: 'INVOICE',
+                referenceId: created.id
+              }
+            })
           }
         }
 
@@ -173,7 +168,7 @@ export const setupSalesHandlers = () => {
           include: { items: true }
         })
 
-        if (!existingInvoice) {
+        if (!existingInvoice || existingInvoice.type !== 'INVOICE') {
           throw new Error('Invoice not found')
         }
 
@@ -199,7 +194,7 @@ export const setupSalesHandlers = () => {
           data: {
             invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
-            type: data.type,
+            type: 'INVOICE',
             partyId: data.partyId,
             subtotal: values.subtotal,
             discount: data.discount || 0,
@@ -275,45 +270,39 @@ export const setupSalesHandlers = () => {
         }
       })
 
-      if (!invoice) {
+      if (!invoice || invoice.type !== 'INVOICE') {
         throw new Error('Invoice not found')
       }
 
-      // If it's an invoice (not quotation), reverse party balance and stock
-      if (invoice.type === 'INVOICE') {
-        // Reverse party balance
-        await prisma.party.update({
-          where: { id: invoice.partyId },
-          data: {
-            currentBalance: {
-              decrement: invoice.balanceDue
-            }
-          }
-        })
-
-        // Reverse stock for each item
-        for (const item of invoice.items) {
-          const dbItem = await prisma.item.findUnique({ where: { id: item.itemId } })
-          if (dbItem && dbItem.trackStock) {
-            await prisma.item.update({
-              where: { id: item.itemId },
-              data: {
-                currentStock: {
-                  increment: item.quantity
-                }
-              }
-            })
+      await prisma.party.update({
+        where: { id: invoice.partyId },
+        data: {
+          currentBalance: {
+            decrement: invoice.balanceDue
           }
         }
+      })
 
-        // Delete stock movements for this invoice
-        await prisma.stockMovement.deleteMany({
-          where: {
-            referenceType: 'INVOICE',
-            referenceId: id
-          }
-        })
+      for (const item of invoice.items) {
+        const dbItem = await prisma.item.findUnique({ where: { id: item.itemId } })
+        if (dbItem && dbItem.trackStock) {
+          await prisma.item.update({
+            where: { id: item.itemId },
+            data: {
+              currentStock: {
+                increment: item.quantity
+              }
+            }
+          })
+        }
       }
+
+      await prisma.stockMovement.deleteMany({
+        where: {
+          referenceType: 'INVOICE',
+          referenceId: id
+        }
+      })
 
       // Delete the invoice (items will cascade delete)
       await prisma.salesInvoice.delete({
@@ -326,21 +315,6 @@ export const setupSalesHandlers = () => {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete invoice'
-      }
-    }
-  })
-
-  // Convert quotation to invoice
-  ipcMain.handle('sales:convertQuoteToInvoice', async (_, quoteId: string) => {
-    try {
-      const invoice = await convertQuotationToInvoice(prisma, quoteId)
-
-      await triggerSyncAfterChange()
-      return { success: true, data: invoice }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to convert quotation'
       }
     }
   })

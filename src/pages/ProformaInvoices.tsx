@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
-import { SalesInvoice, QuotationStatus } from '../types'
-import { downloadInvoicePDF } from '../utils/generateInvoicePDF'
+import { FileText, Search as SearchIcon } from 'lucide-react'
+
+import { ProformaInvoice, ProformaInvoiceStatus } from '../types'
+import { downloadProformaInvoicePDF } from '../utils/pdfmakeProformaInvoice'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import { useToast } from '../components/ToastContext'
@@ -9,7 +11,6 @@ import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
 import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
-import { FileText, Search as SearchIcon } from 'lucide-react'
 
 interface Party {
   id: string
@@ -26,7 +27,7 @@ interface Item {
   skuHsn?: string
 }
 
-interface QuotationItem {
+interface ProformaInvoiceFormItem {
   itemId: string
   hsnCode: string
   quantity: number
@@ -36,7 +37,7 @@ interface QuotationItem {
   amount: number
 }
 
-const statusOptions: QuotationStatus[] = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED']
+const statusOptions: ProformaInvoiceStatus[] = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED']
 
 const statusBadgeClass = (status: string) => {
   switch (status) {
@@ -53,47 +54,42 @@ const statusBadgeClass = (status: string) => {
   }
 }
 
-const Quotations = () => {
-  const [quotations, setQuotations] = useState<SalesInvoice[]>([])
+const ProformaInvoices = () => {
+  const [proformaInvoices, setProformaInvoices] = useState<ProformaInvoice[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
-  const [viewingQuotation, setViewingQuotation] = useState<SalesInvoice | null>(null)
-  const [editingQuotation, setEditingQuotation] = useState<SalesInvoice | null>(null)
+  const [viewingProformaInvoice, setViewingProformaInvoice] = useState<ProformaInvoice | null>(null)
+  const [editingProformaInvoice, setEditingProformaInvoice] = useState<ProformaInvoice | null>(null)
   const [parties, setParties] = useState<Party[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [showAdditionalFields, setShowAdditionalFields] = useState(false)
-  const [quotationItems, setQuotationItems] = useState<QuotationItem[]>([])
+  const [proformaInvoiceItems, setProformaInvoiceItems] = useState<ProformaInvoiceFormItem[]>([])
   const toast = useToast()
   const confirm = useConfirm()
 
   const [formData, setFormData] = useState({
     partyId: '',
-    status: 'DRAFT' as QuotationStatus,
+    status: 'DRAFT' as ProformaInvoiceStatus,
     invoiceDate: new Date().toISOString().split('T')[0],
     dueDate: '',
     invoiceNumber: '',
     notes: '',
-    poNumber: '',
-    ewayBillNo: '',
-    vehicleNumber: '',
-    warrantyPeriod: '',
-    dispatchedThrough: '',
+    deliveryTime: '',
   })
 
   useEffect(() => {
-    loadQuotations()
+    loadProformaInvoices()
     loadParties()
     loadItems()
   }, [])
 
-  const loadQuotations = async () => {
+  const loadProformaInvoices = async () => {
     setLoading(true)
     try {
-      const result = await window.electronAPI.quotation.getAll()
+      const result = await window.electronAPI.proformaInvoice.getAll()
       if (result.success && result.data) {
-        setQuotations(result.data)
+        setProformaInvoices(result.data)
       }
     } finally {
       setLoading(false)
@@ -114,11 +110,11 @@ const Quotations = () => {
     }
   }
 
-  const handleDownloadPDF = async (quotationId: string) => {
+  const handleDownloadPDF = async (proformaInvoiceId: string) => {
     try {
-      const result = await window.electronAPI.quotation.getById(quotationId)
+      const result = await window.electronAPI.proformaInvoice.getById(proformaInvoiceId)
       if (result.success && result.data) {
-        const quotation = result.data
+        const proformaInvoice = result.data
         const companyResult = await window.electronAPI.company.get()
         const company = companyResult.success ? companyResult.data : undefined
 
@@ -149,75 +145,71 @@ const Quotations = () => {
           }
         }
 
-        downloadInvoicePDF({
-          ...quotation,
-          party: quotation.party,
-          items: quotation.items || [],
+        downloadProformaInvoicePDF({
+          ...proformaInvoice,
+          type: 'PROFORMA_INVOICE',
+          party: proformaInvoice.party,
+          items: proformaInvoice.items || [],
           company,
+          amountPaid: 0,
+          balanceDue: 0,
         } as any)
       } else {
-        toast.error('Failed to load quotation details')
+        toast.error('Failed to load proforma invoice details')
       }
     } catch (error) {
-      console.error('Error generating quotation PDF:', error)
+      console.error('Error generating proforma invoice PDF:', error)
       toast.error('Failed to generate PDF')
     }
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this quotation?', danger: true })
+    const confirmed = await confirm({ message: 'Are you sure you want to delete this proforma invoice?', danger: true })
     if (confirmed) {
-      const result = await window.electronAPI.quotation.delete(id)
+      const result = await window.electronAPI.proformaInvoice.delete(id)
       if (result.success) {
-        loadQuotations()
+        loadProformaInvoices()
       } else {
-        toast.error('Failed to delete quotation: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to delete proforma invoice: ' + (result.error || 'Unknown error'))
       }
     }
   }
 
   const handleConvertToInvoice = async (id: string) => {
-    const result = await window.electronAPI.quotation.convertToInvoice(id)
+    const result = await window.electronAPI.proformaInvoice.convertToInvoice(id)
     if (result.success) {
-      toast.success('Quotation converted to invoice successfully!')
+      toast.success('Proforma invoice converted to invoice successfully!')
       setShowViewModal(false)
-      setViewingQuotation(null)
-      loadQuotations()
+      setViewingProformaInvoice(null)
+      loadProformaInvoices()
     } else {
-      toast.error('Failed to convert quotation: ' + (result.error || 'Unknown error'))
+      toast.error('Failed to convert proforma invoice: ' + (result.error || 'Unknown error'))
     }
   }
 
   const handleView = async (id: string) => {
-    const result = await window.electronAPI.quotation.getById(id)
+    const result = await window.electronAPI.proformaInvoice.getById(id)
     if (result.success && result.data) {
-      setViewingQuotation(result.data)
+      setViewingProformaInvoice(result.data)
       setShowViewModal(true)
     }
   }
 
-  const handleEdit = async (quotation: SalesInvoice) => {
-    const result = await window.electronAPI.quotation.getById(quotation.id)
+  const handleEdit = async (proformaInvoice: ProformaInvoice) => {
+    const result = await window.electronAPI.proformaInvoice.getById(proformaInvoice.id)
     if (result.success && result.data) {
-      const fullQuotation = result.data
-      setEditingQuotation(fullQuotation)
+      const fullProformaInvoice = result.data
+      setEditingProformaInvoice(fullProformaInvoice)
       setFormData({
-        invoiceNumber: fullQuotation.invoiceNumber || '',
-        partyId: fullQuotation.party?.id || '',
-        status: (fullQuotation.status as QuotationStatus) || 'DRAFT',
-        invoiceDate: new Date(fullQuotation.invoiceDate).toISOString().split('T')[0],
-        dueDate: fullQuotation.dueDate ? new Date(fullQuotation.dueDate).toISOString().split('T')[0] : '',
-        notes: fullQuotation.notes || '',
-        poNumber: fullQuotation.poNumber || '',
-        ewayBillNo: fullQuotation.ewayBillNo || '',
-        vehicleNumber: fullQuotation.vehicleNumber || '',
-        warrantyPeriod: fullQuotation.warrantyPeriod || '',
-        dispatchedThrough: fullQuotation.dispatchedThrough || '',
+        invoiceNumber: fullProformaInvoice.invoiceNumber || '',
+        partyId: fullProformaInvoice.party?.id || '',
+        status: (fullProformaInvoice.status as ProformaInvoiceStatus) || 'DRAFT',
+        invoiceDate: new Date(fullProformaInvoice.invoiceDate).toISOString().split('T')[0],
+        dueDate: fullProformaInvoice.dueDate ? new Date(fullProformaInvoice.dueDate).toISOString().split('T')[0] : '',
+        notes: fullProformaInvoice.notes || '',
+        deliveryTime: fullProformaInvoice.deliveryTime ? new Date(fullProformaInvoice.deliveryTime).toISOString().split('T')[0] : '',
       })
-      if (fullQuotation.poNumber || fullQuotation.ewayBillNo || fullQuotation.vehicleNumber || fullQuotation.warrantyPeriod || fullQuotation.dispatchedThrough) {
-        setShowAdditionalFields(true)
-      }
-      setQuotationItems(fullQuotation.items?.map((item: any) => ({
+      setProformaInvoiceItems(fullProformaInvoice.items?.map((item: any) => ({
         itemId: item.item?.id || item.itemId,
         hsnCode: item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '',
         quantity: item.quantity,
@@ -230,12 +222,12 @@ const Quotations = () => {
     }
   }
 
-  const addQuotationItem = () => {
-    if (quotationItems.length >= 1 && quotationItems[quotationItems.length - 1].itemId === '') {
+  const addProformaInvoiceItem = () => {
+    if (proformaInvoiceItems.length >= 1 && proformaInvoiceItems[proformaInvoiceItems.length - 1].itemId === '') {
       toast.info('Please complete the current item first')
       return
     }
-    setQuotationItems([...quotationItems, {
+    setProformaInvoiceItems([...proformaInvoiceItems, {
       itemId: '',
       hsnCode: '',
       quantity: 1,
@@ -246,8 +238,8 @@ const Quotations = () => {
     }])
   }
 
-  const updateQuotationItem = (index: number, field: string, value: any) => {
-    const newItems = [...quotationItems]
+  const updateProformaInvoiceItem = (index: number, field: string, value: any) => {
+    const newItems = [...proformaInvoiceItems]
     newItems[index] = { ...newItems[index], [field]: value }
 
     if (field === 'itemId') {
@@ -265,22 +257,22 @@ const Quotations = () => {
     const taxRate = newItems[index].taxRate || 0
     newItems[index].amount = (qty * rate - discount) * (1 + taxRate / 100)
 
-    setQuotationItems(newItems)
+    setProformaInvoiceItems(newItems)
   }
 
-  const removeQuotationItem = (index: number) => {
-    setQuotationItems(quotationItems.filter((_, i) => i !== index))
+  const removeProformaInvoiceItem = (index: number) => {
+    setProformaInvoiceItems(proformaInvoiceItems.filter((_, i) => i !== index))
   }
 
   const calculateTotals = () => {
-    const subtotal = quotationItems.reduce((sum, item) => {
+    const subtotal = proformaInvoiceItems.reduce((sum, item) => {
       const qty = item.quantity || 0
       const rate = item.rate || 0
       const discount = item.discount || 0
       return sum + (qty * rate - discount)
     }, 0)
 
-    const taxAmount = quotationItems.reduce((sum, item) => {
+    const taxAmount = proformaInvoiceItems.reduce((sum, item) => {
       const qty = item.quantity || 0
       const rate = item.rate || 0
       const discount = item.discount || 0
@@ -303,51 +295,46 @@ const Quotations = () => {
       return
     }
 
-    if (quotationItems.length === 0) {
+    if (proformaInvoiceItems.length === 0) {
       toast.info('Please add at least one item')
       return
     }
 
     const { subtotal, taxAmount, total } = calculateTotals()
 
-    const quotationData = {
+    const proformaInvoiceData = {
       invoiceNumber: formData.invoiceNumber,
       partyId: formData.partyId,
-      type: 'QUOTATION',
       status: formData.status,
       invoiceDate: formData.invoiceDate,
       dueDate: formData.dueDate || null,
+      deliveryTime: formData.deliveryTime || null,
       notes: formData.notes,
-      poNumber: formData.poNumber,
-      ewayBillNo: formData.ewayBillNo,
-      vehicleNumber: formData.vehicleNumber,
-      warrantyPeriod: formData.warrantyPeriod,
-      dispatchedThrough: formData.dispatchedThrough,
-      items: quotationItems,
+      items: proformaInvoiceItems,
       subtotalAmount: subtotal,
       taxAmount,
       totalAmount: total,
     }
 
-    if (editingQuotation) {
-      const result = await window.electronAPI.quotation.update(editingQuotation.id, quotationData)
+    if (editingProformaInvoice) {
+      const result = await window.electronAPI.proformaInvoice.update(editingProformaInvoice.id, proformaInvoiceData)
       if (result.success) {
-        toast.success('Quotation updated successfully!')
+        toast.success('Proforma invoice updated successfully!')
         setShowModal(false)
         resetForm()
-        loadQuotations()
+        loadProformaInvoices()
       } else {
-        toast.error('Failed to update quotation: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to update proforma invoice: ' + (result.error || 'Unknown error'))
       }
     } else {
-      const result = await window.electronAPI.quotation.create(quotationData)
+      const result = await window.electronAPI.proformaInvoice.create(proformaInvoiceData)
       if (result.success) {
-        toast.success('Quotation created successfully!')
+        toast.success('Proforma invoice created successfully!')
         setShowModal(false)
         resetForm()
-        loadQuotations()
+        loadProformaInvoices()
       } else {
-        toast.error('Failed to create quotation: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to create proforma invoice: ' + (result.error || 'Unknown error'))
       }
     }
   }
@@ -360,19 +347,14 @@ const Quotations = () => {
       dueDate: '',
       invoiceNumber: '',
       notes: '',
-      poNumber: '',
-      ewayBillNo: '',
-      vehicleNumber: '',
-      warrantyPeriod: '',
-      dispatchedThrough: '',
+      deliveryTime: '',
     })
-    setQuotationItems([])
-    setEditingQuotation(null)
-    setShowAdditionalFields(false)
+    setProformaInvoiceItems([])
+    setEditingProformaInvoice(null)
   }
 
-  const handleNewQuotation = async () => {
-    const result = await window.electronAPI.quotation.generateQuotationNumber()
+  const handleNewProformaInvoice = async () => {
+    const result = await window.electronAPI.proformaInvoice.generateNumber()
     if (result.success) {
       setFormData(prev => ({
         ...prev,
@@ -385,15 +367,15 @@ const Quotations = () => {
 
   const totals = calculateTotals()
 
-  const filteredQuotations = quotations.filter((quotation) => {
+  const filteredProformaInvoices = proformaInvoices.filter((proformaInvoice) => {
     if (!searchQuery.trim()) return true
     const query = searchQuery.toLowerCase()
-    const matchesNumber = quotation.invoiceNumber?.toLowerCase().includes(query)
-    const matchesParty = quotation.party?.name?.toLowerCase().includes(query)
+    const matchesNumber = proformaInvoice.invoiceNumber?.toLowerCase().includes(query)
+    const matchesParty = proformaInvoice.party?.name?.toLowerCase().includes(query)
     return matchesNumber || matchesParty
   })
 
-  const { sortedItems: sortedQuotations, sortKey, sortDir, toggleSort } = useSortable(filteredQuotations, [
+  const { sortedItems: sortedProformaInvoices, sortKey, sortDir, toggleSort } = useSortable(filteredProformaInvoices, [
     { key: 'invoiceNumber', accessor: (i) => i.invoiceNumber },
     { key: 'invoiceDate', accessor: (i) => new Date(i.invoiceDate).getTime() },
     { key: 'dueDate', accessor: (i) => i.dueDate ? new Date(i.dueDate).getTime() : 0 },
@@ -405,9 +387,9 @@ const Quotations = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Quotations</h1>
-        <button onClick={handleNewQuotation} className="btn btn-primary">
-          + New Quotation
+        <h1 className="text-3xl font-bold">Proforma Invoices</h1>
+        <button onClick={handleNewProformaInvoice} className="btn btn-primary">
+          + New Proforma Invoice
         </button>
       </div>
 
@@ -415,7 +397,7 @@ const Quotations = () => {
         <input
           type="text"
           className="input max-w-md"
-          placeholder="Search by quotation number or party name..."
+          placeholder="Search by PI number or party name..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
@@ -424,19 +406,19 @@ const Quotations = () => {
       <div className="card">
         {loading ? (
           <TableSkeleton rows={6} columns={7} />
-        ) : filteredQuotations.length === 0 ? (
+        ) : filteredProformaInvoices.length === 0 ? (
           searchQuery.trim() ? (
             <EmptyState
               icon={SearchIcon}
-              title="No quotations match your search"
+              title="No proforma invoices match your search"
               description={`Nothing matched "${searchQuery}".`}
             />
           ) : (
             <EmptyState
               icon={FileText}
-              title="No quotations yet"
-              description="Create your first quotation to share pricing with customers before billing."
-              action={{ label: '+ Create your first quotation', onClick: handleNewQuotation }}
+              title="No proforma invoices yet"
+              description="Create your first proforma invoice to share expected pricing with customers before billing."
+              action={{ label: '+ Create your first proforma invoice', onClick: handleNewProformaInvoice }}
             />
           )
         ) : (
@@ -444,7 +426,7 @@ const Quotations = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <SortHeader label="Quotation #" sortKey="invoiceNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                  <SortHeader label="PI #" sortKey="invoiceNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Date" sortKey="invoiceDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Expiry" sortKey="dueDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Party" sortKey="party" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
@@ -454,47 +436,47 @@ const Quotations = () => {
                 </tr>
               </thead>
               <tbody>
-                {sortedQuotations.map((quotation) => (
-                  <tr key={quotation.id} className="border-t">
-                    <td className="table-cell font-medium">{quotation.invoiceNumber}</td>
-                    <td className="table-cell">{new Date(quotation.invoiceDate).toLocaleDateString()}</td>
-                    <td className="table-cell">{quotation.dueDate ? new Date(quotation.dueDate).toLocaleDateString() : '-'}</td>
-                    <td className="table-cell">{quotation.party?.name}</td>
-                    <td className="table-cell">{formatCurrency(quotation.totalAmount)}</td>
+                {sortedProformaInvoices.map((proformaInvoice) => (
+                  <tr key={proformaInvoice.id} className="border-t">
+                    <td className="table-cell font-medium">{proformaInvoice.invoiceNumber}</td>
+                    <td className="table-cell">{new Date(proformaInvoice.invoiceDate).toLocaleDateString()}</td>
+                    <td className="table-cell">{proformaInvoice.dueDate ? new Date(proformaInvoice.dueDate).toLocaleDateString() : '-'}</td>
+                    <td className="table-cell">{proformaInvoice.party?.name}</td>
+                    <td className="table-cell">{formatCurrency(proformaInvoice.totalAmount)}</td>
                     <td className="table-cell">
-                      <span className={`px-2 py-1 rounded-full text-xs ${statusBadgeClass(quotation.status)}`}>
-                        {quotation.status}
+                      <span className={`px-2 py-1 rounded-full text-xs ${statusBadgeClass(proformaInvoice.status)}`}>
+                        {proformaInvoice.status}
                       </span>
                     </td>
                     <td className="table-cell">
                       <div className="flex items-center space-x-2">
                         <button
-                          onClick={() => handleView(quotation.id)}
+                          onClick={() => handleView(proformaInvoice.id)}
                           className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
                         >
                           View
                         </button>
                         <button
-                          onClick={() => handleEdit(quotation)}
+                          onClick={() => handleEdit(proformaInvoice)}
                           className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
                         >
                           Edit
                         </button>
                         <button
-                          onClick={() => handleDownloadPDF(quotation.id)}
+                          onClick={() => handleDownloadPDF(proformaInvoice.id)}
                           className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
                           title="Download PDF"
                         >
                           PDF
                         </button>
                         <button
-                          onClick={() => handleConvertToInvoice(quotation.id)}
+                          onClick={() => handleConvertToInvoice(proformaInvoice.id)}
                           className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
                         >
                           Convert
                         </button>
                         <button
-                          onClick={() => handleDelete(quotation.id)}
+                          onClick={() => handleDelete(proformaInvoice.id)}
                           className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                         >
                           Delete
@@ -515,7 +497,7 @@ const Quotations = () => {
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">
-                  {editingQuotation ? 'Edit' : 'Create New'} Quotation
+                  {editingProformaInvoice ? 'Edit' : 'Create New'} Proforma Invoice
                 </h2>
                 <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-2xl">
                   ×
@@ -525,7 +507,7 @@ const Quotations = () => {
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="label">Quotation Number *</label>
+                    <label className="label">Proforma Invoice Number *</label>
                     <input
                       type="text"
                       className="input"
@@ -556,7 +538,7 @@ const Quotations = () => {
                     <select
                       className="input"
                       value={formData.status}
-                      onChange={(e) => setFormData({ ...formData, status: e.target.value as QuotationStatus })}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value as ProformaInvoiceStatus })}
                     >
                       {statusOptions.map((status) => (
                         <option key={status} value={status}>
@@ -567,7 +549,7 @@ const Quotations = () => {
                   </div>
 
                   <div>
-                    <label className="label">Quotation Date *</label>
+                    <label className="label">PI Date *</label>
                     <input
                       type="date"
                       className="input"
@@ -586,33 +568,43 @@ const Quotations = () => {
                       onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
                     />
                   </div>
+
+                  <div>
+                    <label className="label">Delivery Time</label>
+                    <input
+                      type="date"
+                      className="input"
+                      value={formData.deliveryTime}
+                      onChange={(e) => setFormData({ ...formData, deliveryTime: e.target.value })}
+                    />
+                  </div>
                 </div>
 
                 <div>
                   <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-lg font-semibold">Quotation Items</h3>
-                    <button type="button" onClick={addQuotationItem} className="btn btn-secondary text-sm">
+                    <h3 className="text-lg font-semibold">PI Items</h3>
+                    <button type="button" onClick={addProformaInvoiceItem} className="btn btn-secondary text-sm">
                       + Add Item
                     </button>
                   </div>
 
-                  {quotationItems.length === 0 ? (
+                  {proformaInvoiceItems.length === 0 ? (
                     <div className="text-center py-8 bg-gray-50 dark:bg-gray-900/40 rounded-lg border-2 border-dashed">
                       <p className="text-gray-500 dark:text-gray-400 mb-2">No items added yet</p>
-                      <button type="button" onClick={addQuotationItem} className="text-primary-600 hover:text-primary-700">
+                      <button type="button" onClick={addProformaInvoiceItem} className="text-primary-600 hover:text-primary-700">
                         Click "+ Add Item" to add your first item
                       </button>
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {quotationItems.map((item, index) => (
+                      {proformaInvoiceItems.map((item, index) => (
                         <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                           <div className="flex-1">
                             <label className="label text-xs">Item</label>
                             <select
                               className="input"
                               value={item.itemId}
-                              onChange={(e) => updateQuotationItem(index, 'itemId', e.target.value)}
+                              onChange={(e) => updateProformaInvoiceItem(index, 'itemId', e.target.value)}
                               required
                             >
                               <option value="">Select Item</option>
@@ -628,7 +620,7 @@ const Quotations = () => {
                               type="text"
                               className="input"
                               value={item.hsnCode}
-                              onChange={(e) => updateQuotationItem(index, 'hsnCode', e.target.value)}
+                              onChange={(e) => updateProformaInvoiceItem(index, 'hsnCode', e.target.value)}
                               placeholder="HSN/SKU"
                             />
                           </div>
@@ -638,7 +630,7 @@ const Quotations = () => {
                             <NumberInput
                               className="input"
                               value={item.quantity}
-                              onChange={(val) => updateQuotationItem(index, 'quantity', val)}
+                              onChange={(val) => updateProformaInvoiceItem(index, 'quantity', val)}
                               min={1}
                               required
                             />
@@ -649,7 +641,7 @@ const Quotations = () => {
                             <NumberInput
                               className="input"
                               value={item.rate}
-                              onChange={(val) => updateQuotationItem(index, 'rate', val)}
+                              onChange={(val) => updateProformaInvoiceItem(index, 'rate', val)}
                               min={0}
                               required
                             />
@@ -660,7 +652,7 @@ const Quotations = () => {
                             <NumberInput
                               className="input"
                               value={item.discount}
-                              onChange={(val) => updateQuotationItem(index, 'discount', val)}
+                              onChange={(val) => updateProformaInvoiceItem(index, 'discount', val)}
                               min={0}
                             />
                           </div>
@@ -670,7 +662,7 @@ const Quotations = () => {
                             <NumberInput
                               className="input"
                               value={item.taxRate}
-                              onChange={(val) => updateQuotationItem(index, 'taxRate', val)}
+                              onChange={(val) => updateProformaInvoiceItem(index, 'taxRate', val)}
                               min={0}
                             />
                           </div>
@@ -687,7 +679,7 @@ const Quotations = () => {
 
                           <button
                             type="button"
-                            onClick={() => removeQuotationItem(index)}
+                            onClick={() => removeProformaInvoiceItem(index)}
                             className="btn btn-danger h-10 px-3"
                           >
                             ×
@@ -698,7 +690,7 @@ const Quotations = () => {
                   )}
                 </div>
 
-                {quotationItems.length > 0 && (
+                {proformaInvoiceItems.length > 0 && (
                   <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                     <div className="space-y-2 max-w-sm ml-auto">
                       <div className="flex justify-between">
@@ -724,76 +716,8 @@ const Quotations = () => {
                     rows={3}
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    placeholder="Quotation notes..."
+                    placeholder="Proforma invoice notes..."
                   />
-                </div>
-
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowAdditionalFields(!showAdditionalFields)}
-                    className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                  >
-                    <span className={`transform transition-transform ${showAdditionalFields ? 'rotate-180' : ''}`}>
-                      ▼
-                    </span>
-                    Additional Fields
-                  </button>
-
-                  {showAdditionalFields && (
-                    <div className="grid grid-cols-2 gap-4 mt-3 p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
-                      <div>
-                        <label className="label">P.O. Number</label>
-                        <input
-                          type="text"
-                          className="input"
-                          value={formData.poNumber}
-                          onChange={(e) => setFormData({ ...formData, poNumber: e.target.value })}
-                          placeholder="Customer's purchase order number"
-                        />
-                      </div>
-                      <div>
-                        <label className="label">E-Way Bill No</label>
-                        <input
-                          type="text"
-                          className="input"
-                          value={formData.ewayBillNo}
-                          onChange={(e) => setFormData({ ...formData, ewayBillNo: e.target.value })}
-                          placeholder="E-Way Bill number"
-                        />
-                      </div>
-                      <div>
-                        <label className="label">Vehicle Number</label>
-                        <input
-                          type="text"
-                          className="input"
-                          value={formData.vehicleNumber}
-                          onChange={(e) => setFormData({ ...formData, vehicleNumber: e.target.value })}
-                          placeholder="Transport vehicle number"
-                        />
-                      </div>
-                      <div>
-                        <label className="label">Warranty Period</label>
-                        <input
-                          type="text"
-                          className="input"
-                          value={formData.warrantyPeriod}
-                          onChange={(e) => setFormData({ ...formData, warrantyPeriod: e.target.value })}
-                          placeholder="e.g. 12 Months"
-                        />
-                      </div>
-                      <div>
-                        <label className="label">Dispatched Through</label>
-                        <input
-                          type="text"
-                          className="input"
-                          value={formData.dispatchedThrough}
-                          onChange={(e) => setFormData({ ...formData, dispatchedThrough: e.target.value })}
-                          placeholder="Transport company / courier"
-                        />
-                      </div>
-                    </div>
-                  )}
                 </div>
 
                 <div className="flex justify-end gap-3 pt-4 border-t">
@@ -805,7 +729,7 @@ const Quotations = () => {
                     Cancel
                   </button>
                   <button type="submit" className="btn btn-primary">
-                    {editingQuotation ? 'Update Quotation' : 'Create Quotation'}
+                    {editingProformaInvoice ? 'Update Proforma Invoice' : 'Create Proforma Invoice'}
                   </button>
                 </div>
               </form>
@@ -814,48 +738,52 @@ const Quotations = () => {
         </div>
       )}
 
-      {showViewModal && viewingQuotation && (
+      {showViewModal && viewingProformaInvoice && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
           <div className="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold">Quotation Details</h2>
-                <button onClick={() => { setShowViewModal(false); setViewingQuotation(null) }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">
+                <h2 className="text-2xl font-bold">Proforma Invoice Details</h2>
+                <button onClick={() => { setShowViewModal(false); setViewingProformaInvoice(null) }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">
                   ×
                 </button>
               </div>
 
               <div className="grid grid-cols-2 gap-6 mb-6">
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Quotation Number</p>
-                  <p className="font-semibold text-lg">{viewingQuotation.invoiceNumber}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">PI Number</p>
+                  <p className="font-semibold text-lg">{viewingProformaInvoice.invoiceNumber}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
-                  <span className={`px-2 py-1 rounded-full text-xs ${statusBadgeClass(viewingQuotation.status)}`}>
-                    {viewingQuotation.status}
+                  <span className={`px-2 py-1 rounded-full text-xs ${statusBadgeClass(viewingProformaInvoice.status)}`}>
+                    {viewingProformaInvoice.status}
                   </span>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Quotation Date</p>
-                  <p className="font-medium">{new Date(viewingQuotation.invoiceDate).toLocaleDateString()}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">PI Date</p>
+                  <p className="font-medium">{new Date(viewingProformaInvoice.invoiceDate).toLocaleDateString()}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Expiry Date</p>
-                  <p className="font-medium">{viewingQuotation.dueDate ? new Date(viewingQuotation.dueDate).toLocaleDateString() : '-'}</p>
+                  <p className="font-medium">{viewingProformaInvoice.dueDate ? new Date(viewingProformaInvoice.dueDate).toLocaleDateString() : '-'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Delivery Time</p>
+                  <p className="font-medium">{viewingProformaInvoice.deliveryTime ? new Date(viewingProformaInvoice.deliveryTime).toLocaleDateString() : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Document Type</p>
-                  <p className="font-medium">Quotation</p>
+                  <p className="font-medium">Proforma Invoice</p>
                 </div>
               </div>
 
               <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Customer</p>
-                <p className="font-semibold">{viewingQuotation.party?.name}</p>
-                {viewingQuotation.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingQuotation.party.phone}</p>}
-                {viewingQuotation.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingQuotation.party.email}</p>}
-                {viewingQuotation.party?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingQuotation.party.billingAddress}</p>}
+                <p className="font-semibold">{viewingProformaInvoice.party?.name}</p>
+                {viewingProformaInvoice.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingProformaInvoice.party.phone}</p>}
+                {viewingProformaInvoice.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingProformaInvoice.party.email}</p>}
+                {viewingProformaInvoice.party?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingProformaInvoice.party.billingAddress}</p>}
               </div>
 
               <div className="mb-6">
@@ -872,7 +800,7 @@ const Quotations = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {viewingQuotation.items?.map((item, index) => (
+                    {viewingProformaInvoice.items?.map((item, index) => (
                       <tr key={index} className="border-t">
                         <td className="table-cell">{item.item?.name}</td>
                         <td className="table-cell text-gray-500">{item.hsnCode || '-'}</td>
@@ -890,41 +818,41 @@ const Quotations = () => {
                 <div className="space-y-2 max-w-sm ml-auto">
                   <div className="flex justify-between">
                     <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
-                    <span className="font-medium">{formatCurrency(viewingQuotation.subtotal || 0)}</span>
+                    <span className="font-medium">{formatCurrency(viewingProformaInvoice.subtotal || 0)}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-gray-600 dark:text-gray-400">Tax:</span>
-                    <span className="font-medium">{formatCurrency(viewingQuotation.taxAmount || 0)}</span>
+                    <span className="font-medium">{formatCurrency(viewingProformaInvoice.taxAmount || 0)}</span>
                   </div>
                   <div className="flex justify-between text-lg font-bold border-t pt-2">
                     <span>Total:</span>
-                    <span>{formatCurrency(viewingQuotation.totalAmount)}</span>
+                    <span>{formatCurrency(viewingProformaInvoice.totalAmount)}</span>
                   </div>
                 </div>
               </div>
 
-              {viewingQuotation.notes && (
+              {viewingProformaInvoice.notes && (
                 <div className="mb-4">
                   <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Notes</p>
-                  <p className="text-gray-700 dark:text-gray-300">{viewingQuotation.notes}</p>
+                  <p className="text-gray-700 dark:text-gray-300">{viewingProformaInvoice.notes}</p>
                 </div>
               )}
 
               <div className="flex justify-end gap-3 pt-4 border-t">
                 <button
-                  onClick={() => { setShowViewModal(false); setViewingQuotation(null) }}
+                  onClick={() => { setShowViewModal(false); setViewingProformaInvoice(null) }}
                   className="btn btn-secondary"
                 >
                   Close
                 </button>
                 <button
-                  onClick={() => handleDownloadPDF(viewingQuotation.id)}
+                  onClick={() => handleDownloadPDF(viewingProformaInvoice.id)}
                   className="btn btn-secondary"
                 >
                   Download PDF
                 </button>
                 <button
-                  onClick={() => handleConvertToInvoice(viewingQuotation.id)}
+                  onClick={() => handleConvertToInvoice(viewingProformaInvoice.id)}
                   className="btn btn-primary"
                 >
                   Convert to Invoice
@@ -938,4 +866,4 @@ const Quotations = () => {
   )
 }
 
-export default Quotations
+export default ProformaInvoices

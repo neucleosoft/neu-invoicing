@@ -4,7 +4,7 @@ import { SalesInvoice } from '../types'
 import { downloadInvoicePDF, InvoiceTemplate } from '../utils/generateInvoicePDF'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
@@ -37,19 +37,11 @@ interface InvoiceItem {
   amount: number
 }
 
-type DocKind = 'INVOICE' | 'PROFORMA_INVOICE'
-
-function kindNames(kind: DocKind) {
-  switch (kind) {
-    case 'PROFORMA_INVOICE': return { singular: 'Proforma Invoice', plural: 'Proforma Invoices', short: 'PI' }
-    default: return { singular: 'Invoice', plural: 'Invoices', short: 'invoice' }
-  }
-}
+const invoiceLabels = { singular: 'Invoice', plural: 'Invoices', short: 'invoice' }
 
 const Sales = () => {
   const [invoices, setInvoices] = useState<SalesInvoice[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState<'ALL' | DocKind>('ALL')
   const [showModal, setShowModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
   const [viewingInvoice, setViewingInvoice] = useState<SalesInvoice | null>(null)
@@ -64,7 +56,7 @@ const Sales = () => {
   // Form state
   const [formData, setFormData] = useState({
     partyId: '',
-    type: 'INVOICE' as DocKind,
+    type: 'INVOICE' as const,
     status: 'DRAFT' as string,
     invoiceDate: new Date().toISOString().split('T')[0],
     invoiceNumber: '',
@@ -91,7 +83,16 @@ const Sales = () => {
     loadParties()
     loadItems()
     loadTemplate()
-  }, [filter])
+  }, [])
+
+  // Auto-open the create-invoice modal when navigated here from Dashboard's "+ New Invoice"
+  useEffect(() => {
+    if ((location.state as { openNew?: boolean } | null)?.openNew) {
+      handleNewInvoice()
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   // Auto-open the create-invoice modal when navigated here from Dashboard's "+ New Invoice"
   useEffect(() => {
@@ -116,9 +117,9 @@ const Sales = () => {
   const loadInvoices = async () => {
     setLoading(true)
     try {
-      const result = await window.electronAPI.sales.getAll(filter === 'ALL' ? undefined : filter)
+      const result = await window.electronAPI.sales.getAll()
       if (result.success && result.data) {
-        setInvoices(result.data.filter(invoice => invoice.type !== 'QUOTATION'))
+        setInvoices(result.data)
       }
     } finally {
       setLoading(false)
@@ -225,7 +226,7 @@ const Sales = () => {
       setFormData({
         invoiceNumber: fullInvoice.invoiceNumber || '',
         partyId: fullInvoice.party?.id || '',
-        type: fullInvoice.type === 'PROFORMA_INVOICE' ? 'PROFORMA_INVOICE' : 'INVOICE',
+        type: 'INVOICE',
         status: fullInvoice.status || 'DRAFT',
         invoiceDate: new Date(fullInvoice.invoiceDate).toISOString().split('T')[0],
         dueDate: fullInvoice.dueDate ? new Date(fullInvoice.dueDate).toISOString().split('T')[0] : '',
@@ -341,7 +342,7 @@ const Sales = () => {
       const invoiceData = {
         invoiceNumber: formData.invoiceNumber,
         partyId: formData.partyId,
-        type: formData.type,
+        type: 'INVOICE',
         status: formData.status,
         invoiceDate: formData.invoiceDate,
         dueDate: formData.dueDate,
@@ -420,13 +421,13 @@ const Sales = () => {
 
   const handleNewInvoice = async () => {
     const result = await window.electronAPI.sales.generateInvoiceNumber()
-    if (result.success) {
-      setFormData(prev => ({
-        ...prev,
-        invoiceNumber: result.data || '',
-        type: filter === 'ALL' ? 'INVOICE' : (filter as DocKind),
-      }))
-    }
+      if (result.success) {
+        setFormData(prev => ({
+          ...prev,
+          invoiceNumber: result.data || '',
+          type: 'INVOICE',
+        }))
+      }
     setShowModal(true)
   }
 
@@ -455,7 +456,6 @@ const Sales = () => {
     { key: 'invoiceNumber', accessor: (i) => i.invoiceNumber },
     { key: 'invoiceDate', accessor: (i) => new Date(i.invoiceDate).getTime() },
     { key: 'party', accessor: (i) => i.party?.name || '' },
-    { key: 'type', accessor: (i) => i.type },
     { key: 'totalAmount', accessor: (i) => i.totalAmount },
     { key: 'status', accessor: (i) => i.status || '' },
   ])
@@ -463,30 +463,13 @@ const Sales = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Sales & {kindNames(filter === 'ALL' ? 'INVOICE' : filter).plural}</h1>
-        {filter !== 'ALL' && (
-          <button
-            onClick={handleNewInvoice}
-            className="btn btn-primary"
-          >
-            + New {kindNames(filter).singular}
-          </button>
-        )}
-      </div>
-
-      {/* Filter Tabs */}
-      <div className="flex space-x-2">
-        {(['ALL', 'INVOICE', 'PROFORMA_INVOICE'] as const).map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setFilter(tab)}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              filter === tab ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
-            }`}
-          >
-            {tab === 'PROFORMA_INVOICE' ? 'PI' : tab}
-          </button>
-        ))}
+        <h1 className="text-3xl font-bold">Sales</h1>
+        <button
+          onClick={handleNewInvoice}
+          className="btn btn-primary"
+        >
+          + New Invoice
+        </button>
       </div>
 
       {/* Search Input */}
@@ -494,7 +477,7 @@ const Sales = () => {
         <input
           type="text"
           className="input max-w-md"
-          placeholder={`Search by ${kindNames(filter === 'ALL' ? 'INVOICE' : filter).short} number or party name...`}
+          placeholder={`Search by ${invoiceLabels.short} number or party name...`}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
@@ -512,23 +495,12 @@ const Sales = () => {
               description={`Nothing matched "${searchQuery}".`}
             />
           ) : (
-            (() => {
-              const k = kindNames(filter === 'ALL' ? 'INVOICE' : filter)
-              const title =
-                filter === 'PROFORMA_INVOICE' ? 'No Proforma yet' : `No ${k.plural.toLowerCase()} yet`
-              const description =
-                filter === 'PROFORMA_INVOICE'
-                    ? 'Create your first proforma invoice to share expected pricing with customers.'
-                    : 'Create your first sales invoice to start billing customers and tracking payments.'
-              return (
-                <EmptyState
-                  icon={Wallet}
-                  title={title}
-                  description={description}
-                  action={{ label: `+ Create your first ${k.singular.toLowerCase()}`, onClick: handleNewInvoice }}
-                />
-              )
-            })()
+            <EmptyState
+              icon={Wallet}
+              title={`No ${invoiceLabels.plural.toLowerCase()} yet`}
+              description="Create your first sales invoice to start billing customers and tracking payments."
+              action={{ label: `+ Create your first ${invoiceLabels.singular.toLowerCase()}`, onClick: handleNewInvoice }}
+            />
           )
         ) : (
           <div className="overflow-auto max-h-[calc(100vh-280px)]">
@@ -538,7 +510,6 @@ const Sales = () => {
                   <SortHeader label="Invoice #" sortKey="invoiceNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Date" sortKey="invoiceDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Party" sortKey="party" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
-                  <SortHeader label="Type" sortKey="type" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Amount" sortKey="totalAmount" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Status" sortKey="status" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <th className="table-header sticky top-0 z-10">Actions</th>
@@ -550,13 +521,6 @@ const Sales = () => {
                     <td className="table-cell font-medium">{invoice.invoiceNumber}</td>
                     <td className="table-cell">{new Date(invoice.invoiceDate).toLocaleDateString()}</td>
                     <td className="table-cell">{invoice.party?.name}</td>
-                    <td className="table-cell">
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        invoice.type === 'INVOICE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
-                      }`}>
-                        {invoice.type}
-                      </span>
-                    </td>
                     <td className="table-cell">{formatCurrency(invoice.totalAmount)}</td>
                     <td className="table-cell">
                       {isOverdue(invoice) ? (
@@ -614,7 +578,7 @@ const Sales = () => {
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">
-                  {editingInvoice ? 'Edit' : 'Create New'} {kindNames(formData.type).singular}
+                  {editingInvoice ? 'Edit' : 'Create New'} Invoice
                 </h2>
                 <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-2xl">
                   ×
@@ -648,18 +612,6 @@ const Sales = () => {
                       {parties.map(party => (
                         <option key={party.id} value={party.id}>{party.name}</option>
                       ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="label">Type *</label>
-                    <select
-                      className="input"
-                      value={formData.type}
-                      onChange={(e) => setFormData({...formData, type: e.target.value as DocKind})}
-                    >
-                      <option value="INVOICE">Invoice</option>
-                      <option value="PROFORMA_INVOICE">Proforma Invoice</option>
                     </select>
                   </div>
 

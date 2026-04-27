@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { formatCurrency } from '../utils/currency'
-import { useToast } from '../components/Toast'
+import { useToast } from '../components/ToastContext'
 import type { GSTR1Data, GSTR3BData, HSNSummaryItem, GSTReportFilters } from '../types'
 
 type ReportType = 'dashboard' | 'gstr1' | 'gstr2' | 'gstr3b' | 'gstr9' | 'hsn'

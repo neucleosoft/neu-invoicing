@@ -26,7 +26,12 @@ const GREEN = '#C6E0B4'
 export function downloadClassicPDF(invoice: InvoiceData) {
   if (!invoice.items) invoice.items = []
   const dd = buildClassicPDFDefinition(invoice)
-  const filename = `${invoice.invoiceNumber.replace(/\//g, '_')}_${invoice.type === 'QUOTATION' ? 'quotation' : 'sales_invoice'}_${invoice.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
+  const suffix = invoice.type === 'QUOTATION'
+    ? 'quotation'
+    : invoice.type === 'PROFORMA_INVOICE'
+      ? 'proforma_invoice'
+      : 'sales_invoice'
+  const filename = `${invoice.invoiceNumber.replace(/\//g, '_')}_${suffix}_${invoice.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
   pdfMake.createPdf(dd).download(filename)
 }
 
@@ -65,8 +70,14 @@ export function buildClassicPDFDefinition(inv: InvoiceData): any {
 // ─── Title ───────────────────────────────────────────────────────────────────
 
 function buildTitle(type: string): Content {
-  const label = type === 'QUOTATION' ? 'QUOTATION' : 'TAX INVOICE'
-  if (type === 'QUOTATION') {
+  const label =
+    type === 'QUOTATION'
+      ? 'QUOTATION'
+      : type === 'PROFORMA_INVOICE'
+        ? 'PROFORMA INVOICE'
+        : 'TAX INVOICE'
+
+  if (type === 'QUOTATION' || type === 'PROFORMA_INVOICE') {
     return {
       columns: [
         { text: label, bold: true, fontSize: 11, width: 'auto' },
@@ -98,6 +109,22 @@ function buildTitle(type: string): Content {
 function buildCompanySection(inv: InvoiceData, logo: string): Content {
   const company = inv.company
   const isQuotation = inv.type === 'QUOTATION'
+  const isProformaInvoice = inv.type === 'PROFORMA_INVOICE'
+  const isQuoteLike = isQuotation || isProformaInvoice
+  const secondaryLabel = isProformaInvoice ? 'Delivery Time' : 'P.O. No.'
+  const secondaryValue = isProformaInvoice ? inv.deliveryTime : inv.poNumber
+  const secondaryDisplayValue = isProformaInvoice && secondaryValue ? formatDate(secondaryValue) : secondaryValue
+  const hasSecondaryValue = !!secondaryValue
+  const numberLabel = isQuotation
+    ? 'Quotation No.'
+    : isProformaInvoice
+      ? 'Proforma Invoice No.'
+      : 'Invoice No.'
+  const dateLabel = isQuotation
+    ? 'Quotation Date'
+    : isProformaInvoice
+      ? 'Proforma Invoice Date'
+      : 'Invoice Date'
 
   // Build company info lines
   const companyStack: Content[] = [
@@ -115,37 +142,36 @@ function buildCompanySection(inv: InvoiceData, logo: string): Content {
 
   // Build the invoice details grid (right side)
   // Rows: Number + Date, then document-specific details if present
-  const hasPoNumber = !!inv.poNumber
-  const hasDueDate = isQuotation && !!inv.dueDate
+  const hasDueDate = isQuoteLike && !!inv.dueDate
   const invoiceGridBody: TableCell[][] = [
     [
       { stack: [
-        { text: isQuotation ? 'Quotation No.' : 'Invoice No.', bold: true, fontSize: 10 },
+        { text: numberLabel, bold: true, fontSize: 10 },
         { text: inv.invoiceNumber, fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
       { stack: [
-        { text: isQuotation ? 'Quotation Date' : 'Invoice Date', bold: true, fontSize: 10 },
+        { text: dateLabel, bold: true, fontSize: 10 },
         { text: formatDate(inv.invoiceDate), fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
     ],
   ]
 
-  if (isQuotation && (hasDueDate || hasPoNumber)) {
+  if (isQuoteLike && (hasDueDate || hasSecondaryValue)) {
     invoiceGridBody.push([
       { stack: [
         { text: 'Expiry Date', bold: true, fontSize: 10 },
         { text: hasDueDate && inv.dueDate ? formatDate(inv.dueDate) : '-', fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
       { stack: [
-        { text: 'P.O. No.', bold: true, fontSize: 10 },
-        { text: hasPoNumber ? inv.poNumber : '-', fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+        { text: secondaryLabel, bold: true, fontSize: 10 },
+        { text: hasSecondaryValue ? secondaryDisplayValue : '-', fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
     ])
-  } else if (hasPoNumber) {
+  } else if (hasSecondaryValue) {
     invoiceGridBody.push(
       [{ stack: [
-        { text: 'P.O. No.', bold: true, fontSize: 10 },
-        { text: inv.poNumber, fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+        { text: secondaryLabel, bold: true, fontSize: 10 },
+        { text: secondaryDisplayValue, fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ], colSpan: 2 }, {}],
     )
   }
@@ -166,12 +192,12 @@ function buildCompanySection(inv: InvoiceData, logo: string): Content {
           // Right: invoice number grid
           {
             table: {
-              heights: (hasPoNumber || hasDueDate) ? [35, 35] : [70],
+              heights: (hasSecondaryValue || hasDueDate) ? [35, 35] : [70],
               widths: ['*', '*'],
               body: invoiceGridBody,
             },
             layout: {
-              hLineWidth: (i: number) => ((hasPoNumber || hasDueDate) && i === 1) ? 0.5 : 0,
+              hLineWidth: (i: number) => ((hasSecondaryValue || hasDueDate) && i === 1) ? 0.5 : 0,
               vLineWidth: () => 0,
               hLineColor: () => '#000',
               vLineColor: () => '#000',
@@ -340,7 +366,9 @@ function buildItemsSection(inv: InvoiceData, isInter: boolean, taxGroups: Return
 
   // Filler rows — stretch the items table to fill the page.
   // Shrink when additional fields exist (they take space above items).
-  const hasAdditionalFields = !!(inv.ewayBillNo || inv.vehicleNumber || inv.warrantyPeriod || inv.dispatchedThrough)
+  const hasAdditionalFields = inv.type === 'PROFORMA_INVOICE'
+    ? false
+    : !!(inv.ewayBillNo || inv.vehicleNumber || inv.warrantyPeriod || inv.dispatchedThrough)
   const TARGET_ROWS = hasAdditionalFields ? 12 : 14
   const usedRows = itemRows.length + taxRows.length
   const fillerCount = Math.max(0, TARGET_ROWS - usedRows)
@@ -391,6 +419,10 @@ function buildItemsSection(inv: InvoiceData, isInter: boolean, taxGroups: Return
 
 /** Returns an array — empty if no fields, or [section] if fields exist */
 function buildAdditionalFieldsSection(inv: InvoiceData): Content[] {
+  if (inv.type === 'PROFORMA_INVOICE') {
+    return []
+  }
+
   const fields: { label: string; value: string }[] = []
   if (inv.ewayBillNo) fields.push({ label: 'E-Way Bill No', value: inv.ewayBillNo })
   if (inv.warrantyPeriod) fields.push({ label: 'Warranty Period', value: inv.warrantyPeriod })
