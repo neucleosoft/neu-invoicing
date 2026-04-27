@@ -97,10 +97,7 @@ export interface Item {
   updatedAt: string
 }
 
-// Invoices and quotations still share the same Prisma model for now,
-// so we keep the legacy SalesInvoice interface name and extract the
-// document semantics into shared type aliases.
-export type SalesDocumentType = 'INVOICE' | 'QUOTATION'
+export type SalesDocumentType = 'INVOICE'
 export type InvoiceStatus = 'DRAFT' | 'PAID' | 'PARTIAL' | 'OVERDUE'
 export type QuotationStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'
 export type ProformaInvoiceStatus = QuotationStatus
@@ -120,8 +117,9 @@ export interface SalesInvoice {
   totalAmount: number
   amountPaid: number
   balanceDue: number
-  status: SalesDocumentStatus
-  convertedFromQuoteId?: string
+  status: InvoiceStatus
+  convertedFromQuotationId?: string
+  convertedFromProformaId?: string
   notes?: string
   termsConditions?: string
   placeOfSupply?: string
@@ -147,6 +145,58 @@ export interface SalesInvoice {
 export interface SalesInvoiceItem {
   id: string
   salesInvoiceId: string
+  itemId: string
+  item?: Item
+  quantity: number
+  rate: number
+  discount: number
+  taxRate: number
+  total: number
+  hsnCode?: string
+  taxableAmount?: number
+  cgstRate?: number
+  cgstAmount?: number
+  sgstRate?: number
+  sgstAmount?: number
+  igstRate?: number
+  igstAmount?: number
+  cessRate?: number
+  cessAmount?: number
+  createdAt: string
+}
+
+export interface Quotation {
+  id: string
+  invoiceNumber: string
+  invoiceDate: string
+  dueDate?: string
+  partyId: string
+  party?: Party
+  subtotal: number
+  discount: number
+  taxAmount: number
+  totalAmount: number
+  status: QuotationStatus
+  notes?: string
+  placeOfSupply?: string
+  placeOfSupplyName?: string
+  isInterState?: boolean
+  reverseCharge?: boolean
+  cgstAmount?: number
+  sgstAmount?: number
+  igstAmount?: number
+  cessAmount?: number
+  supplyType?: string
+  ecommerceGstin?: string
+  deliveryTime?: string
+  items: QuotationItem[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface QuotationItem {
+  id: string
+  quotationId: string
   itemId: string
   item?: Item
   quantity: number
@@ -433,10 +483,10 @@ declare global {
         generatePDF: (id: string) => Promise<{ success: boolean; message?: string; error?: string }>
       }
       quotation: {
-        getAll: () => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>
-        getById: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
-        create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
-        update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
+        getAll: () => Promise<{ success: boolean; data?: Quotation[]; error?: string }>
+        getById: (id: string) => Promise<{ success: boolean; data?: Quotation; error?: string }>
+        create: (data: any) => Promise<{ success: boolean; data?: Quotation; error?: string }>
+        update: (id: string, data: any) => Promise<{ success: boolean; data?: Quotation; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
         convertToInvoice: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         generateQuotationNumber: () => Promise<{ success: boolean; data?: string; error?: string }>

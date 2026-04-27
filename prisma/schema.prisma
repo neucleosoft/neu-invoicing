@@ -61,6 +61,7 @@ model Party {
 
   // Relations
   salesInvoices    SalesInvoice[]
+  quotations       Quotation[]
   proformaInvoices ProformaInvoice[]
   purchaseBills    PurchaseBill[]
   payments         PaymentTransaction[]
@@ -89,6 +90,7 @@ model Item {
 
   // Relations
   salesInvoiceItems    SalesInvoiceItem[]
+  quotationItems       QuotationItem[]
   proformaInvoiceItems ProformaInvoiceItem[]
   purchaseBillItems    PurchaseBillItem[]
   stockMovements       StockMovement[]
@@ -96,27 +98,26 @@ model Item {
   creditDebitNoteItems CreditDebitNoteItem[]
 }
 
-// Sales Invoices and Quotations
+// Sales Invoices
 model SalesInvoice {
-  id                   String         @id @default(cuid())
-  invoiceNumber        String         @unique
-  invoiceDate          DateTime       @default(now())
-  type                 String         @default("INVOICE") // INVOICE or QUOTATION
-  partyId              String
-  party                Party          @relation(fields: [partyId], references: [id])
-  subtotal             Float          @default(0)
-  discount             Float          @default(0)
-  taxAmount            Float          @default(0)
-  totalAmount          Float          @default(0)
-  amountPaid           Float          @default(0)
-  balanceDue           Float          @default(0)
-  status               String         @default("DRAFT") // DRAFT, PAID, PARTIAL, OVERDUE
-  convertedFromQuoteId String?
-  convertedQuote       SalesInvoice?  @relation("QuoteConversion", fields: [convertedFromQuoteId], references: [id])
-  convertedInvoices    SalesInvoice[] @relation("QuoteConversion")
-  convertedFromProformaId String?
-  convertedProforma       ProformaInvoice? @relation("ProformaConversion", fields: [convertedFromProformaId], references: [id], onDelete: SetNull)
-  notes                String?
+  id                       String            @id @default(cuid())
+  invoiceNumber            String            @unique
+  invoiceDate              DateTime          @default(now())
+  type                     String            @default("INVOICE") // INVOICE
+  partyId                  String
+  party                    Party             @relation(fields: [partyId], references: [id])
+  subtotal                 Float             @default(0)
+  discount                 Float             @default(0)
+  taxAmount                Float             @default(0)
+  totalAmount              Float             @default(0)
+  amountPaid               Float             @default(0)
+  balanceDue               Float             @default(0)
+  status                   String            @default("DRAFT") // DRAFT, PAID, PARTIAL, OVERDUE
+  convertedFromQuotationId String?
+  convertedQuotation       Quotation?        @relation("QuotationConversion", fields: [convertedFromQuotationId], references: [id], onDelete: SetNull)
+  convertedFromProformaId  String?
+  convertedProforma        ProformaInvoice?  @relation("ProformaConversion", fields: [convertedFromProformaId], references: [id], onDelete: SetNull)
+  notes                    String?
   // GST-specific fields
   placeOfSupply        String? // State code of place of supply
   placeOfSupplyName    String? // State name of place of supply
@@ -169,6 +170,62 @@ model SalesInvoiceItem {
   cessRate       Float        @default(0)
   cessAmount     Float        @default(0)
   createdAt      DateTime     @default(now())
+}
+
+// Quotations
+model Quotation {
+  id                String          @id @default(cuid())
+  invoiceNumber     String          @unique
+  invoiceDate       DateTime        @default(now())
+  dueDate           DateTime?
+  partyId           String
+  party             Party           @relation(fields: [partyId], references: [id])
+  subtotal          Float           @default(0)
+  discount          Float           @default(0)
+  taxAmount         Float           @default(0)
+  totalAmount       Float           @default(0)
+  status            String          @default("DRAFT") // DRAFT, SENT, ACCEPTED, REJECTED, EXPIRED
+  notes             String?
+  placeOfSupply     String?
+  placeOfSupplyName String?
+  isInterState      Boolean         @default(false)
+  reverseCharge     Boolean         @default(false)
+  cgstAmount        Float           @default(0)
+  sgstAmount        Float           @default(0)
+  igstAmount        Float           @default(0)
+  cessAmount        Float           @default(0)
+  supplyType        String          @default("B2B")
+  ecommerceGstin    String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  deliveryTime      DateTime?
+
+  items             QuotationItem[]
+  convertedInvoices SalesInvoice[]  @relation("QuotationConversion")
+}
+
+model QuotationItem {
+  id             String      @id @default(cuid())
+  quotationId    String
+  quotation      Quotation   @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  itemId         String
+  item           Item        @relation(fields: [itemId], references: [id])
+  quantity       Float
+  rate           Float
+  discount       Float       @default(0)
+  taxRate        Float       @default(0)
+  total          Float
+  hsnCode        String?
+  taxableAmount  Float       @default(0)
+  cgstRate       Float       @default(0)
+  cgstAmount     Float       @default(0)
+  sgstRate       Float       @default(0)
+  sgstAmount     Float       @default(0)
+  igstRate       Float       @default(0)
+  igstAmount     Float       @default(0)
+  cessRate       Float       @default(0)
+  cessAmount     Float       @default(0)
+  createdAt      DateTime    @default(now())
 }
 
 // Proforma Invoices

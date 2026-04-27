@@ -19,17 +19,16 @@ const getFiscalYear = (): string => {
   }
 }
 
-const generateNextNumber = async (
+const generateNextInvoiceSeriesNumber = async (
   prisma: any,
-  type: 'INVOICE' | 'QUOTATION',
-  seriesCode: 'SL' | 'QT'
+  seriesCode: 'SL'
 ): Promise<string> => {
   const fy = getFiscalYear()
   const prefix = `NS/${seriesCode}/${fy}/`
 
   const lastDocument = await prisma.salesInvoice.findFirst({
     where: {
-      type,
+      type: 'INVOICE',
       invoiceNumber: { startsWith: prefix }
     },
     orderBy: { invoiceNumber: 'desc' }
@@ -46,10 +45,28 @@ const generateNextNumber = async (
 }
 
 export const generateNextInvoiceNumber = async (prisma: any): Promise<string> =>
-  generateNextNumber(prisma, 'INVOICE', 'SL')
+  generateNextInvoiceSeriesNumber(prisma, 'SL')
 
-export const generateNextQuotationNumber = async (prisma: any): Promise<string> =>
-  generateNextNumber(prisma, 'QUOTATION', 'QT')
+export const generateNextQuotationNumber = async (prisma: any): Promise<string> => {
+  const fy = getFiscalYear()
+  const prefix = `NS/QT/${fy}/`
+
+  const lastDocument = await prisma.quotation.findFirst({
+    where: {
+      invoiceNumber: { startsWith: prefix }
+    },
+    orderBy: { invoiceNumber: 'desc' }
+  })
+
+  let nextNum = 1
+  if (lastDocument) {
+    const lastPart = lastDocument.invoiceNumber.split('/').pop()
+    const parsed = parseInt(lastPart || '0')
+    if (!isNaN(parsed)) nextNum = parsed + 1
+  }
+
+  return `${prefix}${String(nextNum).padStart(2, '0')}`
+}
 
 export const generateNextProformaInvoiceNumber = async (prisma: any): Promise<string> => {
   const fy = getFiscalYear()
@@ -176,7 +193,7 @@ export const buildSalesDocumentValues = async (tx: any, data: any) => {
 const createInvoiceFromSourceDocument = async (
   tx: any,
   source: any,
-  relationData: { convertedFromQuoteId?: string; convertedFromProformaId?: string }
+  relationData: { convertedFromQuotationId?: string; convertedFromProformaId?: string }
 ) => {
   const newInvoiceNumber = await generateNextInvoiceNumber(tx)
 
@@ -279,18 +296,18 @@ const createInvoiceFromSourceDocument = async (
 
 export const convertQuotationToInvoice = async (prisma: any, quoteId: string) => {
   return prisma.$transaction(async (tx: any) => {
-    const quote = await tx.salesInvoice.findUnique({
+    const quote = await tx.quotation.findUnique({
       where: { id: quoteId },
       include: {
         items: true
       }
     })
 
-    if (!quote || quote.type !== 'QUOTATION') {
+    if (!quote) {
       throw new Error('Invalid quotation')
     }
 
-    return createInvoiceFromSourceDocument(tx, quote, { convertedFromQuoteId: quoteId })
+    return createInvoiceFromSourceDocument(tx, quote, { convertedFromQuotationId: quoteId })
   })
 }
 

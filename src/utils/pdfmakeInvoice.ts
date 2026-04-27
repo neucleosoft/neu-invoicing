@@ -111,9 +111,9 @@ function buildCompanySection(inv: InvoiceData, logo: string): Content {
   const isQuotation = inv.type === 'QUOTATION'
   const isProformaInvoice = inv.type === 'PROFORMA_INVOICE'
   const isQuoteLike = isQuotation || isProformaInvoice
-  const secondaryLabel = isProformaInvoice ? 'Delivery Time' : 'P.O. No.'
-  const secondaryValue = isProformaInvoice ? inv.deliveryTime : inv.poNumber
-  const secondaryDisplayValue = isProformaInvoice && secondaryValue ? formatDate(secondaryValue) : secondaryValue
+  const secondaryLabel = isQuoteLike ? 'Delivery Time' : 'P.O. No.'
+  const secondaryValue = isQuoteLike ? inv.deliveryTime : inv.poNumber
+  const secondaryDisplayValue = isQuoteLike && secondaryValue ? formatDate(secondaryValue) : secondaryValue
   const hasSecondaryValue = !!secondaryValue
   const numberLabel = isQuotation
     ? 'Quotation No.'
@@ -366,7 +366,7 @@ function buildItemsSection(inv: InvoiceData, isInter: boolean, taxGroups: Return
 
   // Filler rows — stretch the items table to fill the page.
   // Shrink when additional fields exist (they take space above items).
-  const hasAdditionalFields = inv.type === 'PROFORMA_INVOICE'
+  const hasAdditionalFields = inv.type === 'PROFORMA_INVOICE' || inv.type === 'QUOTATION'
     ? false
     : !!(inv.ewayBillNo || inv.vehicleNumber || inv.warrantyPeriod || inv.dispatchedThrough)
   const TARGET_ROWS = hasAdditionalFields ? 12 : 14
@@ -419,7 +419,7 @@ function buildItemsSection(inv: InvoiceData, isInter: boolean, taxGroups: Return
 
 /** Returns an array — empty if no fields, or [section] if fields exist */
 function buildAdditionalFieldsSection(inv: InvoiceData): Content[] {
-  if (inv.type === 'PROFORMA_INVOICE') {
+  if (inv.type === 'PROFORMA_INVOICE' || inv.type === 'QUOTATION') {
     return []
   }
 

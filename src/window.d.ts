@@ -1,4 +1,4 @@
-import type { ProformaInvoice, SalesDocumentType, SalesInvoice } from './types';
+import type { ProformaInvoice, Quotation, SalesDocumentType, SalesInvoice } from './types';
 
 export {};
 
@@ -48,10 +48,10 @@ declare global {
         generatePDF: (id: string) => Promise<{ success: boolean; message?: string; error?: string }>;
       };
       quotation: {
-        getAll: () => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>;
-        getById: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
-        create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
-        update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
+        getAll: () => Promise<{ success: boolean; data?: Quotation[]; error?: string }>;
+        getById: (id: string) => Promise<{ success: boolean; data?: Quotation; error?: string }>;
+        create: (data: any) => Promise<{ success: boolean; data?: Quotation; error?: string }>;
+        update: (id: string, data: any) => Promise<{ success: boolean; data?: Quotation; error?: string }>;
         delete: (id: string) => Promise<{ success: boolean; error?: string }>;
         convertToInvoice: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
         generateQuotationNumber: () => Promise<{ success: boolean; data?: string; error?: string }>;
