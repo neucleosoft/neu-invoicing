@@ -51,6 +51,27 @@ export const generateNextInvoiceNumber = async (prisma: any): Promise<string> =>
 export const generateNextQuotationNumber = async (prisma: any): Promise<string> =>
   generateNextNumber(prisma, 'QUOTATION', 'QT')
 
+export const generateNextProformaInvoiceNumber = async (prisma: any): Promise<string> => {
+  const fy = getFiscalYear()
+  const prefix = `NS/PI/${fy}/`
+
+  const lastDocument = await prisma.proformaInvoice.findFirst({
+    where: {
+      invoiceNumber: { startsWith: prefix }
+    },
+    orderBy: { invoiceNumber: 'desc' }
+  })
+
+  let nextNum = 1
+  if (lastDocument) {
+    const lastPart = lastDocument.invoiceNumber.split('/').pop()
+    const parsed = parseInt(lastPart || '0')
+    if (!isNaN(parsed)) nextNum = parsed + 1
+  }
+
+  return `${prefix}${String(nextNum).padStart(2, '0')}`
+}
+
 export const determineSupplyType = (party: any, totalAmount: number, isInterState: boolean): string => {
   const hasGstin = party?.taxId && party.taxId.length === 15
 
@@ -152,6 +173,110 @@ export const buildSalesDocumentValues = async (tx: any, data: any) => {
   }
 }
 
+const createInvoiceFromSourceDocument = async (
+  tx: any,
+  source: any,
+  relationData: { convertedFromQuoteId?: string; convertedFromProformaId?: string }
+) => {
+  const newInvoiceNumber = await generateNextInvoiceNumber(tx)
+
+  const invoice = await tx.salesInvoice.create({
+    data: {
+      invoiceNumber: newInvoiceNumber,
+      invoiceDate: new Date(),
+      type: 'INVOICE',
+      partyId: source.partyId,
+      subtotal: source.subtotal,
+      discount: source.discount,
+      taxAmount: source.taxAmount,
+      totalAmount: source.totalAmount,
+      amountPaid: 0,
+      balanceDue: source.totalAmount,
+      status: 'DRAFT',
+      notes: source.notes,
+      placeOfSupply: source.placeOfSupply,
+      placeOfSupplyName: source.placeOfSupplyName,
+      isInterState: source.isInterState,
+      reverseCharge: source.reverseCharge,
+      cgstAmount: source.cgstAmount,
+      sgstAmount: source.sgstAmount,
+      igstAmount: source.igstAmount,
+      cessAmount: source.cessAmount,
+      supplyType: source.supplyType,
+      ecommerceGstin: source.ecommerceGstin,
+      poNumber: source.poNumber,
+      ewayBillNo: source.ewayBillNo,
+      vehicleNumber: source.vehicleNumber,
+      warrantyPeriod: source.warrantyPeriod,
+      dispatchedThrough: source.dispatchedThrough,
+      ...relationData,
+      items: {
+        create: source.items.map((item: any) => ({
+          itemId: item.itemId,
+          quantity: item.quantity,
+          rate: item.rate,
+          discount: item.discount,
+          taxRate: item.taxRate,
+          total: item.total,
+          hsnCode: item.hsnCode,
+          taxableAmount: item.taxableAmount,
+          cgstRate: item.cgstRate,
+          cgstAmount: item.cgstAmount,
+          sgstRate: item.sgstRate,
+          sgstAmount: item.sgstAmount,
+          igstRate: item.igstRate,
+          igstAmount: item.igstAmount,
+          cessRate: item.cessRate,
+          cessAmount: item.cessAmount
+        }))
+      }
+    },
+    include: {
+      items: {
+        include: {
+          item: true
+        }
+      },
+      party: true
+    }
+  })
+
+  await tx.party.update({
+    where: { id: source.partyId },
+    data: {
+      currentBalance: {
+        increment: source.totalAmount
+      }
+    }
+  })
+
+  for (const item of source.items) {
+    const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
+    if (dbItem && dbItem.trackStock) {
+      await tx.item.update({
+        where: { id: item.itemId },
+        data: {
+          currentStock: {
+            decrement: item.quantity
+          }
+        }
+      })
+
+      await tx.stockMovement.create({
+        data: {
+          itemId: item.itemId,
+          movementType: 'SALE',
+          quantity: -item.quantity,
+          referenceType: 'INVOICE',
+          referenceId: invoice.id
+        }
+      })
+    }
+  }
+
+  return invoice
+}
+
 export const convertQuotationToInvoice = async (prisma: any, quoteId: string) => {
   return prisma.$transaction(async (tx: any) => {
     const quote = await tx.salesInvoice.findUnique({
@@ -165,102 +290,23 @@ export const convertQuotationToInvoice = async (prisma: any, quoteId: string) =>
       throw new Error('Invalid quotation')
     }
 
-    const newInvoiceNumber = await generateNextInvoiceNumber(tx)
+    return createInvoiceFromSourceDocument(tx, quote, { convertedFromQuoteId: quoteId })
+  })
+}
 
-    const invoice = await tx.salesInvoice.create({
-      data: {
-        invoiceNumber: newInvoiceNumber,
-        invoiceDate: new Date(),
-        type: 'INVOICE',
-        partyId: quote.partyId,
-        subtotal: quote.subtotal,
-        discount: quote.discount,
-        taxAmount: quote.taxAmount,
-        totalAmount: quote.totalAmount,
-        amountPaid: 0,
-        balanceDue: quote.totalAmount,
-        status: 'DRAFT',
-        convertedFromQuoteId: quoteId,
-        notes: quote.notes,
-        placeOfSupply: quote.placeOfSupply,
-        placeOfSupplyName: quote.placeOfSupplyName,
-        isInterState: quote.isInterState,
-        reverseCharge: quote.reverseCharge,
-        cgstAmount: quote.cgstAmount,
-        sgstAmount: quote.sgstAmount,
-        igstAmount: quote.igstAmount,
-        cessAmount: quote.cessAmount,
-        supplyType: quote.supplyType,
-        ecommerceGstin: quote.ecommerceGstin,
-        poNumber: quote.poNumber,
-        ewayBillNo: quote.ewayBillNo,
-        vehicleNumber: quote.vehicleNumber,
-        warrantyPeriod: quote.warrantyPeriod,
-        dispatchedThrough: quote.dispatchedThrough,
-        items: {
-          create: quote.items.map((item: any) => ({
-            itemId: item.itemId,
-            quantity: item.quantity,
-            rate: item.rate,
-            discount: item.discount,
-            taxRate: item.taxRate,
-            total: item.total,
-            hsnCode: item.hsnCode,
-            taxableAmount: item.taxableAmount,
-            cgstRate: item.cgstRate,
-            cgstAmount: item.cgstAmount,
-            sgstRate: item.sgstRate,
-            sgstAmount: item.sgstAmount,
-            igstRate: item.igstRate,
-            igstAmount: item.igstAmount,
-            cessRate: item.cessRate,
-            cessAmount: item.cessAmount
-          }))
-        }
-      },
+export const convertProformaInvoiceToInvoice = async (prisma: any, proformaInvoiceId: string) => {
+  return prisma.$transaction(async (tx: any) => {
+    const proformaInvoice = await tx.proformaInvoice.findUnique({
+      where: { id: proformaInvoiceId },
       include: {
-        items: {
-          include: {
-            item: true
-          }
-        },
-        party: true
+        items: true
       }
     })
 
-    await tx.party.update({
-      where: { id: quote.partyId },
-      data: {
-        currentBalance: {
-          increment: quote.totalAmount
-        }
-      }
-    })
-
-    for (const item of quote.items) {
-      const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
-      if (dbItem && dbItem.trackStock) {
-        await tx.item.update({
-          where: { id: item.itemId },
-          data: {
-            currentStock: {
-              decrement: item.quantity
-            }
-          }
-        })
-
-        await tx.stockMovement.create({
-          data: {
-            itemId: item.itemId,
-            movementType: 'SALE',
-            quantity: -item.quantity,
-            referenceType: 'INVOICE',
-            referenceId: invoice.id
-          }
-        })
-      }
+    if (!proformaInvoice) {
+      throw new Error('Invalid proforma invoice')
     }
 
-    return invoice
+    return createInvoiceFromSourceDocument(tx, proformaInvoice, { convertedFromProformaId: proformaInvoiceId })
   })
 }

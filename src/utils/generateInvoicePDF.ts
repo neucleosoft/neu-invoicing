@@ -2,6 +2,7 @@ import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { downloadClassicPDF } from './pdfmakeInvoice'
 import { downloadQuotationPDF, previewQuotationPDF } from './pdfmakeQuotation'
+import { downloadProformaInvoicePDF, previewProformaInvoicePDF } from './pdfmakeProformaInvoice'
 import {
   fmtNum,
   fmtRs,
@@ -635,6 +636,11 @@ export function downloadInvoicePDF(invoice: InvoiceData, template: InvoiceTempla
     return
   }
 
+  if (invoice.type === 'PROFORMA_INVOICE') {
+    downloadProformaInvoicePDF(invoice)
+    return
+  }
+
   // Classic uses pdfmake (flow-based layout), others still use jsPDF
   if (template === 'classic') {
     downloadClassicPDF(invoice)
@@ -648,6 +654,11 @@ export function downloadInvoicePDF(invoice: InvoiceData, template: InvoiceTempla
 export function previewInvoicePDF(invoice: InvoiceData, template: InvoiceTemplate = 'classic') {
   if (invoice.type === 'QUOTATION') {
     previewQuotationPDF(invoice)
+    return
+  }
+
+  if (invoice.type === 'PROFORMA_INVOICE') {
+    previewProformaInvoicePDF(invoice)
     return
   }
 

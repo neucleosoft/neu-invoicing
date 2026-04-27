@@ -59,8 +59,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("sales:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("sales:delete", id),
-    convertQuoteToInvoice: (quoteId: string) =>
-      ipcRenderer.invoke("sales:convertQuoteToInvoice", quoteId),
     generateInvoiceNumber: () =>
       ipcRenderer.invoke("sales:generateInvoiceNumber"),
     generatePDF: (id: string) => ipcRenderer.invoke("sales:generatePDF", id),
@@ -78,6 +76,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("quotation:convertToInvoice", id),
     generateQuotationNumber: () =>
       ipcRenderer.invoke("quotation:generateQuotationNumber"),
+  },
+
+  // Proforma Invoices
+  proformaInvoice: {
+    getAll: () => ipcRenderer.invoke("proformaInvoice:getAll"),
+    getById: (id: string) => ipcRenderer.invoke("proformaInvoice:getById", id),
+    create: (data: any) => ipcRenderer.invoke("proformaInvoice:create", data),
+    update: (id: string, data: any) =>
+      ipcRenderer.invoke("proformaInvoice:update", id, data),
+    delete: (id: string) => ipcRenderer.invoke("proformaInvoice:delete", id),
+    convertToInvoice: (id: string) =>
+      ipcRenderer.invoke("proformaInvoice:convertToInvoice", id),
+    generateNumber: () =>
+      ipcRenderer.invoke("proformaInvoice:generateNumber"),
   },
 
   // Purchase

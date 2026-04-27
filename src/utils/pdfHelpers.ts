@@ -74,6 +74,7 @@ export interface ChallanData extends PDFDocumentData {
 export interface InvoiceData extends PDFDocumentData {
   invoiceNumber: string
   invoiceDate: string
+  dueDate?: string
   type: string
   status: string
   subtotal: number
@@ -96,6 +97,7 @@ export interface InvoiceData extends PDFDocumentData {
   vehicleNumber?: string
   warrantyPeriod?: string
   dispatchedThrough?: string
+  deliveryTime?: string
 }
 
 // ─── Template types ───────────────────────────────────────────────────────────

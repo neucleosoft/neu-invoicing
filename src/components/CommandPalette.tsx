@@ -26,6 +26,7 @@ const destinations = [
   { name: 'Items', path: '/items', icon: Package, group: 'Navigate' },
   { name: 'Sales', path: '/sales', icon: Wallet, group: 'Navigate' },
   { name: 'Quotations', path: '/quotations', icon: FileText, group: 'Navigate' },
+  { name: 'Proforma Invoices', path: '/proforma-invoices', icon: FileText, group: 'Navigate' },
   { name: 'Purchase', path: '/purchase', icon: ShoppingCart, group: 'Navigate' },
   { name: 'Delivery Challans', path: '/delivery-challan', icon: Truck, group: 'Navigate' },
   { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText, group: 'Navigate' },
