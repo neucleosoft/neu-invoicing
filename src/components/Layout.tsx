@@ -32,6 +32,7 @@ const navigation = [
   { name: 'Items', path: '/items', icon: Package },
   { name: 'Sales', path: '/sales', icon: Wallet },
   { name: 'Quotations', path: '/quotations', icon: FileText },
+  { name: 'Proforma Invoices', path: '/proforma-invoices', icon: FileText },
   { name: 'Purchase', path: '/purchase', icon: ShoppingCart },
   { name: 'Challans', path: '/delivery-challan', icon: Truck },
   { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText },

@@ -12,6 +12,7 @@ import Parties from './pages/Parties'
 import Items from './pages/Items'
 import Sales from './pages/Sales'
 import Quotations from './pages/Quotations'
+import ProformaInvoices from './pages/ProformaInvoices'
 import Purchase from './pages/Purchase'
 import Payments from './pages/Payments'
 import Reports from './pages/Reports'
@@ -132,6 +133,7 @@ function App() {
             <Route path="items" element={<Items />} />
             <Route path="sales" element={<Sales />} />
             <Route path="quotations" element={<Quotations />} />
+            <Route path="proforma-invoices" element={<ProformaInvoices />} />
             <Route path="purchase" element={<Purchase />} />
             <Route path="payments" element={<Payments />} />
             <Route path="delivery-challan" element={<DeliveryChallan />} />
