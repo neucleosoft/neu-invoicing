@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { SalesInvoice, QuotationStatus } from '../types'
+import { Quotation, QuotationStatus } from '../types'
 import { downloadInvoicePDF } from '../utils/generateInvoicePDF'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
@@ -54,16 +54,15 @@ const statusBadgeClass = (status: string) => {
 }
 
 const Quotations = () => {
-  const [quotations, setQuotations] = useState<SalesInvoice[]>([])
+  const [quotations, setQuotations] = useState<Quotation[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [showViewModal, setShowViewModal] = useState(false)
-  const [viewingQuotation, setViewingQuotation] = useState<SalesInvoice | null>(null)
-  const [editingQuotation, setEditingQuotation] = useState<SalesInvoice | null>(null)
+  const [viewingQuotation, setViewingQuotation] = useState<Quotation | null>(null)
+  const [editingQuotation, setEditingQuotation] = useState<Quotation | null>(null)
   const [parties, setParties] = useState<Party[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [showAdditionalFields, setShowAdditionalFields] = useState(false)
   const [quotationItems, setQuotationItems] = useState<QuotationItem[]>([])
   const toast = useToast()
   const confirm = useConfirm()
@@ -75,11 +74,7 @@ const Quotations = () => {
     dueDate: '',
     invoiceNumber: '',
     notes: '',
-    poNumber: '',
-    ewayBillNo: '',
-    vehicleNumber: '',
-    warrantyPeriod: '',
-    dispatchedThrough: '',
+    deliveryTime: '',
   })
 
   useEffect(() => {
@@ -151,6 +146,7 @@ const Quotations = () => {
 
         downloadInvoicePDF({
           ...quotation,
+          type: 'QUOTATION',
           party: quotation.party,
           items: quotation.items || [],
           company,
@@ -196,7 +192,7 @@ const Quotations = () => {
     }
   }
 
-  const handleEdit = async (quotation: SalesInvoice) => {
+  const handleEdit = async (quotation: Quotation) => {
     const result = await window.electronAPI.quotation.getById(quotation.id)
     if (result.success && result.data) {
       const fullQuotation = result.data
@@ -208,15 +204,8 @@ const Quotations = () => {
         invoiceDate: new Date(fullQuotation.invoiceDate).toISOString().split('T')[0],
         dueDate: fullQuotation.dueDate ? new Date(fullQuotation.dueDate).toISOString().split('T')[0] : '',
         notes: fullQuotation.notes || '',
-        poNumber: fullQuotation.poNumber || '',
-        ewayBillNo: fullQuotation.ewayBillNo || '',
-        vehicleNumber: fullQuotation.vehicleNumber || '',
-        warrantyPeriod: fullQuotation.warrantyPeriod || '',
-        dispatchedThrough: fullQuotation.dispatchedThrough || '',
+        deliveryTime: fullQuotation.deliveryTime ? new Date(fullQuotation.deliveryTime).toISOString().split('T')[0] : '',
       })
-      if (fullQuotation.poNumber || fullQuotation.ewayBillNo || fullQuotation.vehicleNumber || fullQuotation.warrantyPeriod || fullQuotation.dispatchedThrough) {
-        setShowAdditionalFields(true)
-      }
       setQuotationItems(fullQuotation.items?.map((item: any) => ({
         itemId: item.item?.id || item.itemId,
         hsnCode: item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '',
@@ -313,16 +302,11 @@ const Quotations = () => {
     const quotationData = {
       invoiceNumber: formData.invoiceNumber,
       partyId: formData.partyId,
-      type: 'QUOTATION',
       status: formData.status,
       invoiceDate: formData.invoiceDate,
       dueDate: formData.dueDate || null,
+      deliveryTime: formData.deliveryTime || null,
       notes: formData.notes,
-      poNumber: formData.poNumber,
-      ewayBillNo: formData.ewayBillNo,
-      vehicleNumber: formData.vehicleNumber,
-      warrantyPeriod: formData.warrantyPeriod,
-      dispatchedThrough: formData.dispatchedThrough,
       items: quotationItems,
       subtotalAmount: subtotal,
       taxAmount,
@@ -360,15 +344,10 @@ const Quotations = () => {
       dueDate: '',
       invoiceNumber: '',
       notes: '',
-      poNumber: '',
-      ewayBillNo: '',
-      vehicleNumber: '',
-      warrantyPeriod: '',
-      dispatchedThrough: '',
+      deliveryTime: '',
     })
     setQuotationItems([])
     setEditingQuotation(null)
-    setShowAdditionalFields(false)
   }
 
   const handleNewQuotation = async () => {
@@ -586,6 +565,16 @@ const Quotations = () => {
                       onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
                     />
                   </div>
+
+                  <div>
+                    <label className="label">Delivery Time</label>
+                    <input
+                      type="date"
+                      className="input"
+                      value={formData.deliveryTime}
+                      onChange={(e) => setFormData({ ...formData, deliveryTime: e.target.value })}
+                    />
+                  </div>
                 </div>
 
                 <div>
@@ -728,74 +717,6 @@ const Quotations = () => {
                   />
                 </div>
 
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setShowAdditionalFields(!showAdditionalFields)}
-                    className="flex items-center gap-2 text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                  >
-                    <span className={`transform transition-transform ${showAdditionalFields ? 'rotate-180' : ''}`}>
-                      ▼
-                    </span>
-                    Additional Fields
-                  </button>
-
-                  {showAdditionalFields && (
-                    <div className="grid grid-cols-2 gap-4 mt-3 p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
-                      <div>
-                        <label className="label">P.O. Number</label>
-                        <input
-                          type="text"
-                          className="input"
-                          value={formData.poNumber}
-                          onChange={(e) => setFormData({ ...formData, poNumber: e.target.value })}
-                          placeholder="Customer's purchase order number"
-                        />
-                      </div>
-                      <div>
-                        <label className="label">E-Way Bill No</label>
-                        <input
-                          type="text"
-                          className="input"
-                          value={formData.ewayBillNo}
-                          onChange={(e) => setFormData({ ...formData, ewayBillNo: e.target.value })}
-                          placeholder="E-Way Bill number"
-                        />
-                      </div>
-                      <div>
-                        <label className="label">Vehicle Number</label>
-                        <input
-                          type="text"
-                          className="input"
-                          value={formData.vehicleNumber}
-                          onChange={(e) => setFormData({ ...formData, vehicleNumber: e.target.value })}
-                          placeholder="Transport vehicle number"
-                        />
-                      </div>
-                      <div>
-                        <label className="label">Warranty Period</label>
-                        <input
-                          type="text"
-                          className="input"
-                          value={formData.warrantyPeriod}
-                          onChange={(e) => setFormData({ ...formData, warrantyPeriod: e.target.value })}
-                          placeholder="e.g. 12 Months"
-                        />
-                      </div>
-                      <div>
-                        <label className="label">Dispatched Through</label>
-                        <input
-                          type="text"
-                          className="input"
-                          value={formData.dispatchedThrough}
-                          onChange={(e) => setFormData({ ...formData, dispatchedThrough: e.target.value })}
-                          placeholder="Transport company / courier"
-                        />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
                 <div className="flex justify-end gap-3 pt-4 border-t">
                   <button
                     type="button"
@@ -843,6 +764,10 @@ const Quotations = () => {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Expiry Date</p>
                   <p className="font-medium">{viewingQuotation.dueDate ? new Date(viewingQuotation.dueDate).toLocaleDateString() : '-'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Delivery Time</p>
+                  <p className="font-medium">{viewingQuotation.deliveryTime ? new Date(viewingQuotation.deliveryTime).toLocaleDateString() : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Document Type</p>
