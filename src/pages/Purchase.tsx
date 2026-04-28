@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { PurchaseBill } from '../types'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
@@ -345,7 +346,7 @@ const Purchase = () => {
               {filteredBills.map((bill) => (
                 <tr key={bill.id} className="border-t">
                   <td className="table-cell font-medium">{bill.billNumber}</td>
-                  <td className="table-cell">{new Date(bill.billDate).toLocaleDateString()}</td>
+                  <td className="table-cell">{new Date(bill.billDate).toLocaleDateString('en-GB')}</td>
                   <td className="table-cell">{bill.party?.name}</td>
                   <td className="table-cell">{formatCurrency(bill.totalAmount)}</td>
                   <td className="table-cell">
@@ -414,8 +415,7 @@ const Purchase = () => {
 
                   <div>
                     <label className="label">Bill Date *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.billDate}
                       onChange={(e) => setFormData({...formData, billDate: e.target.value})}
@@ -608,7 +608,7 @@ const Purchase = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Date</p>
-                  <p className="font-medium">{new Date(viewingBill.billDate).toLocaleDateString()}</p>
+                  <p className="font-medium">{new Date(viewingBill.billDate).toLocaleDateString('en-GB')}</p>
                 </div>
               </div>
 

@@ -772,7 +772,7 @@ export const setupGSTReportHandlers = () => {
           b2bSheet.addRow({
             gstin: inv.party?.taxId || '',
             invoiceNumber: inv.invoiceNumber,
-            invoiceDate: new Date(inv.invoiceDate).toLocaleDateString('en-IN'),
+            invoiceDate: new Date(inv.invoiceDate).toLocaleDateString('en-GB'),
             invoiceValue: inv.totalAmount,
             placeOfSupply: `${inv.placeOfSupply}-${inv.placeOfSupplyName || INDIAN_STATES[inv.placeOfSupply] || ''}`,
             reverseCharge: inv.reverseCharge ? 'Y' : 'N',

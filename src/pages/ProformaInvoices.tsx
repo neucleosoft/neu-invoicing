@@ -5,6 +5,7 @@ import { ProformaInvoice, ProformaInvoiceStatus } from '../types'
 import { downloadProformaInvoicePDF } from '../utils/pdfmakeProformaInvoice'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
@@ -439,8 +440,8 @@ const ProformaInvoices = () => {
                 {sortedProformaInvoices.map((proformaInvoice) => (
                   <tr key={proformaInvoice.id} className="border-t">
                     <td className="table-cell font-medium">{proformaInvoice.invoiceNumber}</td>
-                    <td className="table-cell">{new Date(proformaInvoice.invoiceDate).toLocaleDateString()}</td>
-                    <td className="table-cell">{proformaInvoice.dueDate ? new Date(proformaInvoice.dueDate).toLocaleDateString() : '-'}</td>
+                    <td className="table-cell">{new Date(proformaInvoice.invoiceDate).toLocaleDateString('en-GB')}</td>
+                    <td className="table-cell">{proformaInvoice.dueDate ? new Date(proformaInvoice.dueDate).toLocaleDateString('en-GB') : '-'}</td>
                     <td className="table-cell">{proformaInvoice.party?.name}</td>
                     <td className="table-cell">{formatCurrency(proformaInvoice.totalAmount)}</td>
                     <td className="table-cell">
@@ -550,8 +551,7 @@ const ProformaInvoices = () => {
 
                   <div>
                     <label className="label">PI Date *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.invoiceDate}
                       onChange={(e) => setFormData({ ...formData, invoiceDate: e.target.value })}
@@ -561,8 +561,7 @@ const ProformaInvoices = () => {
 
                   <div>
                     <label className="label">Expiry Date</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.dueDate}
                       onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
@@ -571,8 +570,7 @@ const ProformaInvoices = () => {
 
                   <div>
                     <label className="label">Delivery Time</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.deliveryTime}
                       onChange={(e) => setFormData({ ...formData, deliveryTime: e.target.value })}
@@ -762,15 +760,15 @@ const ProformaInvoices = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">PI Date</p>
-                  <p className="font-medium">{new Date(viewingProformaInvoice.invoiceDate).toLocaleDateString()}</p>
+                  <p className="font-medium">{new Date(viewingProformaInvoice.invoiceDate).toLocaleDateString('en-GB')}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Expiry Date</p>
-                  <p className="font-medium">{viewingProformaInvoice.dueDate ? new Date(viewingProformaInvoice.dueDate).toLocaleDateString() : '-'}</p>
+                  <p className="font-medium">{viewingProformaInvoice.dueDate ? new Date(viewingProformaInvoice.dueDate).toLocaleDateString('en-GB') : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Delivery Time</p>
-                  <p className="font-medium">{viewingProformaInvoice.deliveryTime ? new Date(viewingProformaInvoice.deliveryTime).toLocaleDateString() : '-'}</p>
+                  <p className="font-medium">{viewingProformaInvoice.deliveryTime ? new Date(viewingProformaInvoice.deliveryTime).toLocaleDateString('en-GB') : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Document Type</p>

@@ -4,6 +4,7 @@ import { SalesInvoice } from '../types'
 import { downloadInvoicePDF, InvoiceTemplate } from '../utils/generateInvoicePDF'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
@@ -519,7 +520,7 @@ const Sales = () => {
                 {sortedInvoices.map((invoice) => (
                   <tr key={invoice.id} className="border-t">
                     <td className="table-cell font-medium">{invoice.invoiceNumber}</td>
-                    <td className="table-cell">{new Date(invoice.invoiceDate).toLocaleDateString()}</td>
+                    <td className="table-cell">{new Date(invoice.invoiceDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{invoice.party?.name}</td>
                     <td className="table-cell">{formatCurrency(invoice.totalAmount)}</td>
                     <td className="table-cell">
@@ -631,8 +632,7 @@ const Sales = () => {
 
                   <div>
                     <label className="label">Invoice Date *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.invoiceDate}
                       onChange={(e) => setFormData({...formData, invoiceDate: e.target.value})}
@@ -642,8 +642,7 @@ const Sales = () => {
 
                   <div>
                     <label className="label">Due Date</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.dueDate}
                       onChange={(e) => setFormData({...formData, dueDate: e.target.value})}
@@ -935,7 +934,7 @@ const Sales = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Date</p>
-                  <p className="font-medium">{new Date(viewingInvoice.invoiceDate).toLocaleDateString()}</p>
+                  <p className="font-medium">{new Date(viewingInvoice.invoiceDate).toLocaleDateString('en-GB')}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>

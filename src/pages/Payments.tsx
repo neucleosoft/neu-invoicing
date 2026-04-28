@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { PaymentTransaction } from '../types'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 
 interface Party {
@@ -145,7 +146,7 @@ const Payments = () => {
             <tbody>
               {payments.map((payment) => (
                 <tr key={payment.id} className="border-t">
-                  <td className="table-cell">{new Date(payment.paymentDate).toLocaleDateString()}</td>
+                  <td className="table-cell">{new Date(payment.paymentDate).toLocaleDateString('en-GB')}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-1 rounded-full text-xs ${
                       payment.type === 'PAYMENT_IN' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
@@ -227,8 +228,7 @@ const Payments = () => {
 
                 <div>
                   <label className="label">Payment Date *</label>
-                  <input
-                    type="date"
+                  <DateInput
                     className="input"
                     value={formData.paymentDate}
                     onChange={(e) => setFormData({...formData, paymentDate: e.target.value})}

@@ -3,6 +3,7 @@ import { Quotation, QuotationStatus } from '../types'
 import { downloadInvoicePDF } from '../utils/generateInvoicePDF'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
@@ -436,8 +437,8 @@ const Quotations = () => {
                 {sortedQuotations.map((quotation) => (
                   <tr key={quotation.id} className="border-t">
                     <td className="table-cell font-medium">{quotation.invoiceNumber}</td>
-                    <td className="table-cell">{new Date(quotation.invoiceDate).toLocaleDateString()}</td>
-                    <td className="table-cell">{quotation.dueDate ? new Date(quotation.dueDate).toLocaleDateString() : '-'}</td>
+                    <td className="table-cell">{new Date(quotation.invoiceDate).toLocaleDateString('en-GB')}</td>
+                    <td className="table-cell">{quotation.dueDate ? new Date(quotation.dueDate).toLocaleDateString('en-GB') : '-'}</td>
                     <td className="table-cell">{quotation.party?.name}</td>
                     <td className="table-cell">{formatCurrency(quotation.totalAmount)}</td>
                     <td className="table-cell">
@@ -547,8 +548,7 @@ const Quotations = () => {
 
                   <div>
                     <label className="label">Quotation Date *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.invoiceDate}
                       onChange={(e) => setFormData({ ...formData, invoiceDate: e.target.value })}
@@ -558,8 +558,7 @@ const Quotations = () => {
 
                   <div>
                     <label className="label">Expiry Date</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.dueDate}
                       onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
@@ -568,8 +567,7 @@ const Quotations = () => {
 
                   <div>
                     <label className="label">Delivery Time</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.deliveryTime}
                       onChange={(e) => setFormData({ ...formData, deliveryTime: e.target.value })}
@@ -759,15 +757,15 @@ const Quotations = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Quotation Date</p>
-                  <p className="font-medium">{new Date(viewingQuotation.invoiceDate).toLocaleDateString()}</p>
+                  <p className="font-medium">{new Date(viewingQuotation.invoiceDate).toLocaleDateString('en-GB')}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Expiry Date</p>
-                  <p className="font-medium">{viewingQuotation.dueDate ? new Date(viewingQuotation.dueDate).toLocaleDateString() : '-'}</p>
+                  <p className="font-medium">{viewingQuotation.dueDate ? new Date(viewingQuotation.dueDate).toLocaleDateString('en-GB') : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Delivery Time</p>
-                  <p className="font-medium">{viewingQuotation.deliveryTime ? new Date(viewingQuotation.deliveryTime).toLocaleDateString() : '-'}</p>
+                  <p className="font-medium">{viewingQuotation.deliveryTime ? new Date(viewingQuotation.deliveryTime).toLocaleDateString('en-GB') : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Document Type</p>

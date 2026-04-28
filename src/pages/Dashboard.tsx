@@ -310,7 +310,7 @@ const Dashboard = () => {
               <tbody>
                 {latestTransactions.map((txn) => (
                   <tr key={txn.id} className="border-t">
-                    <td className="table-cell">{new Date(txn.date).toLocaleDateString()}</td>
+                    <td className="table-cell">{new Date(txn.date).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${getTypeBadgeClass(txn.type)}`}>
                         {txn.type}

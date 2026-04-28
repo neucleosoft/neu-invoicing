@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
 import { downloadChallanPDF } from '../utils/pdfmakeChallan'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
@@ -449,7 +450,7 @@ const DeliveryChallan = () => {
                 {filteredChallans.map((challan) => (
                   <tr key={challan.id} className="border-t">
                     <td className="table-cell font-medium">{challan.challanNumber}</td>
-                    <td className="table-cell">{new Date(challan.challanDate).toLocaleDateString()}</td>
+                    <td className="table-cell">{new Date(challan.challanDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{challan.party?.name}</td>
                     <td className="table-cell">{formatCurrency(challan.totalAmount)}</td>
                     <td className="table-cell">
@@ -565,8 +566,7 @@ const DeliveryChallan = () => {
 
                   <div>
                     <label className="label">Challan Date *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.challanDate}
                       onChange={(e) => setFormData({...formData, challanDate: e.target.value})}
@@ -833,7 +833,7 @@ const DeliveryChallan = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Date</p>
-                  <p className="font-medium">{new Date(viewingChallan.challanDate).toLocaleDateString()}</p>
+                  <p className="font-medium">{new Date(viewingChallan.challanDate).toLocaleDateString('en-GB')}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Transport Mode</p>

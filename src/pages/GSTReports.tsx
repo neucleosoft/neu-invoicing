@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { formatCurrency } from '../utils/currency'
 import { useToast } from '../components/ToastContext'
+import DateInput from '../components/DateInput'
 import type { GSTR1Data, GSTR3BData, HSNSummaryItem, GSTReportFilters } from '../types'
 
 type ReportType = 'dashboard' | 'gstr1' | 'gstr2' | 'gstr3b' | 'gstr9' | 'hsn'
@@ -291,8 +292,7 @@ const GSTReports = () => {
           </div>
           <div>
             <label className="label">Start Date</label>
-            <input
-              type="date"
+            <DateInput
               className="input"
               value={startDate}
               onChange={(e) => {
@@ -303,8 +303,7 @@ const GSTReports = () => {
           </div>
           <div>
             <label className="label">End Date</label>
-            <input
-              type="date"
+            <DateInput
               className="input"
               value={endDate}
               onChange={(e) => {
@@ -903,7 +902,7 @@ const GSTReports = () => {
                   {drillDownInvoices.map((inv: any) => (
                     <tr key={inv.id} className="border-t">
                       <td className="px-4 py-2 font-medium">{inv.invoiceNumber}</td>
-                      <td className="px-4 py-2">{new Date(inv.invoiceDate).toLocaleDateString()}</td>
+                      <td className="px-4 py-2">{new Date(inv.invoiceDate).toLocaleDateString('en-GB')}</td>
                       <td className="px-4 py-2">{inv.party?.name}</td>
                       <td className="px-4 py-2 font-mono text-sm">{inv.party?.taxId || '-'}</td>
                       <td className="px-4 py-2 text-right">{formatCurrency(inv.subtotal - (inv.discount || 0))}</td>
