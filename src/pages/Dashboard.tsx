@@ -14,6 +14,7 @@ import {
 import { DashboardMetrics, SalesInvoice, Item } from '../types'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { formatCurrency } from '../utils/currency'
+import { useStore } from '../store/useStore'
 
 interface LatestTransaction {
   id: string
@@ -33,6 +34,7 @@ const amountFontSize = (value: string | number): string => {
 }
 
 const Dashboard = () => {
+  const darkMode = useStore((s) => s.darkMode)
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
   const [recentInvoices, setRecentInvoices] = useState<SalesInvoice[]>([])
   const [lowStockItems, setLowStockItems] = useState<Item[]>([])
@@ -238,7 +240,16 @@ const Dashboard = () => {
               <CartesianGrid strokeDasharray="3 3" />
               <XAxis dataKey="month" />
               <YAxis />
-              <Tooltip />
+              <Tooltip
+                contentStyle={
+                  darkMode
+                    ? { background: '#1f2937', border: '1px solid #374151', color: '#f3f4f6' }
+                    : { background: '#ffffff', border: '1px solid #e5e7eb', color: '#111827' }
+                }
+                labelStyle={{ color: darkMode ? '#f3f4f6' : '#111827' }}
+                itemStyle={{ color: darkMode ? '#f3f4f6' : '#111827' }}
+                cursor={{ fill: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}
+              />
               <Bar dataKey="amount" fill="#0ea5e9" />
             </BarChart>
           </ResponsiveContainer>

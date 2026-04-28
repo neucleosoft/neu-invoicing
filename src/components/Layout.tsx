@@ -101,7 +101,7 @@ const Layout = () => {
         <div className={`border-b dark:border-gray-700 shrink-0 ${collapsed ? 'p-3' : 'p-6'}`}>
           <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
             {!collapsed && (
-              <h1 className="text-2xl font-bold text-primary-600 tracking-tight">neuInvoicing</h1>
+              <h1 className="text-2xl font-bold text-primary-600 tracking-tight">Neu Invoicing</h1>
             )}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
