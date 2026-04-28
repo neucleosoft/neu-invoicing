@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+
 import { getPrisma } from '../database'
 import { triggerSyncAfterChange } from '../sync'
 import {
@@ -13,46 +14,44 @@ export const setupQuotationHandlers = () => {
 
   ipcMain.handle('quotation:getAll', async () => {
     try {
-      const quotations = await prisma.salesInvoice.findMany({
-        where: { type: 'QUOTATION' },
+      const quotations = await prisma.quotation.findMany({
         include: {
           party: true,
           items: {
             include: {
-              item: true
-            }
-          }
+              item: true,
+            },
+          },
         },
-        orderBy: { invoiceDate: 'desc' }
+        orderBy: { invoiceDate: 'desc' },
       })
       return { success: true, data: quotations }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch quotations'
+        error: error instanceof Error ? error.message : 'Failed to fetch quotations',
       }
     }
   })
 
   ipcMain.handle('quotation:getById', async (_, id: string) => {
     try {
-      const quotation = await prisma.salesInvoice.findFirst({
-        where: { id, type: 'QUOTATION' },
+      const quotation = await prisma.quotation.findUnique({
+        where: { id },
         include: {
           party: true,
           items: {
             include: {
-              item: true
-            }
+              item: true,
+            },
           },
-          payments: true
-        }
+        },
       })
       return { success: true, data: quotation }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch quotation'
+        error: error instanceof Error ? error.message : 'Failed to fetch quotation',
       }
     }
   })
@@ -62,25 +61,24 @@ export const setupQuotationHandlers = () => {
       data.invoiceNumber = normalizeSalesDocumentNumber(data.invoiceNumber)
 
       const quotation = await prisma.$transaction(async (tx: any) => {
-        const existing = await tx.salesInvoice.findUnique({ where: { invoiceNumber: data.invoiceNumber } })
+        const existing = await tx.quotation.findUnique({
+          where: { invoiceNumber: data.invoiceNumber },
+        })
         if (existing) throw new Error(`Quotation number ${data.invoiceNumber} already exists`)
 
         const values = await buildSalesDocumentValues(tx, data)
         const status = data.status || 'DRAFT'
 
-        return tx.salesInvoice.create({
+        return tx.quotation.create({
           data: {
             invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
-            type: 'QUOTATION',
             partyId: data.partyId,
             subtotal: values.subtotal,
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
             totalAmount: values.totalAmount,
-            amountPaid: 0,
-            balanceDue: 0,
             status: status as any,
             notes: data.notes,
             placeOfSupply: values.placeOfSupply,
@@ -93,19 +91,15 @@ export const setupQuotationHandlers = () => {
             cessAmount: values.totalCess,
             supplyType: values.supplyType,
             ecommerceGstin: data.ecommerceGstin || null,
-            poNumber: data.poNumber || null,
-            ewayBillNo: data.ewayBillNo || null,
-            vehicleNumber: data.vehicleNumber || null,
-            warrantyPeriod: data.warrantyPeriod || null,
-            dispatchedThrough: data.dispatchedThrough || null,
+            deliveryTime: data.deliveryTime ? new Date(data.deliveryTime) : null,
             items: {
-              create: values.processedItems
-            }
+              create: values.processedItems,
+            },
           },
           include: {
             items: { include: { item: true } },
-            party: true
-          }
+            party: true,
+          },
         })
       })
 
@@ -114,7 +108,7 @@ export const setupQuotationHandlers = () => {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to create quotation'
+        error: error instanceof Error ? error.message : 'Failed to create quotation',
       }
     }
   })
@@ -126,8 +120,8 @@ export const setupQuotationHandlers = () => {
       }
 
       const quotation = await prisma.$transaction(async (tx: any) => {
-        const existingQuotation = await tx.salesInvoice.findFirst({
-          where: { id, type: 'QUOTATION' }
+        const existingQuotation = await tx.quotation.findUnique({
+          where: { id },
         })
 
         if (!existingQuotation) {
@@ -135,31 +129,30 @@ export const setupQuotationHandlers = () => {
         }
 
         if (data.invoiceNumber && data.invoiceNumber !== existingQuotation.invoiceNumber) {
-          const duplicate = await tx.salesInvoice.findUnique({ where: { invoiceNumber: data.invoiceNumber } })
+          const duplicate = await tx.quotation.findUnique({
+            where: { invoiceNumber: data.invoiceNumber },
+          })
           if (duplicate) throw new Error(`Quotation number ${data.invoiceNumber} already exists`)
         }
 
         const values = await buildSalesDocumentValues(tx, data)
         const status = data.status || existingQuotation.status
 
-        await tx.salesInvoiceItem.deleteMany({
-          where: { salesInvoiceId: id }
+        await tx.quotationItem.deleteMany({
+          where: { quotationId: id },
         })
 
-        return tx.salesInvoice.update({
+        return tx.quotation.update({
           where: { id },
           data: {
             invoiceNumber: data.invoiceNumber || existingQuotation.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
-            type: 'QUOTATION',
             partyId: data.partyId,
             subtotal: values.subtotal,
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
             totalAmount: values.totalAmount,
-            amountPaid: 0,
-            balanceDue: 0,
             status: status as any,
             notes: data.notes,
             placeOfSupply: values.placeOfSupply,
@@ -172,19 +165,15 @@ export const setupQuotationHandlers = () => {
             cessAmount: values.totalCess,
             supplyType: values.supplyType,
             ecommerceGstin: data.ecommerceGstin || null,
-            poNumber: data.poNumber || null,
-            ewayBillNo: data.ewayBillNo || null,
-            vehicleNumber: data.vehicleNumber || null,
-            warrantyPeriod: data.warrantyPeriod || null,
-            dispatchedThrough: data.dispatchedThrough || null,
+            deliveryTime: data.deliveryTime ? new Date(data.deliveryTime) : null,
             items: {
-              create: values.processedItems
-            }
+              create: values.processedItems,
+            },
           },
           include: {
             items: { include: { item: true } },
-            party: true
-          }
+            party: true,
+          },
         })
       })
 
@@ -193,23 +182,23 @@ export const setupQuotationHandlers = () => {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to update quotation'
+        error: error instanceof Error ? error.message : 'Failed to update quotation',
       }
     }
   })
 
   ipcMain.handle('quotation:delete', async (_, id: string) => {
     try {
-      const quotation = await prisma.salesInvoice.findFirst({
-        where: { id, type: 'QUOTATION' }
+      const quotation = await prisma.quotation.findUnique({
+        where: { id },
       })
 
       if (!quotation) {
         throw new Error('Quotation not found')
       }
 
-      await prisma.salesInvoice.delete({
-        where: { id }
+      await prisma.quotation.delete({
+        where: { id },
       })
 
       await triggerSyncAfterChange()
@@ -217,20 +206,20 @@ export const setupQuotationHandlers = () => {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to delete quotation'
+        error: error instanceof Error ? error.message : 'Failed to delete quotation',
       }
     }
   })
 
-  ipcMain.handle('quotation:convertToInvoice', async (_, quoteId: string) => {
+  ipcMain.handle('quotation:convertToInvoice', async (_, quotationId: string) => {
     try {
-      const invoice = await convertQuotationToInvoice(prisma, quoteId)
+      const invoice = await convertQuotationToInvoice(prisma, quotationId)
       await triggerSyncAfterChange()
       return { success: true, data: invoice }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to convert quotation'
+        error: error instanceof Error ? error.message : 'Failed to convert quotation',
       }
     }
   })
@@ -242,7 +231,7 @@ export const setupQuotationHandlers = () => {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to generate quotation number'
+        error: error instanceof Error ? error.message : 'Failed to generate quotation number',
       }
     }
   })
