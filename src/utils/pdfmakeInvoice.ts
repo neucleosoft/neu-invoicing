@@ -23,16 +23,34 @@ const GREEN = '#C6E0B4'
 
 // ─── Main export ─────────────────────────────────────────────────────────────
 
-export function downloadClassicPDF(invoice: InvoiceData) {
-  if (!invoice.items) invoice.items = []
-  const dd = buildClassicPDFDefinition(invoice)
+export function buildClassicPDFFilename(invoice: InvoiceData) {
   const suffix = invoice.type === 'QUOTATION'
     ? 'quotation'
     : invoice.type === 'PROFORMA_INVOICE'
       ? 'proforma_invoice'
       : 'sales_invoice'
-  const filename = `${invoice.invoiceNumber.replace(/\//g, '_')}_${suffix}_${invoice.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
-  pdfMake.createPdf(dd).download(filename)
+  return `${invoice.invoiceNumber.replace(/\//g, '_')}_${suffix}_${invoice.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
+}
+
+export function downloadClassicPDF(invoice: InvoiceData) {
+  if (!invoice.items) invoice.items = []
+  const dd = buildClassicPDFDefinition(invoice)
+  pdfMake.createPdf(dd).download(buildClassicPDFFilename(invoice))
+}
+
+export function getClassicPDFBytes(invoice: InvoiceData): Promise<Uint8Array> {
+  if (!invoice.items) invoice.items = []
+  const dd = buildClassicPDFDefinition(invoice)
+  return new Promise((resolve, reject) => {
+    try {
+      pdfMake.createPdf(dd).getBuffer((buffer: any) => {
+        // pdfmake returns a Node Buffer in Electron renderer; coerce to Uint8Array
+        resolve(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer))
+      })
+    } catch (err) {
+      reject(err)
+    }
+  })
 }
 
 // ─── Document definition ─────────────────────────────────────────────────────

@@ -23,11 +23,28 @@ const GREEN = '#C6E0B4'
 
 // ─── Main export ─────────────────────────────────────────────────────────────
 
+export function buildChallanFilename(challan: ChallanData) {
+  return `${challan.challanNumber.replace(/\//g, '_')}_delivery_challan_${challan.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
+}
+
 export function downloadChallanPDF(challan: ChallanData) {
   if (!challan.items) challan.items = []
   const dd = buildDocDefinition(challan)
-  const filename = `${challan.challanNumber.replace(/\//g, '_')}_delivery_challan_${challan.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
-  pdfMake.createPdf(dd).download(filename)
+  pdfMake.createPdf(dd).download(buildChallanFilename(challan))
+}
+
+export function getChallanPDFBytes(challan: ChallanData): Promise<Uint8Array> {
+  if (!challan.items) challan.items = []
+  const dd = buildDocDefinition(challan)
+  return new Promise((resolve, reject) => {
+    try {
+      pdfMake.createPdf(dd).getBuffer((buffer: any) => {
+        resolve(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer))
+      })
+    } catch (err) {
+      reject(err)
+    }
+  })
 }
 
 // ─── Document definition ─────────────────────────────────────────────────────

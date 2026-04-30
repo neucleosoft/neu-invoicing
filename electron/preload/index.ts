@@ -213,4 +213,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     clearExpiredCache: () => ipcRenderer.invoke("gst:clearExpiredCache"),
     getStateList: () => ipcRenderer.invoke("gst:getStateList"),
   },
+
+  // Share (WhatsApp / Email)
+  share: {
+    sharePdf: (args: {
+      pdfBytes: Uint8Array;
+      filename: string;
+      target: "whatsapp" | "email";
+      subject?: string;
+      phone?: string;
+      email?: string;
+    }) => ipcRenderer.invoke("share:sharePdf", args),
+  },
 });

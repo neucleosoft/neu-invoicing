@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { SalesInvoice } from '../types'
-import { downloadInvoicePDF, InvoiceTemplate } from '../utils/generateInvoicePDF'
+import { downloadInvoicePDF, getInvoicePDFBytes, InvoiceTemplate } from '../utils/generateInvoicePDF'
+import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
+import { sharePdf, ShareTarget } from '../utils/sharePdf'
+import ShareMenu from '../components/ShareMenu'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import DateInput from '../components/DateInput'
@@ -127,61 +130,50 @@ const Sales = () => {
     }
   }
 
+  const loadInvoicePDFData = async (invoiceId: string): Promise<any | null> => {
+    const result = await window.electronAPI.sales.getById(invoiceId)
+    if (!result.success || !result.data) return null
+    const company = await loadCompanyForPDF()
+    return {
+      ...result.data,
+      party: result.data.party,
+      items: result.data.items || [],
+      company,
+    }
+  }
+
   const handleDownloadPDF = async (invoiceId: string) => {
     try {
-      // Fetch full invoice details with items
-      const result = await window.electronAPI.sales.getById(invoiceId)
-      if (result.success && result.data) {
-        const invoice = result.data
-
-        // Get company details
-        const companyResult = await window.electronAPI.company.get()
-        const company = companyResult.success ? companyResult.data : undefined
-
-        // Convert logo file to base64 for PDF generation (resized to save space)
-        if (company?.logoPath) {
-          try {
-            const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
-            const response = await fetch(logoUrl)
-            if (!response.ok) throw new Error('Logo file not found')
-            const blob = await response.blob()
-            // Resize using canvas — 200x200 is plenty for a 22mm logo on PDF
-            const img = new Image()
-            const imgUrl = URL.createObjectURL(blob)
-            const logoBase64 = await new Promise<string>((resolve, reject) => {
-              img.onload = () => {
-                const canvas = document.createElement('canvas')
-                canvas.width = 600
-                canvas.height = 600
-                const ctx = canvas.getContext('2d')!
-                ctx.drawImage(img, 0, 0, 600, 600)
-                URL.revokeObjectURL(imgUrl)
-                resolve(canvas.toDataURL('image/png'))
-              }
-              img.onerror = reject
-              img.src = imgUrl
-            })
-            company.logoBase64 = logoBase64
-          } catch {
-            // Logo file missing or unreadable, skip it
-          }
-        }
-
-        // Pass all invoice fields (including GST data) to PDF generator
-        const pdfData = {
-          ...invoice,
-          party: invoice.party,
-          items: invoice.items || [],
-          company
-        } as any
-
-        downloadInvoicePDF(pdfData, selectedTemplate)
-      } else {
+      const pdfData = await loadInvoicePDFData(invoiceId)
+      if (!pdfData) {
         toast.error('Failed to load invoice details')
+        return
       }
+      downloadInvoicePDF(pdfData, selectedTemplate)
     } catch (error) {
       console.error('Error generating PDF:', error)
       toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleShare = async (invoiceId: string, target: ShareTarget) => {
+    try {
+      const pdfData = await loadInvoicePDFData(invoiceId)
+      if (!pdfData) {
+        toast.error('Failed to load invoice details')
+        return
+      }
+      const { bytes, filename } = await getInvoicePDFBytes(pdfData, selectedTemplate)
+      const subject = `Invoice ${pdfData.invoiceNumber} from ${pdfData.company?.name || ''}`.trim()
+      await sharePdf(bytes, filename, target, toast, {
+        subject,
+        phone: pdfData.party?.phone,
+        email: pdfData.party?.email,
+        partyName: pdfData.party?.name,
+      })
+    } catch (error) {
+      console.error('Error sharing invoice:', error)
+      toast.error('Failed to share invoice')
     }
   }
 
@@ -559,6 +551,12 @@ const Sales = () => {
                         >
                           PDF
                         </button>
+                        <ShareMenu
+                          onShare={(target) => handleShare(invoice.id, target)}
+                          phone={invoice.party?.phone}
+                          email={invoice.party?.email}
+                          partyName={invoice.party?.name}
+                        />
                         <button onClick={() => handleDelete(invoice.id)} className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
                           Delete
                         </button>
@@ -1032,6 +1030,13 @@ const Sales = () => {
                 >
                   Close
                 </button>
+                <ShareMenu
+                  variant="button"
+                  onShare={(target) => handleShare(viewingInvoice.id, target)}
+                  phone={viewingInvoice.party?.phone}
+                  email={viewingInvoice.party?.email}
+                  partyName={viewingInvoice.party?.name}
+                />
                 <button
                   onClick={() => handleDownloadPDF(viewingInvoice.id)}
                   className="btn btn-primary"

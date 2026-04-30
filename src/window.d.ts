@@ -145,6 +145,20 @@ declare global {
         clearExpiredCache: () => Promise<any>;
         getStateList: () => Promise<any>;
       };
+      share: {
+        sharePdf: (args: {
+          pdfBytes: Uint8Array;
+          filename: string;
+          target: 'whatsapp' | 'email';
+          subject?: string;
+          phone?: string;
+          email?: string;
+        }) => Promise<{
+          success: boolean;
+          data?: { savedPath: string; clipboardCopied: boolean; recipientPrefilled: boolean };
+          error?: string;
+        }>;
+      };
     };
   }
 }

@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Quotation, QuotationStatus } from '../types'
-import { downloadInvoicePDF } from '../utils/generateInvoicePDF'
+import { downloadInvoicePDF, getInvoicePDFBytes } from '../utils/generateInvoicePDF'
+import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
+import { sharePdf, ShareTarget } from '../utils/sharePdf'
+import ShareMenu from '../components/ShareMenu'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import DateInput from '../components/DateInput'
@@ -110,54 +113,51 @@ const Quotations = () => {
     }
   }
 
+  const loadQuotationPDFData = async (quotationId: string): Promise<any | null> => {
+    const result = await window.electronAPI.quotation.getById(quotationId)
+    if (!result.success || !result.data) return null
+    const company = await loadCompanyForPDF()
+    return {
+      ...result.data,
+      type: 'QUOTATION',
+      party: result.data.party,
+      items: result.data.items || [],
+      company,
+    }
+  }
+
   const handleDownloadPDF = async (quotationId: string) => {
     try {
-      const result = await window.electronAPI.quotation.getById(quotationId)
-      if (result.success && result.data) {
-        const quotation = result.data
-        const companyResult = await window.electronAPI.company.get()
-        const company = companyResult.success ? companyResult.data : undefined
-
-        if (company?.logoPath) {
-          try {
-            const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
-            const response = await fetch(logoUrl)
-            if (!response.ok) throw new Error('Logo file not found')
-            const blob = await response.blob()
-            const img = new Image()
-            const imgUrl = URL.createObjectURL(blob)
-            const logoBase64 = await new Promise<string>((resolve, reject) => {
-              img.onload = () => {
-                const canvas = document.createElement('canvas')
-                canvas.width = 600
-                canvas.height = 600
-                const ctx = canvas.getContext('2d')!
-                ctx.drawImage(img, 0, 0, 600, 600)
-                URL.revokeObjectURL(imgUrl)
-                resolve(canvas.toDataURL('image/png'))
-              }
-              img.onerror = reject
-              img.src = imgUrl
-            })
-            company.logoBase64 = logoBase64
-          } catch {
-            // Logo file missing or unreadable, skip it
-          }
-        }
-
-        downloadInvoicePDF({
-          ...quotation,
-          type: 'QUOTATION',
-          party: quotation.party,
-          items: quotation.items || [],
-          company,
-        } as any)
-      } else {
+      const pdfData = await loadQuotationPDFData(quotationId)
+      if (!pdfData) {
         toast.error('Failed to load quotation details')
+        return
       }
+      downloadInvoicePDF(pdfData)
     } catch (error) {
       console.error('Error generating quotation PDF:', error)
       toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleShare = async (quotationId: string, target: ShareTarget) => {
+    try {
+      const pdfData = await loadQuotationPDFData(quotationId)
+      if (!pdfData) {
+        toast.error('Failed to load quotation details')
+        return
+      }
+      const { bytes, filename } = await getInvoicePDFBytes(pdfData)
+      const subject = `Quotation ${pdfData.invoiceNumber} from ${pdfData.company?.name || ''}`.trim()
+      await sharePdf(bytes, filename, target, toast, {
+        subject,
+        phone: pdfData.party?.phone,
+        email: pdfData.party?.email,
+        partyName: pdfData.party?.name,
+      })
+    } catch (error) {
+      console.error('Error sharing quotation:', error)
+      toast.error('Failed to share quotation')
     }
   }
 
@@ -467,6 +467,12 @@ const Quotations = () => {
                         >
                           PDF
                         </button>
+                        <ShareMenu
+                          onShare={(target) => handleShare(quotation.id, target)}
+                          phone={quotation.party?.phone}
+                          email={quotation.party?.email}
+                          partyName={quotation.party?.name}
+                        />
                         <button
                           onClick={() => handleConvertToInvoice(quotation.id)}
                           className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
@@ -846,6 +852,13 @@ const Quotations = () => {
                 >
                   Download PDF
                 </button>
+                <ShareMenu
+                  variant="button"
+                  onShare={(target) => handleShare(viewingQuotation.id, target)}
+                  phone={viewingQuotation.party?.phone}
+                  email={viewingQuotation.party?.email}
+                  partyName={viewingQuotation.party?.name}
+                />
                 <button
                   onClick={() => handleConvertToInvoice(viewingQuotation.id)}
                   className="btn btn-primary"

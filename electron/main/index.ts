@@ -21,6 +21,7 @@ import { setupGstHandlers } from './handlers/gst'
 import { setupChallanHandlers } from './handlers/challan'
 import { setupCreditNoteHandlers } from './handlers/creditNote'
 import { setupCashBankHandlers } from './handlers/cashBank'
+import { setupShareHandlers } from './handlers/share'
 
 app.commandLine.appendSwitch('lang', 'en-GB')
 
@@ -121,6 +122,7 @@ app.whenReady().then(async () => {
   setupChallanHandlers()
   setupCreditNoteHandlers()
   setupCashBankHandlers()
+  setupShareHandlers()
 
   createWindow()
 

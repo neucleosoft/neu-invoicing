@@ -3,6 +3,10 @@ import { FileText, Search as SearchIcon } from 'lucide-react'
 
 import { ProformaInvoice, ProformaInvoiceStatus } from '../types'
 import { downloadProformaInvoicePDF } from '../utils/pdfmakeProformaInvoice'
+import { getInvoicePDFBytes } from '../utils/generateInvoicePDF'
+import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
+import { sharePdf, ShareTarget } from '../utils/sharePdf'
+import ShareMenu from '../components/ShareMenu'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import DateInput from '../components/DateInput'
@@ -111,56 +115,54 @@ const ProformaInvoices = () => {
     }
   }
 
+  const loadProformaInvoicePDFData = async (proformaInvoiceId: string): Promise<any | null> => {
+    const result = await window.electronAPI.proformaInvoice.getById(proformaInvoiceId)
+    if (!result.success || !result.data) return null
+    const company = await loadCompanyForPDF()
+    return {
+      ...result.data,
+      type: 'PROFORMA_INVOICE',
+      party: result.data.party,
+      items: result.data.items || [],
+      company,
+      amountPaid: 0,
+      balanceDue: 0,
+    }
+  }
+
   const handleDownloadPDF = async (proformaInvoiceId: string) => {
     try {
-      const result = await window.electronAPI.proformaInvoice.getById(proformaInvoiceId)
-      if (result.success && result.data) {
-        const proformaInvoice = result.data
-        const companyResult = await window.electronAPI.company.get()
-        const company = companyResult.success ? companyResult.data : undefined
-
-        if (company?.logoPath) {
-          try {
-            const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
-            const response = await fetch(logoUrl)
-            if (!response.ok) throw new Error('Logo file not found')
-            const blob = await response.blob()
-            const img = new Image()
-            const imgUrl = URL.createObjectURL(blob)
-            const logoBase64 = await new Promise<string>((resolve, reject) => {
-              img.onload = () => {
-                const canvas = document.createElement('canvas')
-                canvas.width = 600
-                canvas.height = 600
-                const ctx = canvas.getContext('2d')!
-                ctx.drawImage(img, 0, 0, 600, 600)
-                URL.revokeObjectURL(imgUrl)
-                resolve(canvas.toDataURL('image/png'))
-              }
-              img.onerror = reject
-              img.src = imgUrl
-            })
-            company.logoBase64 = logoBase64
-          } catch {
-            // Logo file missing or unreadable, skip it
-          }
-        }
-
-        downloadProformaInvoicePDF({
-          ...proformaInvoice,
-          type: 'PROFORMA_INVOICE',
-          party: proformaInvoice.party,
-          items: proformaInvoice.items || [],
-          company,
-          amountPaid: 0,
-          balanceDue: 0,
-        } as any)
-      } else {
+      const pdfData = await loadProformaInvoicePDFData(proformaInvoiceId)
+      if (!pdfData) {
         toast.error('Failed to load proforma invoice details')
+        return
       }
+      downloadProformaInvoicePDF(pdfData)
     } catch (error) {
       console.error('Error generating proforma invoice PDF:', error)
       toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleShare = async (proformaInvoiceId: string, target: ShareTarget) => {
+    try {
+      const pdfData = await loadProformaInvoicePDFData(proformaInvoiceId)
+      if (!pdfData) {
+        toast.error('Failed to load proforma invoice details')
+        return
+      }
+      const { bytes, filename } = await getInvoicePDFBytes(pdfData)
+      const subject =
+        `Proforma Invoice ${pdfData.invoiceNumber} from ${pdfData.company?.name || ''}`.trim()
+      await sharePdf(bytes, filename, target, toast, {
+        subject,
+        phone: pdfData.party?.phone,
+        email: pdfData.party?.email,
+        partyName: pdfData.party?.name,
+      })
+    } catch (error) {
+      console.error('Error sharing proforma invoice:', error)
+      toast.error('Failed to share proforma invoice')
     }
   }
 
@@ -470,6 +472,12 @@ const ProformaInvoices = () => {
                         >
                           PDF
                         </button>
+                        <ShareMenu
+                          onShare={(target) => handleShare(proformaInvoice.id, target)}
+                          phone={proformaInvoice.party?.phone}
+                          email={proformaInvoice.party?.email}
+                          partyName={proformaInvoice.party?.name}
+                        />
                         <button
                           onClick={() => handleConvertToInvoice(proformaInvoice.id)}
                           className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
@@ -849,6 +857,13 @@ const ProformaInvoices = () => {
                 >
                   Download PDF
                 </button>
+                <ShareMenu
+                  variant="button"
+                  onShare={(target) => handleShare(viewingProformaInvoice.id, target)}
+                  phone={viewingProformaInvoice.party?.phone}
+                  email={viewingProformaInvoice.party?.email}
+                  partyName={viewingProformaInvoice.party?.name}
+                />
                 <button
                   onClick={() => handleConvertToInvoice(viewingProformaInvoice.id)}
                   className="btn btn-primary"
