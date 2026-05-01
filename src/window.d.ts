@@ -29,6 +29,7 @@ declare global {
         update: (id: string, data: any) => Promise<any>;
         delete: (id: string) => Promise<any>;
         getLedger: (id: string) => Promise<any>;
+        getStatement: (args: { partyId: string; fromDate: string; toDate: string }) => Promise<any>;
       };
       item: {
         getAll: () => Promise<any>;

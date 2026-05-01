@@ -38,6 +38,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("party:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("party:delete", id),
     getLedger: (id: string) => ipcRenderer.invoke("party:getLedger", id),
+    getStatement: (args: { partyId: string; fromDate: string; toDate: string }) =>
+      ipcRenderer.invoke("party:getStatement", args),
   },
 
   // Items

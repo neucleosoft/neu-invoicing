@@ -464,6 +464,11 @@ declare global {
         update: (id: string, data: Partial<Party>) => Promise<{ success: boolean; data?: Party; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
         getLedger: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        getStatement: (args: {
+          partyId: string
+          fromDate: string
+          toDate: string
+        }) => Promise<{ success: boolean; data?: any; error?: string }>
       }
       item: {
         getAll: () => Promise<{ success: boolean; data?: Item[]; error?: string }>

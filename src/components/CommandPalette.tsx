@@ -33,6 +33,7 @@ const destinations = [
   { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText, group: 'Navigate' },
   { name: 'Payments', path: '/payments', icon: CreditCard, group: 'Navigate' },
   { name: 'Cash & Bank', path: '/cash-bank', icon: Landmark, group: 'Navigate' },
+  { name: 'Customer Statement', path: '/statement', icon: FileText, group: 'Navigate' },
   { name: 'Reports', path: '/reports', icon: BarChart3, group: 'Navigate' },
   { name: 'GST Reports', path: '/gst-reports', icon: Receipt, group: 'Navigate' },
   { name: 'Settings', path: '/settings', icon: SettingsIcon, group: 'Navigate' },
