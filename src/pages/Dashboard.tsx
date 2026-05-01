@@ -14,6 +14,7 @@ import {
 import { DashboardMetrics, SalesInvoice, Item } from '../types'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { formatCurrency } from '../utils/currency'
+import { formatInvoiceStatus } from '../utils/invoiceStatus'
 import { useStore } from '../store/useStore'
 
 interface LatestTransaction {
@@ -280,7 +281,7 @@ const Dashboard = () => {
                       invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
                       'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                     }`}>
-                      {invoice.status}
+                      {formatInvoiceStatus(invoice.status)}
                     </span>
                   </div>
                 </div>

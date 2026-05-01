@@ -160,7 +160,8 @@ function buildCompanySection(inv: InvoiceData, logo: string): Content {
 
   // Build the invoice details grid (right side)
   // Rows: Number + Date, then document-specific details if present
-  const hasDueDate = isQuoteLike && !!inv.dueDate
+  const hasDueDate = !!inv.dueDate
+  const dueDateLabel = isQuoteLike ? 'Expiry Date' : 'Due Date'
   const invoiceGridBody: TableCell[][] = [
     [
       { stack: [
@@ -174,17 +175,24 @@ function buildCompanySection(inv: InvoiceData, logo: string): Content {
     ],
   ]
 
-  if (isQuoteLike && (hasDueDate || hasSecondaryValue)) {
+  if (hasDueDate && hasSecondaryValue) {
     invoiceGridBody.push([
       { stack: [
-        { text: 'Expiry Date', bold: true, fontSize: 10 },
-        { text: hasDueDate && inv.dueDate ? formatDate(inv.dueDate) : '-', fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+        { text: dueDateLabel, bold: true, fontSize: 10 },
+        { text: formatDate(inv.dueDate!), fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
       { stack: [
         { text: secondaryLabel, bold: true, fontSize: 10 },
-        { text: hasSecondaryValue ? secondaryDisplayValue : '-', fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+        { text: secondaryDisplayValue, fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
     ])
+  } else if (hasDueDate) {
+    invoiceGridBody.push(
+      [{ stack: [
+        { text: dueDateLabel, bold: true, fontSize: 10 },
+        { text: formatDate(inv.dueDate!), fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+      ], colSpan: 2 }, {}],
+    )
   } else if (hasSecondaryValue) {
     invoiceGridBody.push(
       [{ stack: [

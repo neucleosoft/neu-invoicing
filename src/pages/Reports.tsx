@@ -132,7 +132,7 @@ const Reports = () => {
                   <option value="">All</option>
                   <option value="PAID">Paid</option>
                   <option value="PARTIAL">Partial</option>
-                  <option value="DRAFT">Draft</option>
+                  <option value="DRAFT">Unpaid</option>
                 </select>
               </div>
             </div>

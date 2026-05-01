@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { SalesInvoice } from '../types'
 import { downloadInvoicePDF, getInvoicePDFBytes, InvoiceTemplate } from '../utils/generateInvoicePDF'
+import { formatInvoiceStatus, getDueCountdown, dueCountdownColorClass } from '../utils/invoiceStatus'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
 import ShareMenu from '../components/ShareMenu'
@@ -517,19 +518,34 @@ const Sales = () => {
                     <td className="table-cell">{invoice.party?.name}</td>
                     <td className="table-cell">{formatCurrency(invoice.totalAmount)}</td>
                     <td className="table-cell">
-                      {isOverdue(invoice) ? (
-                        <span className="px-2 py-1 rounded-full text-xs bg-red-600 text-white font-bold">
-                          OVERDUE
-                        </span>
-                      ) : (
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                          invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                          'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                        }`}>
-                          {invoice.status}
-                        </span>
-                      )}
+                      <div className="flex flex-col items-start gap-1">
+                        {isOverdue(invoice) ? (
+                          <span className="px-2 py-1 rounded-full text-xs bg-red-600 text-white font-bold">
+                            OVERDUE
+                          </span>
+                        ) : (
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                            invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                          }`}>
+                            {formatInvoiceStatus(invoice.status)}
+                          </span>
+                        )}
+                        {(() => {
+                          const cd = getDueCountdown(
+                            invoice.dueDate,
+                            invoice.status,
+                            invoice.amountPaid,
+                            invoice.totalAmount
+                          )
+                          return cd ? (
+                            <span className={`text-xs font-medium ${dueCountdownColorClass[cd.tone]}`}>
+                              {cd.text}
+                            </span>
+                          ) : null
+                        })()}
+                      </div>
                     </td>
                     <td className="table-cell">
                       <div className="flex items-center space-x-2">
@@ -618,7 +634,7 @@ const Sales = () => {
                       value={formData.status}
                       onChange={(e) => setFormData({...formData, status: e.target.value})}
                     >
-                      <option value="DRAFT">Draft</option>
+                      <option value="DRAFT">Unpaid</option>
                       <option value="PAID">Paid</option>
                       <option value="PARTIAL">Partial</option>
                       <option value="OVERDUE">Overdue</option>
@@ -932,13 +948,34 @@ const Sales = () => {
                   <p className="font-medium">{new Date(viewingInvoice.invoiceDate).toLocaleDateString('en-GB')}</p>
                 </div>
                 <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Due Date</p>
+                  <p className="font-medium">
+                    {viewingInvoice.dueDate
+                      ? new Date(viewingInvoice.dueDate).toLocaleDateString('en-GB')
+                      : '—'}
+                  </p>
+                  {(() => {
+                    const cd = getDueCountdown(
+                      viewingInvoice.dueDate,
+                      viewingInvoice.status,
+                      viewingInvoice.amountPaid,
+                      viewingInvoice.totalAmount
+                    )
+                    return cd ? (
+                      <p className={`text-xs font-medium mt-0.5 ${dueCountdownColorClass[cd.tone]}`}>
+                        {cd.text}
+                      </p>
+                    ) : null
+                  })()}
+                </div>
+                <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
                     viewingInvoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
                     viewingInvoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
                     'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                   }`}>
-                    {viewingInvoice.status}
+                    {formatInvoiceStatus(viewingInvoice.status)}
                   </span>
                 </div>
               </div>

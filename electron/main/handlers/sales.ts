@@ -80,6 +80,7 @@ export const setupSalesHandlers = () => {
           data: {
             invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
+            dueDate: data.dueDate ? new Date(data.dueDate) : null,
             type: 'INVOICE',
             partyId: data.partyId,
             subtotal: values.subtotal,
@@ -194,6 +195,7 @@ export const setupSalesHandlers = () => {
           data: {
             invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
+            dueDate: data.dueDate ? new Date(data.dueDate) : null,
             type: 'INVOICE',
             partyId: data.partyId,
             subtotal: values.subtotal,
