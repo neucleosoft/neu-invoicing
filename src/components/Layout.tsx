@@ -15,6 +15,7 @@ import {
   Settings as SettingsIcon,
   Moon,
   Sun,
+  Monitor,
   ChevronLeft,
   ChevronRight,
   Search,
@@ -46,9 +47,21 @@ const navigation = [
 const Layout = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { company, authStatus, syncStatus, setAuthStatus, darkMode, setDarkMode, sidebarOpen, setSidebarOpen } = useStore()
+  const {
+    company,
+    authStatus,
+    syncStatus,
+    setAuthStatus,
+    darkMode,
+    setDarkMode,
+    themePreference,
+    setThemePreference,
+    sidebarOpen,
+    setSidebarOpen,
+  } = useStore()
   const [paletteOpen, setPaletteOpen] = useState(false)
 
+  // Apply the dark class to <html> whenever effective darkMode changes.
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark')
@@ -56,6 +69,18 @@ const Layout = () => {
       document.documentElement.classList.remove('dark')
     }
   }, [darkMode])
+
+  // When preference is "system", track the OS color-scheme media query and
+  // update the effective darkMode accordingly. Stop tracking when the user
+  // picks an explicit light/dark preference.
+  useEffect(() => {
+    if (themePreference !== 'system') return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    setDarkMode(mq.matches)
+    const onChange = (e: MediaQueryListEvent) => setDarkMode(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [themePreference, setDarkMode])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -154,15 +179,61 @@ const Layout = () => {
 
         {/* Footer */}
         <div className={`shrink-0 border-t bg-white dark:bg-gray-800 dark:border-gray-700 ${collapsed ? 'p-2 space-y-2' : 'p-4'}`}>
-          {/* Dark mode toggle */}
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className={`${collapsed ? 'w-full flex justify-center' : 'w-full flex items-center gap-2'} px-3 py-2 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors mb-2`}
-            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {darkMode ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4 text-gray-600 dark:text-gray-300" />}
-            {!collapsed && <span className="text-gray-700 dark:text-gray-300">{darkMode ? 'Light mode' : 'Dark mode'}</span>}
-          </button>
+          {/* Theme switch — segmented pill: Light / Dark / System */}
+          {(() => {
+            const options: { key: 'light' | 'dark' | 'system'; Icon: typeof Sun; label: string }[] = [
+              { key: 'light', Icon: Sun, label: 'Light' },
+              { key: 'dark', Icon: Moon, label: 'Dark' },
+              { key: 'system', Icon: Monitor, label: 'System' },
+            ]
+            if (collapsed) {
+              // Compact: cycle through on a single icon button
+              const next = themePreference === 'light' ? 'dark' : themePreference === 'dark' ? 'system' : 'light'
+              const current = options.find((o) => o.key === themePreference)!
+              const Icon = current.Icon
+              const iconColor =
+                themePreference === 'light' ? 'text-yellow-500' :
+                themePreference === 'dark' ? 'text-indigo-400' :
+                'text-gray-600 dark:text-gray-300'
+              return (
+                <button
+                  onClick={() => setThemePreference(next)}
+                  className="w-full flex justify-center px-3 py-2 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors mb-2"
+                  title={`Theme: ${current.label} — click for ${next}`}
+                >
+                  <Icon className={`w-4 h-4 ${iconColor}`} />
+                </button>
+              )
+            }
+            return (
+              <div
+                role="radiogroup"
+                aria-label="Theme"
+                className="mb-2 grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-900/60"
+              >
+                {options.map(({ key, Icon, label }) => {
+                  const active = themePreference === key
+                  return (
+                    <button
+                      key={key}
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setThemePreference(key)}
+                      title={`${label} mode`}
+                      className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition ${
+                        active
+                          ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                          : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      <span>{label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })()}
 
           {/* Sync Status */}
           <button

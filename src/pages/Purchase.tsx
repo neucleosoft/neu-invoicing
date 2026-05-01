@@ -9,6 +9,7 @@ import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
 import { ShoppingCart, Search as SearchIcon } from 'lucide-react'
+import SearchableSelect from '../components/SearchableSelect'
 
 interface Party {
   id: string
@@ -400,17 +401,13 @@ const Purchase = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="label">Supplier *</label>
-                    <select
-                      className="input"
+                    <SearchableSelect
                       value={formData.partyId}
-                      onChange={(e) => setFormData({...formData, partyId: e.target.value})}
+                      onChange={(id) => setFormData({...formData, partyId: id})}
+                      options={suppliers.map(s => ({ id: s.id, name: s.name }))}
+                      placeholder="Select Supplier"
                       required
-                    >
-                      <option value="">Select Supplier</option>
-                      {suppliers.map(supplier => (
-                        <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div>

@@ -14,6 +14,7 @@ import { TableSkeleton } from '../components/Skeleton'
 import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
 import { FileText, Search as SearchIcon } from 'lucide-react'
+import SearchableSelect from '../components/SearchableSelect'
 
 interface Party {
   id: string
@@ -524,17 +525,13 @@ const Quotations = () => {
 
                   <div>
                     <label className="label">Customer *</label>
-                    <select
-                      className="input"
+                    <SearchableSelect
                       value={formData.partyId}
-                      onChange={(e) => setFormData({ ...formData, partyId: e.target.value })}
+                      onChange={(id) => setFormData({ ...formData, partyId: id })}
+                      options={parties.map((p) => ({ id: p.id, name: p.name }))}
+                      placeholder="Select Customer"
                       required
-                    >
-                      <option value="">Select Customer</option>
-                      {parties.map((party) => (
-                        <option key={party.id} value={party.id}>{party.name}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div>

@@ -6,6 +6,7 @@ import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { FileText } from 'lucide-react'
+import SearchableSelect from '../components/SearchableSelect'
 
 interface CreditDebitNote {
   id: string
@@ -488,17 +489,13 @@ const CreditNotes = () => {
 
                   <div>
                     <label className="label">Party *</label>
-                    <select
-                      className="input"
+                    <SearchableSelect
                       value={formData.partyId}
-                      onChange={(e) => handlePartyChange(e.target.value)}
+                      onChange={(id) => handlePartyChange(id)}
+                      options={parties.map(p => ({ id: p.id, name: p.name }))}
+                      placeholder="Select Party"
                       required
-                    >
-                      <option value="">Select Party</option>
-                      {parties.map(party => (
-                        <option key={party.id} value={party.id}>{party.name}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div>

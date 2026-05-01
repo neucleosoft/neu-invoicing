@@ -4,6 +4,7 @@ import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
+import SearchableSelect from '../components/SearchableSelect'
 
 interface Party {
   id: string
@@ -184,19 +185,17 @@ const Payments = () => {
                   <label className="label">
                     {paymentType === 'PAYMENT_IN' ? 'Customer' : 'Supplier'} *
                   </label>
-                  <select
-                    className="input"
+                  <SearchableSelect
                     value={formData.partyId}
-                    onChange={(e) => setFormData({...formData, partyId: e.target.value})}
+                    onChange={(id) => setFormData({...formData, partyId: id})}
+                    options={parties.map(p => ({
+                      id: p.id,
+                      name: p.name,
+                      subtitle: `Balance: ${formatCurrency(Math.abs(p.currentBalance))}`,
+                    }))}
+                    placeholder={`Select ${paymentType === 'PAYMENT_IN' ? 'Customer' : 'Supplier'}`}
                     required
-                  >
-                    <option value="">Select {paymentType === 'PAYMENT_IN' ? 'Customer' : 'Supplier'}</option>
-                    {parties.map(party => (
-                      <option key={party.id} value={party.id}>
-                        {party.name} (Balance: {formatCurrency(Math.abs(party.currentBalance))})
-                      </option>
-                    ))}
-                  </select>
+                  />
                 </div>
 
                 <div>
