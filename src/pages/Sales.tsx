@@ -56,6 +56,9 @@ const Sales = () => {
   const [items, setItems] = useState<Item[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState<InvoiceTemplate>('classic')
   const [searchQuery, setSearchQuery] = useState('')
+  const [dateFilter, setDateFilter] = useState<'all' | '7d' | '1m' | '1y' | 'custom'>('all')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -438,13 +441,42 @@ const Sales = () => {
 
   const totals = calculateTotals()
 
-  // Filter invoices by search query
+  // Compute date-range bounds from the selected preset
+  const getDateRange = (): { start: Date | null; end: Date | null } => {
+    if (dateFilter === 'all') return { start: null, end: null }
+    if (dateFilter === 'custom') {
+      const start = customStart ? new Date(customStart) : null
+      const end = customEnd ? new Date(customEnd) : null
+      if (start) start.setHours(0, 0, 0, 0)
+      if (end) end.setHours(23, 59, 59, 999)
+      return { start, end }
+    }
+    const end = new Date()
+    end.setHours(23, 59, 59, 999)
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    if (dateFilter === '7d') start.setDate(start.getDate() - 6) // last 7 days inclusive of today
+    else if (dateFilter === '1m') start.setDate(start.getDate() - 29) // last 30 days
+    else if (dateFilter === '1y') start.setDate(start.getDate() - 364) // last 365 days
+    return { start, end }
+  }
+
+  const { start: dateStart, end: dateEnd } = getDateRange()
+
+  // Filter invoices by search query and date range
   const filteredInvoices = invoices.filter((invoice) => {
-    if (!searchQuery.trim()) return true
-    const query = searchQuery.toLowerCase()
-    const matchesNumber = invoice.invoiceNumber?.toLowerCase().includes(query)
-    const matchesParty = invoice.party?.name?.toLowerCase().includes(query)
-    return matchesNumber || matchesParty
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      const matchesNumber = invoice.invoiceNumber?.toLowerCase().includes(query)
+      const matchesParty = invoice.party?.name?.toLowerCase().includes(query)
+      if (!matchesNumber && !matchesParty) return false
+    }
+    if (dateStart || dateEnd) {
+      const invDate = new Date(invoice.invoiceDate)
+      if (dateStart && invDate < dateStart) return false
+      if (dateEnd && invDate > dateEnd) return false
+    }
+    return true
   })
 
   const { sortedItems: sortedInvoices, sortKey, sortDir, toggleSort } = useSortable(filteredInvoices, [
@@ -467,15 +499,46 @@ const Sales = () => {
         </button>
       </div>
 
-      {/* Search Input */}
-      <div>
+      {/* Search + Date Filter */}
+      <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
-          className="input max-w-md"
+          className="input max-w-md flex-1 min-w-[240px]"
           placeholder={`Search by ${invoiceLabels.short} number or party name...`}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
+        <select
+          className="input w-auto"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}
+        >
+          <option value="all">All Dates</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="1m">Last Month</option>
+          <option value="1y">Last Year</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        {dateFilter === 'custom' && (
+          <>
+            <DateInput
+              className="input w-auto"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+            />
+            <span className="text-gray-500 dark:text-gray-400">to</span>
+            <DateInput
+              className="input w-auto"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+            />
+          </>
+        )}
+        {dateFilter !== 'all' && (
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            {filteredInvoices.length} {filteredInvoices.length === 1 ? 'invoice' : 'invoices'}
+          </span>
+        )}
       </div>
 
       {/* Invoices Table */}
@@ -483,11 +546,13 @@ const Sales = () => {
         {loading ? (
           <TableSkeleton rows={6} columns={7} />
         ) : filteredInvoices.length === 0 ? (
-          searchQuery.trim() ? (
+          searchQuery.trim() || dateFilter !== 'all' ? (
             <EmptyState
               icon={SearchIcon}
-              title="No invoices match your search"
-              description={`Nothing matched "${searchQuery}".`}
+              title="No invoices match your filters"
+              description={searchQuery.trim()
+                ? `Nothing matched "${searchQuery}" in the selected date range.`
+                : 'No invoices fall within the selected date range.'}
             />
           ) : (
             <EmptyState
