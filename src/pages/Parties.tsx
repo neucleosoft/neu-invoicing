@@ -224,8 +224,15 @@ const Parties = () => {
     setGstValidation(null)
   }
 
-  const handleOpenModal = () => {
+  const handleAddCustomer = () => {
     resetForm()
+    setEditingParty(null)
+    setShowModal(true)
+  }
+
+  const handleAddSupplier = () => {
+    resetForm()
+    setFormData((prev) => ({ ...prev, type: 'SUPPLIER' }))
     setEditingParty(null)
     setShowModal(true)
   }
@@ -259,9 +266,16 @@ const Parties = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Parties</h1>
-        <button onClick={handleOpenModal} className="btn btn-primary">
-          + Add Party
-        </button>
+        {filter === 'CUSTOMER' && (
+          <button onClick={handleAddCustomer} className="btn btn-primary">
+            + Add Customer
+          </button>
+        )}
+        {filter === 'SUPPLIER' && (
+          <button onClick={handleAddSupplier} className="btn btn-primary">
+            + Add Supplier
+          </button>
+        )}
       </div>
 
       {/* Filter Tabs */}
@@ -314,7 +328,6 @@ const Parties = () => {
               icon={Users}
               title="No parties yet"
               description="Add customers and suppliers to start tracking balances, invoices, and payments."
-              action={{ label: '+ Add your first party', onClick: handleOpenModal }}
             />
           )
         ) : (
