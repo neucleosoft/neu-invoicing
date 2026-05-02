@@ -1,6 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { google } from 'googleapis'
-import { getOAuth2Client } from './auth'
+import { getOAuth2Client, isAuthError, clearStoredCredentials } from './auth'
 import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
 import fs from 'fs'
 import Store from 'electron-store'
@@ -166,14 +166,25 @@ const performSync = async () => {
     }
   } catch (error) {
     console.error('Sync error:', error)
-    updateSyncStatus({
-      status: 'error',
-      lastError: error instanceof Error ? error.message : 'Sync failed'
-    })
+    const authProblem = isAuthError(error)
+    const friendly = authProblem
+      ? 'Google sign-in expired. Please sign out and sign in again.'
+      : error instanceof Error ? error.message : 'Sync failed'
+
+    if (authProblem) {
+      // Tokens are unusable — wipe them so the user is prompted to re-auth
+      // instead of getting the same error every retry.
+      clearStoredCredentials()
+      BrowserWindow.getAllWindows().forEach(win => {
+        win.webContents.send('auth:invalidated')
+      })
+    }
+
+    updateSyncStatus({ status: 'error', lastError: friendly })
 
     return {
       success: false,
-      error: syncStatus.lastError
+      error: friendly
     }
   }
 }

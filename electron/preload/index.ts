@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     signInWithGoogle: () => ipcRenderer.invoke("auth:signInWithGoogle"),
     signOut: () => ipcRenderer.invoke("auth:signOut"),
     getAuthStatus: () => ipcRenderer.invoke("auth:getAuthStatus"),
+    onAuthInvalidated: (callback: () => void) => {
+      ipcRenderer.on("auth:invalidated", () => callback());
+    },
   },
 
   // Sync

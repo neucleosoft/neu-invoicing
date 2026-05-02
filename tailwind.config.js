@@ -29,9 +29,19 @@ export default {
           '0%': { opacity: '0', transform: 'translateY(-4px) scale(0.97)' },
           '100%': { opacity: '1', transform: 'translateY(0) scale(1)' },
         },
+        emptyIn: {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        floaty: {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-4px)' },
+        },
       },
       animation: {
         menuIn: 'menuIn 120ms ease-out',
+        emptyIn: 'emptyIn 280ms ease-out',
+        floaty: 'floaty 3.5s ease-in-out infinite',
       },
     },
   },

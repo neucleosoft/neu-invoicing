@@ -28,22 +28,50 @@ import {
 import { useStore } from '../store/useStore'
 import CommandPalette from './CommandPalette'
 
-const navigation = [
-  { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-  { name: 'Parties', path: '/parties', icon: Users },
-  { name: 'Items', path: '/items', icon: Package },
-  { name: 'Invoices', path: '/invoices', icon: Wallet },
-  { name: 'Quotations', path: '/quotations', icon: FileText },
-  { name: 'Proforma Invoices', path: '/proforma-invoices', icon: FileText },
-  { name: 'Purchase', path: '/purchase', icon: ShoppingCart },
-  { name: 'Challans', path: '/delivery-challan', icon: Truck },
-  { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText },
-  { name: 'Payments', path: '/payments', icon: CreditCard },
-  { name: 'Cash & Bank', path: '/cash-bank', icon: Landmark },
-  { name: 'Customer Statement', path: '/statement', icon: ScrollText },
-  { name: 'Reports', path: '/reports', icon: BarChart3 },
-  { name: 'GST Reports', path: '/gst-reports', icon: Receipt },
-  { name: 'Settings', path: '/settings', icon: SettingsIcon },
+const navigationGroups: { label?: string; items: { name: string; path: string; icon: typeof LayoutDashboard }[] }[] = [
+  {
+    items: [
+      { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+    ],
+  },
+  {
+    label: 'Master',
+    items: [
+      { name: 'Parties', path: '/parties', icon: Users },
+      { name: 'Items', path: '/items', icon: Package },
+    ],
+  },
+  {
+    label: 'Sales',
+    items: [
+      { name: 'Invoices', path: '/invoices', icon: Wallet },
+      { name: 'Quotations', path: '/quotations', icon: FileText },
+      { name: 'Proforma Invoices', path: '/proforma-invoices', icon: FileText },
+      { name: 'Challans', path: '/delivery-challan', icon: Truck },
+    ],
+  },
+  {
+    label: 'Purchase & Payments',
+    items: [
+      { name: 'Purchase', path: '/purchase', icon: ShoppingCart },
+      { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText },
+      { name: 'Payments', path: '/payments', icon: CreditCard },
+      { name: 'Cash & Bank', path: '/cash-bank', icon: Landmark },
+    ],
+  },
+  {
+    label: 'Reports',
+    items: [
+      { name: 'Customer Statement', path: '/statement', icon: ScrollText },
+      { name: 'Reports', path: '/reports', icon: BarChart3 },
+      { name: 'GST Reports', path: '/gst-reports', icon: Receipt },
+    ],
+  },
+  {
+    items: [
+      { name: 'Settings', path: '/settings', icon: SettingsIcon },
+    ],
+  },
 ]
 
 const Layout = () => {
@@ -62,6 +90,15 @@ const Layout = () => {
     setSidebarOpen,
   } = useStore()
   const [paletteOpen, setPaletteOpen] = useState(false)
+
+  // Main process tells us tokens are no longer valid → bounce to /login.
+  useEffect(() => {
+    window.electronAPI.auth.onAuthInvalidated?.(() => {
+      setAuthStatus({ isAuthenticated: false, user: null })
+      navigate('/login')
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Apply the dark class to <html> whenever effective darkMode changes.
   useEffect(() => {
@@ -157,26 +194,40 @@ const Layout = () => {
           </div>
         )}
 
-        <nav className={`flex-1 overflow-y-auto space-y-1 ${collapsed ? 'p-2' : 'p-4'}`}>
-          {navigation.map((item) => {
-            const Icon = item.icon
-            const active = location.pathname === item.path
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                title={collapsed ? item.name : undefined}
-                className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2.5 rounded-lg transition-colors ${
-                  active
-                    ? 'bg-primary-50 text-primary-700 font-medium dark:bg-primary-900/30 dark:text-primary-400'
-                    : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700'
-                }`}
-              >
-                <Icon className="w-5 h-5 shrink-0" />
-                {!collapsed && <span className="truncate">{item.name}</span>}
-              </Link>
-            )
-          })}
+        <nav className={`flex-1 overflow-y-auto ${collapsed ? 'p-2' : 'px-3 py-4'}`}>
+          {navigationGroups.map((group, gi) => (
+            <div key={gi} className={gi > 0 ? (collapsed ? 'mt-2 pt-2 border-t border-gray-100 dark:border-gray-700/50' : 'mt-4') : ''}>
+              {!collapsed && group.label && (
+                <div className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                  {group.label}
+                </div>
+              )}
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const Icon = item.icon
+                  const active = location.pathname === item.path
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      title={collapsed ? item.name : undefined}
+                      className={`relative flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg transition-colors ${
+                        active
+                          ? 'bg-primary-50 text-primary-700 font-semibold dark:bg-primary-900/30 dark:text-primary-300'
+                          : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/60'
+                      }`}
+                    >
+                      {active && !collapsed && (
+                        <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r bg-primary-600 dark:bg-primary-400" />
+                      )}
+                      <Icon className={`w-5 h-5 shrink-0 ${active ? 'text-primary-600 dark:text-primary-400' : ''}`} strokeWidth={active ? 2.25 : 1.75} />
+                      {!collapsed && <span className="truncate text-sm">{item.name}</span>}
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* Footer */}
@@ -241,7 +292,9 @@ const Layout = () => {
           <button
             onClick={handleSync}
             className={`${collapsed ? 'w-full flex justify-center' : 'w-full flex items-center justify-between'} px-3 py-2 text-sm rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors mb-3`}
-            title={syncStatus?.status === 'error' ? 'Sync error — click to retry' : 'Sync now'}
+            title={syncStatus?.status === 'error'
+              ? `Sync error — click to retry\n\n${syncStatus?.lastError || 'Unknown error'}`
+              : 'Sync now'}
           >
             <span className="flex items-center gap-2">
               <SyncBadge />
@@ -257,6 +310,11 @@ const Layout = () => {
               </span>
             )}
           </button>
+          {!collapsed && syncStatus?.status === 'error' && syncStatus?.lastError && (
+            <div className="mb-3 -mt-1 px-3 py-2 text-xs rounded-lg bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200 dark:border-red-900/50">
+              {syncStatus.lastError}
+            </div>
+          )}
 
           {/* User Info */}
           <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>

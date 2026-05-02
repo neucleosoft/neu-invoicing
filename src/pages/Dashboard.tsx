@@ -15,6 +15,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { formatCurrency } from '../utils/currency'
 import { formatInvoiceStatus } from '../utils/invoiceStatus'
 import { useStore } from '../store/useStore'
+import MetricCard from '../components/MetricCard'
 
 interface LatestTransaction {
   id: string
@@ -23,14 +24,6 @@ interface LatestTransaction {
   number: string
   party: string
   amount: number
-}
-
-const amountFontSize = (value: string | number): string => {
-  const len = String(value).length
-  if (len >= 15) return 'text-sm'
-  if (len >= 13) return 'text-base'
-  if (len >= 11) return 'text-lg'
-  return 'text-xl'
 }
 
 const Dashboard = () => {
@@ -180,54 +173,51 @@ const Dashboard = () => {
       </div>
 
       {/* Metrics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-6">
-        <div className="card bg-gradient-to-br from-green-50 to-green-100 relative">
-          <Wallet className="absolute top-4 right-4 w-6 h-6 text-green-600/60" strokeWidth={1.5} />
-          <p className="text-sm text-green-600 font-medium pr-8">Total Receivables</p>
-          <p className={`${amountFontSize(formatCurrency(metrics?.totalReceivables || 0))} font-bold text-green-700 mt-2`}>
-            {formatCurrency(metrics?.totalReceivables || 0)}
-          </p>
-        </div>
-
-        <div className="card bg-gradient-to-br from-red-50 to-red-100 relative">
-          <CreditCard className="absolute top-4 right-4 w-6 h-6 text-red-600/60" strokeWidth={1.5} />
-          <p className="text-sm text-red-600 font-medium pr-8">Total Payables</p>
-          <p className={`${amountFontSize(formatCurrency(metrics?.totalPayables || 0))} font-bold text-red-700 mt-2`}>
-            {formatCurrency(metrics?.totalPayables || 0)}
-          </p>
-        </div>
-
-        <div className="card bg-gradient-to-br from-blue-50 to-blue-100 relative">
-          <TrendingUp className="absolute top-4 right-4 w-6 h-6 text-blue-600/60" strokeWidth={1.5} />
-          <p className="text-sm text-blue-600 font-medium pr-8">Total Invoiced (YTD)</p>
-          <p className={`${amountFontSize(formatCurrency(metrics?.totalSales || 0))} font-bold text-blue-700 mt-2`}>
-            {formatCurrency(metrics?.totalSales || 0)}
-          </p>
-        </div>
-
-        <div className="card bg-gradient-to-br from-orange-50 to-orange-100 relative">
-          <AlertTriangle className="absolute top-4 right-4 w-6 h-6 text-orange-600/60" strokeWidth={1.5} />
-          <p className="text-sm text-orange-600 font-medium pr-8">Low Stock Alerts</p>
-          <p className={`${amountFontSize(metrics?.lowStockCount || 0)} font-bold text-orange-700 mt-2`}>
-            {metrics?.lowStockCount || 0}
-          </p>
-        </div>
-
-        <div className="card bg-gradient-to-br from-indigo-50 to-indigo-100 relative">
-          <Landmark className="absolute top-4 right-4 w-6 h-6 text-indigo-600/60" strokeWidth={1.5} />
-          <p className="text-sm text-indigo-600 font-medium pr-8">Cash & Bank</p>
-          <p className={`${amountFontSize(formatCurrency(cashBankBalance))} font-bold text-indigo-700 mt-2`}>
-            {formatCurrency(cashBankBalance)}
-          </p>
-        </div>
-
-        <div className="card bg-gradient-to-br from-rose-50 to-rose-100 relative">
-          <Clock className="absolute top-4 right-4 w-6 h-6 text-rose-600/60" strokeWidth={1.5} />
-          <p className="text-sm text-rose-600 font-medium pr-8">Overdue Invoices</p>
-          <p className={`${amountFontSize(overdueCount)} font-bold text-rose-700 mt-2`}>
-            {overdueCount}
-          </p>
-        </div>
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4">
+        <MetricCard
+          label="Total Receivables"
+          value={formatCurrency(metrics?.totalReceivables || 0)}
+          icon={Wallet}
+          tone="green"
+          to="/invoices"
+        />
+        <MetricCard
+          label="Total Payables"
+          value={formatCurrency(metrics?.totalPayables || 0)}
+          icon={CreditCard}
+          tone="red"
+          to="/purchase"
+        />
+        <MetricCard
+          label="Total Invoiced (YTD)"
+          value={formatCurrency(metrics?.totalSales || 0)}
+          icon={TrendingUp}
+          tone="blue"
+          to="/invoices"
+        />
+        <MetricCard
+          label="Low Stock Alerts"
+          value={metrics?.lowStockCount || 0}
+          icon={AlertTriangle}
+          tone="orange"
+          to="/items"
+          hint={metrics?.lowStockCount ? 'Items below threshold' : 'All items in stock'}
+        />
+        <MetricCard
+          label="Cash & Bank"
+          value={formatCurrency(cashBankBalance)}
+          icon={Landmark}
+          tone="indigo"
+          to="/cash-bank"
+        />
+        <MetricCard
+          label="Overdue Invoices"
+          value={overdueCount}
+          icon={Clock}
+          tone="rose"
+          to="/invoices"
+          hint={overdueCount ? 'Need follow-up' : 'Nothing overdue'}
+        />
       </div>
 
       {/* Invoice Chart and Recent Activity */}
