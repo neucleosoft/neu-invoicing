@@ -23,8 +23,6 @@ import { setupCreditNoteHandlers } from './handlers/creditNote'
 import { setupCashBankHandlers } from './handlers/cashBank'
 import { setupShareHandlers } from './handlers/share'
 
-app.commandLine.appendSwitch('lang', 'en-GB')
-
 protocol.registerSchemesAsPrivileged([
   { scheme: 'local-resource', privileges: { bypassCSP: true, stream: true, supportFetchAPI: true } }
 ])
