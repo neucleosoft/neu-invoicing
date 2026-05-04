@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Search as SearchIcon, ChevronDown, Check, X } from 'lucide-react'
 
 export type SearchableOption = {
@@ -18,6 +19,17 @@ type Props = {
   emptyMessage?: string
 }
 
+const DROPDOWN_GAP = 4
+const DROPDOWN_MAX_HEIGHT = 320
+const DROPDOWN_MIN_HEIGHT = 120
+
+type DropdownLayout = {
+  top: number
+  left: number
+  width: number
+  maxHeight: number
+}
+
 const SearchableSelect = ({
   value,
   onChange,
@@ -33,6 +45,8 @@ const SearchableSelect = ({
   const wrapRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [dropdownLayout, setDropdownLayout] = useState<DropdownLayout | null>(null)
 
   const selected = useMemo(() => options.find((o) => o.id === value), [options, value])
 
@@ -58,6 +72,43 @@ const SearchableSelect = ({
       setTimeout(() => inputRef.current?.focus(), 0)
     } else {
       setQuery('')
+      setDropdownLayout(null)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+
+    const updateDropdownLayout = () => {
+      if (!wrapRef.current) return
+
+      const rect = wrapRef.current.getBoundingClientRect()
+      const viewportWidth = window.innerWidth
+      const viewportHeight = window.innerHeight
+      const spaceBelow = Math.max(0, viewportHeight - rect.bottom - 8)
+      const spaceAbove = Math.max(0, rect.top - 8)
+      const placeAbove = spaceBelow < 220 && spaceAbove > spaceBelow
+      const availableSpace = placeAbove ? spaceAbove : spaceBelow
+      const maxHeight = Math.max(
+        DROPDOWN_MIN_HEIGHT,
+        Math.min(DROPDOWN_MAX_HEIGHT, availableSpace)
+      )
+      const width = Math.min(rect.width, viewportWidth - 16)
+      const left = Math.min(Math.max(8, rect.left), viewportWidth - width - 8)
+      const top = placeAbove
+        ? Math.max(8, rect.top - maxHeight - DROPDOWN_GAP)
+        : Math.min(viewportHeight - maxHeight - 8, rect.bottom + DROPDOWN_GAP)
+
+      setDropdownLayout({ top, left, width, maxHeight })
+    }
+
+    updateDropdownLayout()
+    window.addEventListener('resize', updateDropdownLayout)
+    window.addEventListener('scroll', updateDropdownLayout, true)
+
+    return () => {
+      window.removeEventListener('resize', updateDropdownLayout)
+      window.removeEventListener('scroll', updateDropdownLayout, true)
     }
   }, [open])
 
@@ -65,7 +116,10 @@ const SearchableSelect = ({
   useEffect(() => {
     if (!open) return
     const onClick = (e: MouseEvent) => {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false)
+      const target = e.target as Node
+      const clickedTrigger = wrapRef.current?.contains(target)
+      const clickedPanel = panelRef.current?.contains(target)
+      if (!clickedTrigger && !clickedPanel) setOpen(false)
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false)
@@ -140,8 +194,16 @@ const SearchableSelect = ({
         />
       </button>
 
-      {open && (
-        <div className="absolute left-0 right-0 z-50 mt-1 overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 dark:border-gray-700 dark:bg-gray-800 dark:ring-white/5">
+      {open && dropdownLayout && createPortal(
+        <div
+          ref={panelRef}
+          className="fixed z-[80] overflow-hidden rounded-md border border-gray-200 bg-white shadow-lg ring-1 ring-black/5 dark:border-gray-700 dark:bg-gray-800 dark:ring-white/5"
+          style={{
+            top: dropdownLayout.top,
+            left: dropdownLayout.left,
+            width: dropdownLayout.width,
+          }}
+        >
           <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2 dark:border-gray-700">
             <SearchIcon className="h-4 w-4 text-gray-400" />
             <input
@@ -172,7 +234,8 @@ const SearchableSelect = ({
             <ul
               ref={listRef}
               role="listbox"
-              className="max-h-64 overflow-y-auto py-1"
+              className="overflow-y-auto py-1"
+              style={{ maxHeight: Math.max(72, dropdownLayout.maxHeight - 44) }}
             >
               {filtered.map((opt, idx) => {
                 const isSelected = opt.id === value
@@ -208,7 +271,8 @@ const SearchableSelect = ({
               })}
             </ul>
           )}
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )

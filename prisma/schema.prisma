@@ -103,6 +103,7 @@ model SalesInvoice {
   id                       String            @id @default(cuid())
   invoiceNumber            String            @unique
   invoiceDate              DateTime          @default(now())
+  dueDate                  DateTime?
   type                     String            @default("INVOICE") // INVOICE
   partyId                  String
   party                    Party             @relation(fields: [partyId], references: [id])
@@ -133,7 +134,6 @@ model SalesInvoice {
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
 
-  dueDate           DateTime?
   // Additional fields (all optional)
   poNumber          String?
   ewayBillNo        String?

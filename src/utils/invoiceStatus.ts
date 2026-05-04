@@ -37,6 +37,7 @@ export const getDueCountdown = (
   if (totalAmount > 0 && amountPaid >= totalAmount) return null
 
   const due = new Date(dueDate)
+  if (Number.isNaN(due.getTime())) return null
   due.setHours(0, 0, 0, 0)
   const today = new Date()
   today.setHours(0, 0, 0, 0)

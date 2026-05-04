@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { formatInvoiceStatus } from './invoiceStatus'
 import { downloadClassicPDF, getClassicPDFBytes, buildClassicPDFFilename } from './pdfmakeInvoice'
 import {
   downloadQuotationPDF,
@@ -412,7 +413,7 @@ function generateModernTemplate(doc: jsPDF, invoice: InvoiceData) {
   doc.setFont('helvetica', 'normal')
   doc.setTextColor(...dark)
   doc.text('Date: ' + formatDate(invoice.invoiceDate), ML + 6, yPos + 16)
-  doc.text('Status: ' + invoice.status, ML + 6, yPos + 23)
+  doc.text('Status: ' + formatInvoiceStatus(invoice.status), ML + 6, yPos + 23)
   if (invoice.company?.taxId) doc.text('GSTIN: ' + invoice.company.taxId, ML + 6, yPos + 30)
 
   const rx = ML + halfW + 8

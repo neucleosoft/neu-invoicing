@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { PurchaseBill } from '../types'
 import { formatCurrency } from '../utils/currency'
+import { formatInvoiceStatus } from '../utils/invoiceStatus'
 import NumberInput from '../components/NumberInput'
 import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
@@ -356,7 +357,7 @@ const Purchase = () => {
                       bill.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
                       'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                     }`}>
-                      {bill.status}
+                      {formatInvoiceStatus(bill.status)}
                     </span>
                   </td>
                   <td className="table-cell">
@@ -600,7 +601,7 @@ const Purchase = () => {
                     viewingBill.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
                     'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                   }`}>
-                    {viewingBill.status}
+                    {formatInvoiceStatus(viewingBill.status)}
                   </span>
                 </div>
                 <div>

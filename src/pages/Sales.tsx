@@ -429,16 +429,6 @@ const Sales = () => {
     setShowModal(true)
   }
 
-  const isOverdue = (invoice: SalesInvoice): boolean => {
-    if (invoice.status === 'PAID') return false
-    if (!invoice.dueDate) return false
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const due = new Date(invoice.dueDate)
-    due.setHours(0, 0, 0, 0)
-    return due < today
-  }
-
   const totals = calculateTotals()
 
   // Compute date-range bounds from the selected preset
@@ -584,19 +574,13 @@ const Sales = () => {
                     <td className="table-cell">{formatCurrency(invoice.totalAmount)}</td>
                     <td className="table-cell">
                       <div className="flex flex-col items-start gap-1">
-                        {isOverdue(invoice) ? (
-                          <span className="px-2 py-1 rounded-full text-xs bg-red-600 text-white font-bold">
-                            OVERDUE
-                          </span>
-                        ) : (
-                          <span className={`px-2 py-1 rounded-full text-xs ${
-                            invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                            invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                          }`}>
-                            {formatInvoiceStatus(invoice.status)}
-                          </span>
-                        )}
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                          invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                          'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                        }`}>
+                          {formatInvoiceStatus(invoice.status)}
+                        </span>
                         {(() => {
                           const cd = getDueCountdown(
                             invoice.dueDate,

@@ -279,7 +279,7 @@ export const setupPartyHandlers = () => {
         entries.sort((a, b) => a.date.getTime() - b.date.getTime())
 
         // Split into pre-range (folded into opening balance) and in-range (line items).
-        let openingBalance = 0
+        let openingBalance = party.openingBalance ?? 0
         const lines: Array<Entry & { balance: number }> = []
         let running = 0
 
