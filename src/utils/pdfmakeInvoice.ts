@@ -23,16 +23,34 @@ const GREEN = '#C6E0B4'
 
 // ─── Main export ─────────────────────────────────────────────────────────────
 
-export function downloadClassicPDF(invoice: InvoiceData) {
-  if (!invoice.items) invoice.items = []
-  const dd = buildClassicPDFDefinition(invoice)
+export function buildClassicPDFFilename(invoice: InvoiceData) {
   const suffix = invoice.type === 'QUOTATION'
     ? 'quotation'
     : invoice.type === 'PROFORMA_INVOICE'
       ? 'proforma_invoice'
       : 'sales_invoice'
-  const filename = `${invoice.invoiceNumber.replace(/\//g, '_')}_${suffix}_${invoice.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
-  pdfMake.createPdf(dd).download(filename)
+  return `${invoice.invoiceNumber.replace(/\//g, '_')}_${suffix}_${invoice.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
+}
+
+export function downloadClassicPDF(invoice: InvoiceData) {
+  if (!invoice.items) invoice.items = []
+  const dd = buildClassicPDFDefinition(invoice)
+  pdfMake.createPdf(dd).download(buildClassicPDFFilename(invoice))
+}
+
+export function getClassicPDFBytes(invoice: InvoiceData): Promise<Uint8Array> {
+  if (!invoice.items) invoice.items = []
+  const dd = buildClassicPDFDefinition(invoice)
+  return new Promise((resolve, reject) => {
+    try {
+      pdfMake.createPdf(dd).getBuffer((buffer: any) => {
+        // pdfmake returns a Node Buffer in Electron renderer; coerce to Uint8Array
+        resolve(buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer))
+      })
+    } catch (err) {
+      reject(err)
+    }
+  })
 }
 
 // ─── Document definition ─────────────────────────────────────────────────────
@@ -142,7 +160,8 @@ function buildCompanySection(inv: InvoiceData, logo: string): Content {
 
   // Build the invoice details grid (right side)
   // Rows: Number + Date, then document-specific details if present
-  const hasDueDate = isQuoteLike && !!inv.dueDate
+  const hasDueDate = !!inv.dueDate
+  const dueDateLabel = isQuoteLike ? 'Expiry Date' : 'Due Date'
   const invoiceGridBody: TableCell[][] = [
     [
       { stack: [
@@ -156,17 +175,24 @@ function buildCompanySection(inv: InvoiceData, logo: string): Content {
     ],
   ]
 
-  if (isQuoteLike && (hasDueDate || hasSecondaryValue)) {
+  if (hasDueDate && hasSecondaryValue) {
     invoiceGridBody.push([
       { stack: [
-        { text: 'Expiry Date', bold: true, fontSize: 10 },
-        { text: hasDueDate && inv.dueDate ? formatDate(inv.dueDate) : '-', fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+        { text: dueDateLabel, bold: true, fontSize: 10 },
+        { text: formatDate(inv.dueDate!), fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
       { stack: [
         { text: secondaryLabel, bold: true, fontSize: 10 },
-        { text: hasSecondaryValue ? secondaryDisplayValue : '-', fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+        { text: secondaryDisplayValue, fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
     ])
+  } else if (hasDueDate) {
+    invoiceGridBody.push(
+      [{ stack: [
+        { text: dueDateLabel, bold: true, fontSize: 10 },
+        { text: formatDate(inv.dueDate!), fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+      ], colSpan: 2 }, {}],
+    )
   } else if (hasSecondaryValue) {
     invoiceGridBody.push(
       [{ stack: [

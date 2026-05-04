@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { SalesInvoice } from '../types'
-import { downloadInvoicePDF, InvoiceTemplate } from '../utils/generateInvoicePDF'
+import { downloadInvoicePDF, getInvoicePDFBytes, InvoiceTemplate } from '../utils/generateInvoicePDF'
+import { formatInvoiceStatus, getDueCountdown, dueCountdownColorClass } from '../utils/invoiceStatus'
+import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
+import { sharePdf, ShareTarget } from '../utils/sharePdf'
+import ShareMenu from '../components/ShareMenu'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
@@ -11,6 +16,7 @@ import { TableSkeleton } from '../components/Skeleton'
 import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
 import { Wallet, Search as SearchIcon } from 'lucide-react'
+import SearchableSelect from '../components/SearchableSelect'
 
 interface Party {
   id: string
@@ -50,6 +56,9 @@ const Sales = () => {
   const [items, setItems] = useState<Item[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState<InvoiceTemplate>('classic')
   const [searchQuery, setSearchQuery] = useState('')
+  const [dateFilter, setDateFilter] = useState<'all' | '7d' | '1m' | '1y' | 'custom'>('all')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
   const toast = useToast()
   const confirm = useConfirm()
 
@@ -94,6 +103,15 @@ const Sales = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state])
 
+  // Auto-open the create-invoice modal when navigated here from Dashboard's "+ New Invoice"
+  useEffect(() => {
+    if ((location.state as { openNew?: boolean } | null)?.openNew) {
+      handleNewInvoice()
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
+
   const loadTemplate = async () => {
     try {
       const result = await window.electronAPI.settings.get('invoiceTemplate')
@@ -117,61 +135,50 @@ const Sales = () => {
     }
   }
 
+  const loadInvoicePDFData = async (invoiceId: string): Promise<any | null> => {
+    const result = await window.electronAPI.sales.getById(invoiceId)
+    if (!result.success || !result.data) return null
+    const company = await loadCompanyForPDF()
+    return {
+      ...result.data,
+      party: result.data.party,
+      items: result.data.items || [],
+      company,
+    }
+  }
+
   const handleDownloadPDF = async (invoiceId: string) => {
     try {
-      // Fetch full invoice details with items
-      const result = await window.electronAPI.sales.getById(invoiceId)
-      if (result.success && result.data) {
-        const invoice = result.data
-
-        // Get company details
-        const companyResult = await window.electronAPI.company.get()
-        const company = companyResult.success ? companyResult.data : undefined
-
-        // Convert logo file to base64 for PDF generation (resized to save space)
-        if (company?.logoPath) {
-          try {
-            const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
-            const response = await fetch(logoUrl)
-            if (!response.ok) throw new Error('Logo file not found')
-            const blob = await response.blob()
-            // Resize using canvas — 200x200 is plenty for a 22mm logo on PDF
-            const img = new Image()
-            const imgUrl = URL.createObjectURL(blob)
-            const logoBase64 = await new Promise<string>((resolve, reject) => {
-              img.onload = () => {
-                const canvas = document.createElement('canvas')
-                canvas.width = 600
-                canvas.height = 600
-                const ctx = canvas.getContext('2d')!
-                ctx.drawImage(img, 0, 0, 600, 600)
-                URL.revokeObjectURL(imgUrl)
-                resolve(canvas.toDataURL('image/png'))
-              }
-              img.onerror = reject
-              img.src = imgUrl
-            })
-            company.logoBase64 = logoBase64
-          } catch {
-            // Logo file missing or unreadable, skip it
-          }
-        }
-
-        // Pass all invoice fields (including GST data) to PDF generator
-        const pdfData = {
-          ...invoice,
-          party: invoice.party,
-          items: invoice.items || [],
-          company
-        } as any
-
-        downloadInvoicePDF(pdfData, selectedTemplate)
-      } else {
+      const pdfData = await loadInvoicePDFData(invoiceId)
+      if (!pdfData) {
         toast.error('Failed to load invoice details')
+        return
       }
+      downloadInvoicePDF(pdfData, selectedTemplate)
     } catch (error) {
       console.error('Error generating PDF:', error)
       toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleShare = async (invoiceId: string, target: ShareTarget) => {
+    try {
+      const pdfData = await loadInvoicePDFData(invoiceId)
+      if (!pdfData) {
+        toast.error('Failed to load invoice details')
+        return
+      }
+      const { bytes, filename } = await getInvoicePDFBytes(pdfData, selectedTemplate)
+      const subject = `Invoice ${pdfData.invoiceNumber} from ${pdfData.company?.name || ''}`.trim()
+      await sharePdf(bytes, filename, target, toast, {
+        subject,
+        phone: pdfData.party?.phone,
+        email: pdfData.party?.email,
+        partyName: pdfData.party?.name,
+      })
+    } catch (error) {
+      console.error('Error sharing invoice:', error)
+      toast.error('Failed to share invoice')
     }
   }
 
@@ -434,13 +441,42 @@ const Sales = () => {
 
   const totals = calculateTotals()
 
-  // Filter invoices by search query
+  // Compute date-range bounds from the selected preset
+  const getDateRange = (): { start: Date | null; end: Date | null } => {
+    if (dateFilter === 'all') return { start: null, end: null }
+    if (dateFilter === 'custom') {
+      const start = customStart ? new Date(customStart) : null
+      const end = customEnd ? new Date(customEnd) : null
+      if (start) start.setHours(0, 0, 0, 0)
+      if (end) end.setHours(23, 59, 59, 999)
+      return { start, end }
+    }
+    const end = new Date()
+    end.setHours(23, 59, 59, 999)
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    if (dateFilter === '7d') start.setDate(start.getDate() - 6) // last 7 days inclusive of today
+    else if (dateFilter === '1m') start.setDate(start.getDate() - 29) // last 30 days
+    else if (dateFilter === '1y') start.setDate(start.getDate() - 364) // last 365 days
+    return { start, end }
+  }
+
+  const { start: dateStart, end: dateEnd } = getDateRange()
+
+  // Filter invoices by search query and date range
   const filteredInvoices = invoices.filter((invoice) => {
-    if (!searchQuery.trim()) return true
-    const query = searchQuery.toLowerCase()
-    const matchesNumber = invoice.invoiceNumber?.toLowerCase().includes(query)
-    const matchesParty = invoice.party?.name?.toLowerCase().includes(query)
-    return matchesNumber || matchesParty
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      const matchesNumber = invoice.invoiceNumber?.toLowerCase().includes(query)
+      const matchesParty = invoice.party?.name?.toLowerCase().includes(query)
+      if (!matchesNumber && !matchesParty) return false
+    }
+    if (dateStart || dateEnd) {
+      const invDate = new Date(invoice.invoiceDate)
+      if (dateStart && invDate < dateStart) return false
+      if (dateEnd && invDate > dateEnd) return false
+    }
+    return true
   })
 
   const { sortedItems: sortedInvoices, sortKey, sortDir, toggleSort } = useSortable(filteredInvoices, [
@@ -463,15 +499,46 @@ const Sales = () => {
         </button>
       </div>
 
-      {/* Search Input */}
-      <div>
+      {/* Search + Date Filter */}
+      <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
-          className="input max-w-md"
+          className="input max-w-md flex-1 min-w-[240px]"
           placeholder={`Search by ${invoiceLabels.short} number or party name...`}
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
+        <select
+          className="input w-auto"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}
+        >
+          <option value="all">All Dates</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="1m">Last Month</option>
+          <option value="1y">Last Year</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        {dateFilter === 'custom' && (
+          <>
+            <DateInput
+              className="input w-auto"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+            />
+            <span className="text-gray-500 dark:text-gray-400">to</span>
+            <DateInput
+              className="input w-auto"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+            />
+          </>
+        )}
+        {dateFilter !== 'all' && (
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            {filteredInvoices.length} {filteredInvoices.length === 1 ? 'invoice' : 'invoices'}
+          </span>
+        )}
       </div>
 
       {/* Invoices Table */}
@@ -479,11 +546,13 @@ const Sales = () => {
         {loading ? (
           <TableSkeleton rows={6} columns={7} />
         ) : filteredInvoices.length === 0 ? (
-          searchQuery.trim() ? (
+          searchQuery.trim() || dateFilter !== 'all' ? (
             <EmptyState
               icon={SearchIcon}
-              title="No invoices match your search"
-              description={`Nothing matched "${searchQuery}".`}
+              title="No invoices match your filters"
+              description={searchQuery.trim()
+                ? `Nothing matched "${searchQuery}" in the selected date range.`
+                : 'No invoices fall within the selected date range.'}
             />
           ) : (
             <EmptyState
@@ -510,23 +579,38 @@ const Sales = () => {
                 {sortedInvoices.map((invoice) => (
                   <tr key={invoice.id} className="border-t">
                     <td className="table-cell font-medium">{invoice.invoiceNumber}</td>
-                    <td className="table-cell">{new Date(invoice.invoiceDate).toLocaleDateString()}</td>
+                    <td className="table-cell">{new Date(invoice.invoiceDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{invoice.party?.name}</td>
                     <td className="table-cell">{formatCurrency(invoice.totalAmount)}</td>
                     <td className="table-cell">
-                      {isOverdue(invoice) ? (
-                        <span className="px-2 py-1 rounded-full text-xs bg-red-600 text-white font-bold">
-                          OVERDUE
-                        </span>
-                      ) : (
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                          invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                          'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                        }`}>
-                          {invoice.status}
-                        </span>
-                      )}
+                      <div className="flex flex-col items-start gap-1">
+                        {isOverdue(invoice) ? (
+                          <span className="px-2 py-1 rounded-full text-xs bg-red-600 text-white font-bold">
+                            OVERDUE
+                          </span>
+                        ) : (
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                            invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                          }`}>
+                            {formatInvoiceStatus(invoice.status)}
+                          </span>
+                        )}
+                        {(() => {
+                          const cd = getDueCountdown(
+                            invoice.dueDate,
+                            invoice.status,
+                            invoice.amountPaid,
+                            invoice.totalAmount
+                          )
+                          return cd ? (
+                            <span className={`text-xs font-medium ${dueCountdownColorClass[cd.tone]}`}>
+                              {cd.text}
+                            </span>
+                          ) : null
+                        })()}
+                      </div>
                     </td>
                     <td className="table-cell">
                       <div className="flex items-center space-x-2">
@@ -549,6 +633,12 @@ const Sales = () => {
                         >
                           PDF
                         </button>
+                        <ShareMenu
+                          onShare={(target) => handleShare(invoice.id, target)}
+                          phone={invoice.party?.phone}
+                          email={invoice.party?.email}
+                          partyName={invoice.party?.name}
+                        />
                         <button onClick={() => handleDelete(invoice.id)} className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
                           Delete
                         </button>
@@ -593,17 +683,13 @@ const Sales = () => {
 
                   <div>
                     <label className="label">Customer *</label>
-                    <select
-                      className="input"
+                    <SearchableSelect
                       value={formData.partyId}
-                      onChange={(e) => setFormData({...formData, partyId: e.target.value})}
+                      onChange={(id) => setFormData({...formData, partyId: id})}
+                      options={parties.map(p => ({ id: p.id, name: p.name }))}
+                      placeholder="Select Customer"
                       required
-                    >
-                      <option value="">Select Customer</option>
-                      {parties.map(party => (
-                        <option key={party.id} value={party.id}>{party.name}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div>
@@ -613,7 +699,7 @@ const Sales = () => {
                       value={formData.status}
                       onChange={(e) => setFormData({...formData, status: e.target.value})}
                     >
-                      <option value="DRAFT">Draft</option>
+                      <option value="DRAFT">Unpaid</option>
                       <option value="PAID">Paid</option>
                       <option value="PARTIAL">Partial</option>
                       <option value="OVERDUE">Overdue</option>
@@ -622,8 +708,7 @@ const Sales = () => {
 
                   <div>
                     <label className="label">Invoice Date *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.invoiceDate}
                       onChange={(e) => setFormData({...formData, invoiceDate: e.target.value})}
@@ -633,8 +718,7 @@ const Sales = () => {
 
                   <div>
                     <label className="label">Due Date</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.dueDate}
                       onChange={(e) => setFormData({...formData, dueDate: e.target.value})}
@@ -926,7 +1010,28 @@ const Sales = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Date</p>
-                  <p className="font-medium">{new Date(viewingInvoice.invoiceDate).toLocaleDateString()}</p>
+                  <p className="font-medium">{new Date(viewingInvoice.invoiceDate).toLocaleDateString('en-GB')}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Due Date</p>
+                  <p className="font-medium">
+                    {viewingInvoice.dueDate
+                      ? new Date(viewingInvoice.dueDate).toLocaleDateString('en-GB')
+                      : '—'}
+                  </p>
+                  {(() => {
+                    const cd = getDueCountdown(
+                      viewingInvoice.dueDate,
+                      viewingInvoice.status,
+                      viewingInvoice.amountPaid,
+                      viewingInvoice.totalAmount
+                    )
+                    return cd ? (
+                      <p className={`text-xs font-medium mt-0.5 ${dueCountdownColorClass[cd.tone]}`}>
+                        {cd.text}
+                      </p>
+                    ) : null
+                  })()}
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
@@ -935,7 +1040,7 @@ const Sales = () => {
                     viewingInvoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
                     'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                   }`}>
-                    {viewingInvoice.status}
+                    {formatInvoiceStatus(viewingInvoice.status)}
                   </span>
                 </div>
               </div>
@@ -1024,6 +1129,13 @@ const Sales = () => {
                 >
                   Close
                 </button>
+                <ShareMenu
+                  variant="button"
+                  onShare={(target) => handleShare(viewingInvoice.id, target)}
+                  phone={viewingInvoice.party?.phone}
+                  email={viewingInvoice.party?.email}
+                  partyName={viewingInvoice.party?.name}
+                />
                 <button
                   onClick={() => handleDownloadPDF(viewingInvoice.id)}
                   className="btn btn-primary"

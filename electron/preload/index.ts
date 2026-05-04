@@ -7,6 +7,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     signInWithGoogle: () => ipcRenderer.invoke("auth:signInWithGoogle"),
     signOut: () => ipcRenderer.invoke("auth:signOut"),
     getAuthStatus: () => ipcRenderer.invoke("auth:getAuthStatus"),
+    onAuthInvalidated: (callback: () => void) => {
+      ipcRenderer.on("auth:invalidated", () => callback());
+    },
   },
 
   // Sync
@@ -38,6 +41,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("party:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("party:delete", id),
     getLedger: (id: string) => ipcRenderer.invoke("party:getLedger", id),
+    getStatement: (args: { partyId: string; fromDate: string; toDate: string }) =>
+      ipcRenderer.invoke("party:getStatement", args),
   },
 
   // Items
@@ -212,5 +217,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getCached: (gstin: string) => ipcRenderer.invoke("gst:getCached", gstin),
     clearExpiredCache: () => ipcRenderer.invoke("gst:clearExpiredCache"),
     getStateList: () => ipcRenderer.invoke("gst:getStateList"),
+  },
+
+  // Share (WhatsApp / Email)
+  share: {
+    sharePdf: (args: {
+      pdfBytes: Uint8Array;
+      filename: string;
+      target: "whatsapp" | "email";
+      subject?: string;
+      phone?: string;
+      email?: string;
+    }) => ipcRenderer.invoke("share:sharePdf", args),
   },
 });

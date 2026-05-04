@@ -12,9 +12,11 @@ import {
   Landmark,
   BarChart3,
   Receipt,
+  ScrollText,
   Settings as SettingsIcon,
   Moon,
   Sun,
+  Monitor,
   ChevronLeft,
   ChevronRight,
   Search,
@@ -26,29 +28,79 @@ import {
 import { useStore } from '../store/useStore'
 import CommandPalette from './CommandPalette'
 
-const navigation = [
-  { name: 'Dashboard', path: '/', icon: LayoutDashboard },
-  { name: 'Parties', path: '/parties', icon: Users },
-  { name: 'Items', path: '/items', icon: Package },
-  { name: 'Invoices', path: '/invoices', icon: Wallet },
-  { name: 'Quotations', path: '/quotations', icon: FileText },
-  { name: 'Proforma Invoices', path: '/proforma-invoices', icon: FileText },
-  { name: 'Purchase', path: '/purchase', icon: ShoppingCart },
-  { name: 'Challans', path: '/delivery-challan', icon: Truck },
-  { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText },
-  { name: 'Payments', path: '/payments', icon: CreditCard },
-  { name: 'Cash & Bank', path: '/cash-bank', icon: Landmark },
-  { name: 'Reports', path: '/reports', icon: BarChart3 },
-  { name: 'GST Reports', path: '/gst-reports', icon: Receipt },
-  { name: 'Settings', path: '/settings', icon: SettingsIcon },
+const navigationGroups: { label?: string; items: { name: string; path: string; icon: typeof LayoutDashboard }[] }[] = [
+  {
+    items: [
+      { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+    ],
+  },
+  {
+    label: 'Master',
+    items: [
+      { name: 'Parties', path: '/parties', icon: Users },
+      { name: 'Items', path: '/items', icon: Package },
+    ],
+  },
+  {
+    label: 'Sales',
+    items: [
+      { name: 'Invoices', path: '/invoices', icon: Wallet },
+      { name: 'Quotations', path: '/quotations', icon: FileText },
+      { name: 'Proforma Invoices', path: '/proforma-invoices', icon: FileText },
+      { name: 'Challans', path: '/delivery-challan', icon: Truck },
+    ],
+  },
+  {
+    label: 'Purchase & Payments',
+    items: [
+      { name: 'Purchase', path: '/purchase', icon: ShoppingCart },
+      { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText },
+      { name: 'Payments', path: '/payments', icon: CreditCard },
+      { name: 'Cash & Bank', path: '/cash-bank', icon: Landmark },
+    ],
+  },
+  {
+    label: 'Reports',
+    items: [
+      { name: 'Customer Statement', path: '/statement', icon: ScrollText },
+      { name: 'Reports', path: '/reports', icon: BarChart3 },
+      { name: 'GST Reports', path: '/gst-reports', icon: Receipt },
+    ],
+  },
+  {
+    items: [
+      { name: 'Settings', path: '/settings', icon: SettingsIcon },
+    ],
+  },
 ]
 
 const Layout = () => {
   const location = useLocation()
   const navigate = useNavigate()
-  const { company, authStatus, syncStatus, setAuthStatus, darkMode, setDarkMode, sidebarOpen, setSidebarOpen } = useStore()
+  const {
+    company,
+    authStatus,
+    syncStatus,
+    setAuthStatus,
+    darkMode,
+    setDarkMode,
+    themePreference,
+    setThemePreference,
+    sidebarOpen,
+    setSidebarOpen,
+  } = useStore()
   const [paletteOpen, setPaletteOpen] = useState(false)
 
+  // Main process tells us tokens are no longer valid → bounce to /login.
+  useEffect(() => {
+    window.electronAPI.auth.onAuthInvalidated?.(() => {
+      setAuthStatus({ isAuthenticated: false, user: null })
+      navigate('/login')
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Apply the dark class to <html> whenever effective darkMode changes.
   useEffect(() => {
     if (darkMode) {
       document.documentElement.classList.add('dark')
@@ -56,6 +108,18 @@ const Layout = () => {
       document.documentElement.classList.remove('dark')
     }
   }, [darkMode])
+
+  // When preference is "system", track the OS color-scheme media query and
+  // update the effective darkMode accordingly. Stop tracking when the user
+  // picks an explicit light/dark preference.
+  useEffect(() => {
+    if (themePreference !== 'system') return
+    const mq = window.matchMedia('(prefers-color-scheme: dark)')
+    setDarkMode(mq.matches)
+    const onChange = (e: MediaQueryListEvent) => setDarkMode(e.matches)
+    mq.addEventListener('change', onChange)
+    return () => mq.removeEventListener('change', onChange)
+  }, [themePreference, setDarkMode])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -101,7 +165,7 @@ const Layout = () => {
         <div className={`border-b dark:border-gray-700 shrink-0 ${collapsed ? 'p-3' : 'p-6'}`}>
           <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
             {!collapsed && (
-              <h1 className="text-2xl font-bold text-primary-600 tracking-tight">neuInvoicing</h1>
+              <h1 className="text-2xl font-bold text-primary-600 tracking-tight">Neu Invoicing</h1>
             )}
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
@@ -130,45 +194,107 @@ const Layout = () => {
           </div>
         )}
 
-        <nav className={`flex-1 overflow-y-auto space-y-1 ${collapsed ? 'p-2' : 'p-4'}`}>
-          {navigation.map((item) => {
-            const Icon = item.icon
-            const active = location.pathname === item.path
-            return (
-              <Link
-                key={item.path}
-                to={item.path}
-                title={collapsed ? item.name : undefined}
-                className={`flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2.5 rounded-lg transition-colors ${
-                  active
-                    ? 'bg-primary-50 text-primary-700 font-medium dark:bg-primary-900/30 dark:text-primary-400'
-                    : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700'
-                }`}
-              >
-                <Icon className="w-5 h-5 shrink-0" />
-                {!collapsed && <span className="truncate">{item.name}</span>}
-              </Link>
-            )
-          })}
+        <nav className={`flex-1 overflow-y-auto ${collapsed ? 'p-2' : 'px-3 py-4'}`}>
+          {navigationGroups.map((group, gi) => (
+            <div key={gi} className={gi > 0 ? (collapsed ? 'mt-2 pt-2 border-t border-gray-100 dark:border-gray-700/50' : 'mt-4') : ''}>
+              {!collapsed && group.label && (
+                <div className="px-3 mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                  {group.label}
+                </div>
+              )}
+              <div className="space-y-0.5">
+                {group.items.map((item) => {
+                  const Icon = item.icon
+                  const active = location.pathname === item.path
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      title={collapsed ? item.name : undefined}
+                      className={`relative flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg transition-colors ${
+                        active
+                          ? 'bg-primary-50 text-primary-700 font-semibold dark:bg-primary-900/30 dark:text-primary-300'
+                          : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/60'
+                      }`}
+                    >
+                      {active && !collapsed && (
+                        <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r bg-primary-600 dark:bg-primary-400" />
+                      )}
+                      <Icon className={`w-5 h-5 shrink-0 ${active ? 'text-primary-600 dark:text-primary-400' : ''}`} strokeWidth={active ? 2.25 : 1.75} />
+                      {!collapsed && <span className="truncate text-sm">{item.name}</span>}
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* Footer */}
         <div className={`shrink-0 border-t bg-white dark:bg-gray-800 dark:border-gray-700 ${collapsed ? 'p-2 space-y-2' : 'p-4'}`}>
-          {/* Dark mode toggle */}
-          <button
-            onClick={() => setDarkMode(!darkMode)}
-            className={`${collapsed ? 'w-full flex justify-center' : 'w-full flex items-center gap-2'} px-3 py-2 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors mb-2`}
-            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {darkMode ? <Sun className="w-4 h-4 text-yellow-400" /> : <Moon className="w-4 h-4 text-gray-600 dark:text-gray-300" />}
-            {!collapsed && <span className="text-gray-700 dark:text-gray-300">{darkMode ? 'Light mode' : 'Dark mode'}</span>}
-          </button>
+          {/* Theme switch — segmented pill: Light / Dark / System */}
+          {(() => {
+            const options: { key: 'light' | 'dark' | 'system'; Icon: typeof Sun; label: string }[] = [
+              { key: 'light', Icon: Sun, label: 'Light' },
+              { key: 'dark', Icon: Moon, label: 'Dark' },
+              { key: 'system', Icon: Monitor, label: 'System' },
+            ]
+            if (collapsed) {
+              // Compact: cycle through on a single icon button
+              const next = themePreference === 'light' ? 'dark' : themePreference === 'dark' ? 'system' : 'light'
+              const current = options.find((o) => o.key === themePreference)!
+              const Icon = current.Icon
+              const iconColor =
+                themePreference === 'light' ? 'text-yellow-500' :
+                themePreference === 'dark' ? 'text-indigo-400' :
+                'text-gray-600 dark:text-gray-300'
+              return (
+                <button
+                  onClick={() => setThemePreference(next)}
+                  className="w-full flex justify-center px-3 py-2 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors mb-2"
+                  title={`Theme: ${current.label} — click for ${next}`}
+                >
+                  <Icon className={`w-4 h-4 ${iconColor}`} />
+                </button>
+              )
+            }
+            return (
+              <div
+                role="radiogroup"
+                aria-label="Theme"
+                className="mb-2 grid grid-cols-3 gap-1 rounded-lg bg-gray-100 p-1 dark:bg-gray-900/60"
+              >
+                {options.map(({ key, Icon, label }) => {
+                  const active = themePreference === key
+                  return (
+                    <button
+                      key={key}
+                      role="radio"
+                      aria-checked={active}
+                      onClick={() => setThemePreference(key)}
+                      title={`${label} mode`}
+                      className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition ${
+                        active
+                          ? 'bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-gray-100'
+                          : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                      }`}
+                    >
+                      <Icon className="h-3.5 w-3.5" />
+                      <span>{label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            )
+          })()}
 
           {/* Sync Status */}
           <button
             onClick={handleSync}
             className={`${collapsed ? 'w-full flex justify-center' : 'w-full flex items-center justify-between'} px-3 py-2 text-sm rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors mb-3`}
-            title={syncStatus?.status === 'error' ? 'Sync error — click to retry' : 'Sync now'}
+            title={syncStatus?.status === 'error'
+              ? `Sync error — click to retry\n\n${syncStatus?.lastError || 'Unknown error'}`
+              : 'Sync now'}
           >
             <span className="flex items-center gap-2">
               <SyncBadge />
@@ -184,6 +310,11 @@ const Layout = () => {
               </span>
             )}
           </button>
+          {!collapsed && syncStatus?.status === 'error' && syncStatus?.lastError && (
+            <div className="mb-3 -mt-1 px-3 py-2 text-xs rounded-lg bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200 dark:border-red-900/50">
+              {syncStatus.lastError}
+            </div>
+          )}
 
           {/* User Info */}
           <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>

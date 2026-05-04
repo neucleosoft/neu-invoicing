@@ -3,11 +3,13 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { PurchaseBill } from '../types'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
 import { ShoppingCart, Search as SearchIcon } from 'lucide-react'
+import SearchableSelect from '../components/SearchableSelect'
 
 interface Party {
   id: string
@@ -345,7 +347,7 @@ const Purchase = () => {
               {filteredBills.map((bill) => (
                 <tr key={bill.id} className="border-t">
                   <td className="table-cell font-medium">{bill.billNumber}</td>
-                  <td className="table-cell">{new Date(bill.billDate).toLocaleDateString()}</td>
+                  <td className="table-cell">{new Date(bill.billDate).toLocaleDateString('en-GB')}</td>
                   <td className="table-cell">{bill.party?.name}</td>
                   <td className="table-cell">{formatCurrency(bill.totalAmount)}</td>
                   <td className="table-cell">
@@ -399,23 +401,18 @@ const Purchase = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="label">Supplier *</label>
-                    <select
-                      className="input"
+                    <SearchableSelect
                       value={formData.partyId}
-                      onChange={(e) => setFormData({...formData, partyId: e.target.value})}
+                      onChange={(id) => setFormData({...formData, partyId: id})}
+                      options={suppliers.map(s => ({ id: s.id, name: s.name }))}
+                      placeholder="Select Supplier"
                       required
-                    >
-                      <option value="">Select Supplier</option>
-                      {suppliers.map(supplier => (
-                        <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div>
                     <label className="label">Bill Date *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.billDate}
                       onChange={(e) => setFormData({...formData, billDate: e.target.value})}
@@ -608,7 +605,7 @@ const Purchase = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Date</p>
-                  <p className="font-medium">{new Date(viewingBill.billDate).toLocaleDateString()}</p>
+                  <p className="font-medium">{new Date(viewingBill.billDate).toLocaleDateString('en-GB')}</p>
                 </div>
               </div>
 

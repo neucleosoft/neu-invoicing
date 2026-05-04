@@ -16,6 +16,7 @@ import {
   Settings as SettingsIcon,
   Moon,
   Sun,
+  Monitor,
   RefreshCw,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
@@ -32,6 +33,7 @@ const destinations = [
   { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText, group: 'Navigate' },
   { name: 'Payments', path: '/payments', icon: CreditCard, group: 'Navigate' },
   { name: 'Cash & Bank', path: '/cash-bank', icon: Landmark, group: 'Navigate' },
+  { name: 'Customer Statement', path: '/statement', icon: FileText, group: 'Navigate' },
   { name: 'Reports', path: '/reports', icon: BarChart3, group: 'Navigate' },
   { name: 'GST Reports', path: '/gst-reports', icon: Receipt, group: 'Navigate' },
   { name: 'Settings', path: '/settings', icon: SettingsIcon, group: 'Navigate' },
@@ -44,7 +46,7 @@ interface CommandPaletteProps {
 
 export default function CommandPalette({ open, onOpenChange }: CommandPaletteProps) {
   const navigate = useNavigate()
-  const { darkMode, setDarkMode } = useStore()
+  const { themePreference, setThemePreference } = useStore()
 
   useEffect(() => {
     if (!open) return
@@ -101,12 +103,28 @@ export default function CommandPalette({ open, onOpenChange }: CommandPalettePro
 
             <Command.Group heading="Actions" className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1 mt-2">
               <Command.Item
-                value="toggle theme dark light"
-                onSelect={() => runAndClose(() => setDarkMode(!darkMode))}
+                value="theme light mode"
+                onSelect={() => runAndClose(() => setThemePreference('light'))}
                 className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-700 dark:text-gray-200 cursor-pointer data-[selected=true]:bg-primary-50 data-[selected=true]:text-primary-700 dark:data-[selected=true]:bg-primary-900/30 dark:data-[selected=true]:text-primary-300"
               >
-                {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-                <span>{darkMode ? 'Switch to light mode' : 'Switch to dark mode'}</span>
+                <Sun className="w-4 h-4" />
+                <span>Theme: Light{themePreference === 'light' ? ' (current)' : ''}</span>
+              </Command.Item>
+              <Command.Item
+                value="theme dark mode"
+                onSelect={() => runAndClose(() => setThemePreference('dark'))}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-700 dark:text-gray-200 cursor-pointer data-[selected=true]:bg-primary-50 data-[selected=true]:text-primary-700 dark:data-[selected=true]:bg-primary-900/30 dark:data-[selected=true]:text-primary-300"
+              >
+                <Moon className="w-4 h-4" />
+                <span>Theme: Dark{themePreference === 'dark' ? ' (current)' : ''}</span>
+              </Command.Item>
+              <Command.Item
+                value="theme system mode auto"
+                onSelect={() => runAndClose(() => setThemePreference('system'))}
+                className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-700 dark:text-gray-200 cursor-pointer data-[selected=true]:bg-primary-50 data-[selected=true]:text-primary-700 dark:data-[selected=true]:bg-primary-900/30 dark:data-[selected=true]:text-primary-300"
+              >
+                <Monitor className="w-4 h-4" />
+                <span>Theme: System{themePreference === 'system' ? ' (current)' : ''}</span>
               </Command.Item>
               <Command.Item
                 value="sync now drive"

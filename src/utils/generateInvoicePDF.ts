@@ -1,8 +1,18 @@
 import { jsPDF } from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { downloadClassicPDF } from './pdfmakeInvoice'
-import { downloadQuotationPDF, previewQuotationPDF } from './pdfmakeQuotation'
-import { downloadProformaInvoicePDF, previewProformaInvoicePDF } from './pdfmakeProformaInvoice'
+import { downloadClassicPDF, getClassicPDFBytes, buildClassicPDFFilename } from './pdfmakeInvoice'
+import {
+  downloadQuotationPDF,
+  previewQuotationPDF,
+  getQuotationPDFBytes,
+  buildQuotationFilename,
+} from './pdfmakeQuotation'
+import {
+  downloadProformaInvoicePDF,
+  previewProformaInvoicePDF,
+  getProformaInvoicePDFBytes,
+  buildProformaInvoiceFilename,
+} from './pdfmakeProformaInvoice'
 import {
   fmtNum,
   fmtRs,
@@ -649,6 +659,35 @@ export function downloadInvoicePDF(invoice: InvoiceData, template: InvoiceTempla
   const doc = generateInvoicePDF(invoice, template)
   const filename = `${invoice.invoiceNumber}_${invoice.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
   doc.save(filename)
+}
+
+export async function getInvoicePDFBytes(
+  invoice: InvoiceData,
+  template: InvoiceTemplate = 'classic'
+): Promise<{ bytes: Uint8Array; filename: string }> {
+  if (!invoice.items) invoice.items = []
+
+  // Quotation/Proforma always use the pdfmake Classic layout regardless of template.
+  if (invoice.type === 'QUOTATION') {
+    return { bytes: await getQuotationPDFBytes(invoice), filename: buildQuotationFilename(invoice) }
+  }
+  if (invoice.type === 'PROFORMA_INVOICE') {
+    return {
+      bytes: await getProformaInvoicePDFBytes(invoice),
+      filename: buildProformaInvoiceFilename(invoice),
+    }
+  }
+
+  // Sales invoice — Classic via pdfmake, others via jsPDF.
+  if (template === 'classic') {
+    return { bytes: await getClassicPDFBytes(invoice), filename: buildClassicPDFFilename(invoice) }
+  }
+
+  const doc = generateInvoicePDF(invoice, template)
+  const arrayBuffer = doc.output('arraybuffer') as ArrayBuffer
+  const safeParty = invoice.party.name.replace(/[^a-z0-9]/gi, '_')
+  const filename = `${invoice.invoiceNumber.replace(/\//g, '_')}_${safeParty}.pdf`
+  return { bytes: new Uint8Array(arrayBuffer), filename }
 }
 
 export function previewInvoicePDF(invoice: InvoiceData, template: InvoiceTemplate = 'classic') {

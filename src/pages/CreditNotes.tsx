@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { FileText } from 'lucide-react'
+import SearchableSelect from '../components/SearchableSelect'
 
 interface CreditDebitNote {
   id: string
@@ -408,7 +410,7 @@ const CreditNotes = () => {
                 {filteredNotes.map((note) => (
                   <tr key={note.id} className="border-t">
                     <td className="table-cell font-medium">{note.noteNumber}</td>
-                    <td className="table-cell">{new Date(note.noteDate).toLocaleDateString()}</td>
+                    <td className="table-cell">{new Date(note.noteDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
                         note.type === 'CREDIT_NOTE' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
@@ -487,17 +489,13 @@ const CreditNotes = () => {
 
                   <div>
                     <label className="label">Party *</label>
-                    <select
-                      className="input"
+                    <SearchableSelect
                       value={formData.partyId}
-                      onChange={(e) => handlePartyChange(e.target.value)}
+                      onChange={(id) => handlePartyChange(id)}
+                      options={parties.map(p => ({ id: p.id, name: p.name }))}
+                      placeholder="Select Party"
                       required
-                    >
-                      <option value="">Select Party</option>
-                      {parties.map(party => (
-                        <option key={party.id} value={party.id}>{party.name}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div>
@@ -518,8 +516,7 @@ const CreditNotes = () => {
 
                   <div>
                     <label className="label">Note Date *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.noteDate}
                       onChange={(e) => setFormData({ ...formData, noteDate: e.target.value })}
@@ -722,7 +719,7 @@ const CreditNotes = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Date</p>
-                  <p className="font-medium">{new Date(viewingNote.noteDate).toLocaleDateString()}</p>
+                  <p className="font-medium">{new Date(viewingNote.noteDate).toLocaleDateString('en-GB')}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>

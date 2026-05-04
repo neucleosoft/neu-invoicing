@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { BarChart3, Package, Wallet, CreditCard, Receipt } from 'lucide-react'
 import { formatCurrency } from '../utils/currency'
 import { useToast } from '../components/ToastContext'
+import DateInput from '../components/DateInput'
 
 const Reports = () => {
   const [activeReport, setActiveReport] = useState<'sales' | 'stock' | 'receivables' | 'payables' | 'tax'>('sales')
@@ -107,8 +108,7 @@ const Reports = () => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
                 <label className="label">Start Date</label>
-                <input
-                  type="date"
+                <DateInput
                   className="input"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
@@ -116,8 +116,7 @@ const Reports = () => {
               </div>
               <div>
                 <label className="label">End Date</label>
-                <input
-                  type="date"
+                <DateInput
                   className="input"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
@@ -133,7 +132,7 @@ const Reports = () => {
                   <option value="">All</option>
                   <option value="PAID">Paid</option>
                   <option value="PARTIAL">Partial</option>
-                  <option value="DRAFT">Draft</option>
+                  <option value="DRAFT">Unpaid</option>
                 </select>
               </div>
             </div>

@@ -224,8 +224,15 @@ const Parties = () => {
     setGstValidation(null)
   }
 
-  const handleOpenModal = () => {
+  const handleAddCustomer = () => {
     resetForm()
+    setEditingParty(null)
+    setShowModal(true)
+  }
+
+  const handleAddSupplier = () => {
+    resetForm()
+    setFormData((prev) => ({ ...prev, type: 'SUPPLIER' }))
     setEditingParty(null)
     setShowModal(true)
   }
@@ -259,9 +266,16 @@ const Parties = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Parties</h1>
-        <button onClick={handleOpenModal} className="btn btn-primary">
-          + Add Party
-        </button>
+        {filter === 'CUSTOMER' && (
+          <button onClick={handleAddCustomer} className="btn btn-primary">
+            + Add Customer
+          </button>
+        )}
+        {filter === 'SUPPLIER' && (
+          <button onClick={handleAddSupplier} className="btn btn-primary">
+            + Add Supplier
+          </button>
+        )}
       </div>
 
       {/* Filter Tabs */}
@@ -314,7 +328,6 @@ const Parties = () => {
               icon={Users}
               title="No parties yet"
               description="Add customers and suppliers to start tracking balances, invoices, and payments."
-              action={{ label: '+ Add your first party', onClick: handleOpenModal }}
             />
           )
         ) : (
@@ -410,7 +423,17 @@ const Parties = () => {
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
-            <h2 className="text-2xl font-bold mb-4">{editingParty ? 'Edit' : 'Add'} Party</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-2xl font-bold">{editingParty ? 'Edit' : 'Add'} Party</h2>
+              <button
+                type="button"
+                onClick={() => { setShowModal(false); setEditingParty(null); resetForm() }}
+                className="text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 text-2xl leading-none"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
             <form onSubmit={handleSubmit} className="space-y-4">
 
               {/* GST Lookup Section */}
