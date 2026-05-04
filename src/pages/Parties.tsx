@@ -226,6 +226,7 @@ const Parties = () => {
 
   const handleAddCustomer = () => {
     resetForm()
+    setFormData((prev) => ({ ...prev, type: 'CUSTOMER' }))
     setEditingParty(null)
     setShowModal(true)
   }
@@ -328,6 +329,13 @@ const Parties = () => {
               icon={Users}
               title="No parties yet"
               description="Add customers and suppliers to start tracking balances, invoices, and payments."
+              action={{
+                label:
+                  filter === 'CUSTOMER' ? '+ Add your first customer'
+                  : filter === 'SUPPLIER' ? '+ Add your first supplier'
+                  : '+ Add your first party',
+                onClick: filter === 'SUPPLIER' ? handleAddSupplier : handleAddCustomer,
+              }}
             />
           )
         ) : (
