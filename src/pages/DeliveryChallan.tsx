@@ -1,11 +1,16 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
-import { downloadChallanPDF } from '../utils/pdfmakeChallan'
+import { downloadChallanPDF, getChallanPDFBytes, buildChallanFilename } from '../utils/pdfmakeChallan'
+import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
+import { sharePdf, ShareTarget } from '../utils/sharePdf'
+import ShareMenu from '../components/ShareMenu'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { Truck, Search as SearchIcon } from 'lucide-react'
+import SearchableSelect from '../components/SearchableSelect'
 
 interface Challan {
   id: string
@@ -158,41 +163,47 @@ const DeliveryChallan = () => {
     }
   }
 
-  const handleDownloadPDF = async (challanId: string) => {
+  const loadChallanPDFData = async (challanId: string): Promise<any | null> => {
     const result = await window.electronAPI.challan.getById(challanId)
-    if (result.success && result.data) {
-      const companyResult = await window.electronAPI.company.get()
-      const company = companyResult.success ? companyResult.data : undefined
+    if (!result.success || !result.data) return null
+    const company = await loadCompanyForPDF()
+    return { ...result.data, company }
+  }
 
-      // Convert logo to base64 resized (200x200 is plenty for PDF)
-      if (company?.logoPath) {
-        try {
-          const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
-          const response = await fetch(logoUrl)
-          if (!response.ok) throw new Error('Logo file not found')
-          const blob = await response.blob()
-          const img = new Image()
-          const imgUrl = URL.createObjectURL(blob)
-          const logoBase64 = await new Promise<string>((resolve, reject) => {
-            img.onload = () => {
-              const canvas = document.createElement('canvas')
-              canvas.width = 600
-              canvas.height = 600
-              const ctx = canvas.getContext('2d')!
-              ctx.drawImage(img, 0, 0, 600, 600)
-              URL.revokeObjectURL(imgUrl)
-              resolve(canvas.toDataURL('image/png'))
-            }
-            img.onerror = reject
-            img.src = imgUrl
-          })
-          ;(company as any).logoBase64 = logoBase64
-        } catch {
-          // Logo file missing or unreadable, skip it
-        }
+  const handleDownloadPDF = async (challanId: string) => {
+    try {
+      const challanData = await loadChallanPDFData(challanId)
+      if (!challanData) {
+        toast.error('Failed to load challan details')
+        return
       }
+      downloadChallanPDF(challanData)
+    } catch (error) {
+      console.error('Error generating challan PDF:', error)
+      toast.error('Failed to generate PDF')
+    }
+  }
 
-      downloadChallanPDF({ ...result.data, company } as any)
+  const handleShare = async (challanId: string, target: ShareTarget) => {
+    try {
+      const challanData = await loadChallanPDFData(challanId)
+      if (!challanData) {
+        toast.error('Failed to load challan details')
+        return
+      }
+      const bytes = await getChallanPDFBytes(challanData)
+      const filename = buildChallanFilename(challanData)
+      const subject =
+        `Delivery Challan ${challanData.challanNumber} from ${challanData.company?.name || ''}`.trim()
+      await sharePdf(bytes, filename, target, toast, {
+        subject,
+        phone: challanData.party?.phone,
+        email: challanData.party?.email,
+        partyName: challanData.party?.name,
+      })
+    } catch (error) {
+      console.error('Error sharing challan:', error)
+      toast.error('Failed to share challan')
     }
   }
 
@@ -449,7 +460,7 @@ const DeliveryChallan = () => {
                 {filteredChallans.map((challan) => (
                   <tr key={challan.id} className="border-t">
                     <td className="table-cell font-medium">{challan.challanNumber}</td>
-                    <td className="table-cell">{new Date(challan.challanDate).toLocaleDateString()}</td>
+                    <td className="table-cell">{new Date(challan.challanDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{challan.party?.name}</td>
                     <td className="table-cell">{formatCurrency(challan.totalAmount)}</td>
                     <td className="table-cell">
@@ -475,6 +486,12 @@ const DeliveryChallan = () => {
                         >
                           PDF
                         </button>
+                        <ShareMenu
+                          onShare={(target) => handleShare(challan.id, target)}
+                          phone={challan.party?.phone}
+                          email={challan.party?.email}
+                          partyName={challan.party?.name}
+                        />
                         {challan.status !== 'CONVERTED' && (
                           <button
                             onClick={() => handleEdit(challan)}
@@ -538,17 +555,13 @@ const DeliveryChallan = () => {
 
                   <div>
                     <label className="label">Customer *</label>
-                    <select
-                      className="input"
+                    <SearchableSelect
                       value={formData.partyId}
-                      onChange={(e) => setFormData({...formData, partyId: e.target.value})}
+                      onChange={(id) => setFormData({...formData, partyId: id})}
+                      options={parties.map(p => ({ id: p.id, name: p.name }))}
+                      placeholder="Select Customer"
                       required
-                    >
-                      <option value="">Select Customer</option>
-                      {parties.map(party => (
-                        <option key={party.id} value={party.id}>{party.name}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div>
@@ -565,8 +578,7 @@ const DeliveryChallan = () => {
 
                   <div>
                     <label className="label">Challan Date *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.challanDate}
                       onChange={(e) => setFormData({...formData, challanDate: e.target.value})}
@@ -833,7 +845,7 @@ const DeliveryChallan = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Date</p>
-                  <p className="font-medium">{new Date(viewingChallan.challanDate).toLocaleDateString()}</p>
+                  <p className="font-medium">{new Date(viewingChallan.challanDate).toLocaleDateString('en-GB')}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Transport Mode</p>
@@ -929,6 +941,13 @@ const DeliveryChallan = () => {
                 >
                   Download PDF
                 </button>
+                <ShareMenu
+                  variant="button"
+                  onShare={(target) => handleShare(viewingChallan.id, target)}
+                  phone={viewingChallan.party?.phone}
+                  email={viewingChallan.party?.email}
+                  partyName={viewingChallan.party?.name}
+                />
                 {(viewingChallan.status === 'PENDING' || viewingChallan.status === 'DELIVERED') && (
                   <button
                     onClick={() => {

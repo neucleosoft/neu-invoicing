@@ -444,6 +444,7 @@ declare global {
         signInWithGoogle: () => Promise<any>
         signOut: () => Promise<any>
         getAuthStatus: () => Promise<AuthStatus>
+        onAuthInvalidated: (callback: () => void) => () => void
       }
       sync: {
         syncNow: () => Promise<any>
@@ -464,6 +465,11 @@ declare global {
         update: (id: string, data: Partial<Party>) => Promise<{ success: boolean; data?: Party; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
         getLedger: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        getStatement: (args: {
+          partyId: string
+          fromDate: string
+          toDate: string
+        }) => Promise<{ success: boolean; data?: any; error?: string }>
       }
       item: {
         getAll: () => Promise<{ success: boolean; data?: Item[]; error?: string }>
@@ -575,6 +581,20 @@ declare global {
         getCached: (gstin: string) => Promise<{ success: boolean; data?: any; error?: string }>
         clearExpiredCache: () => Promise<{ success: boolean; data?: { deleted: number }; error?: string }>
         getStateList: () => Promise<{ success: boolean; data?: Record<string, string>; error?: string }>
+      }
+      share: {
+        sharePdf: (args: {
+          pdfBytes: Uint8Array
+          filename: string
+          target: 'whatsapp' | 'email'
+          subject?: string
+          phone?: string
+          email?: string
+        }) => Promise<{
+          success: boolean
+          data?: { savedPath: string; clipboardCopied: boolean; recipientPrefilled: boolean }
+          error?: string
+        }>
       }
     }
   }

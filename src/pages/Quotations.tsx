@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Quotation, QuotationStatus } from '../types'
-import { downloadInvoicePDF } from '../utils/generateInvoicePDF'
+import { downloadInvoicePDF, getInvoicePDFBytes } from '../utils/generateInvoicePDF'
+import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
+import { sharePdf, ShareTarget } from '../utils/sharePdf'
+import ShareMenu from '../components/ShareMenu'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
@@ -10,6 +14,7 @@ import { TableSkeleton } from '../components/Skeleton'
 import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
 import { FileText, Search as SearchIcon } from 'lucide-react'
+import SearchableSelect from '../components/SearchableSelect'
 
 interface Party {
   id: string
@@ -109,54 +114,51 @@ const Quotations = () => {
     }
   }
 
+  const loadQuotationPDFData = async (quotationId: string): Promise<any | null> => {
+    const result = await window.electronAPI.quotation.getById(quotationId)
+    if (!result.success || !result.data) return null
+    const company = await loadCompanyForPDF()
+    return {
+      ...result.data,
+      type: 'QUOTATION',
+      party: result.data.party,
+      items: result.data.items || [],
+      company,
+    }
+  }
+
   const handleDownloadPDF = async (quotationId: string) => {
     try {
-      const result = await window.electronAPI.quotation.getById(quotationId)
-      if (result.success && result.data) {
-        const quotation = result.data
-        const companyResult = await window.electronAPI.company.get()
-        const company = companyResult.success ? companyResult.data : undefined
-
-        if (company?.logoPath) {
-          try {
-            const logoUrl = `local-resource://${company.logoPath.replace(/\\/g, '/')}`
-            const response = await fetch(logoUrl)
-            if (!response.ok) throw new Error('Logo file not found')
-            const blob = await response.blob()
-            const img = new Image()
-            const imgUrl = URL.createObjectURL(blob)
-            const logoBase64 = await new Promise<string>((resolve, reject) => {
-              img.onload = () => {
-                const canvas = document.createElement('canvas')
-                canvas.width = 600
-                canvas.height = 600
-                const ctx = canvas.getContext('2d')!
-                ctx.drawImage(img, 0, 0, 600, 600)
-                URL.revokeObjectURL(imgUrl)
-                resolve(canvas.toDataURL('image/png'))
-              }
-              img.onerror = reject
-              img.src = imgUrl
-            })
-            company.logoBase64 = logoBase64
-          } catch {
-            // Logo file missing or unreadable, skip it
-          }
-        }
-
-        downloadInvoicePDF({
-          ...quotation,
-          type: 'QUOTATION',
-          party: quotation.party,
-          items: quotation.items || [],
-          company,
-        } as any)
-      } else {
+      const pdfData = await loadQuotationPDFData(quotationId)
+      if (!pdfData) {
         toast.error('Failed to load quotation details')
+        return
       }
+      downloadInvoicePDF(pdfData)
     } catch (error) {
       console.error('Error generating quotation PDF:', error)
       toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleShare = async (quotationId: string, target: ShareTarget) => {
+    try {
+      const pdfData = await loadQuotationPDFData(quotationId)
+      if (!pdfData) {
+        toast.error('Failed to load quotation details')
+        return
+      }
+      const { bytes, filename } = await getInvoicePDFBytes(pdfData)
+      const subject = `Quotation ${pdfData.invoiceNumber} from ${pdfData.company?.name || ''}`.trim()
+      await sharePdf(bytes, filename, target, toast, {
+        subject,
+        phone: pdfData.party?.phone,
+        email: pdfData.party?.email,
+        partyName: pdfData.party?.name,
+      })
+    } catch (error) {
+      console.error('Error sharing quotation:', error)
+      toast.error('Failed to share quotation')
     }
   }
 
@@ -436,8 +438,8 @@ const Quotations = () => {
                 {sortedQuotations.map((quotation) => (
                   <tr key={quotation.id} className="border-t">
                     <td className="table-cell font-medium">{quotation.invoiceNumber}</td>
-                    <td className="table-cell">{new Date(quotation.invoiceDate).toLocaleDateString()}</td>
-                    <td className="table-cell">{quotation.dueDate ? new Date(quotation.dueDate).toLocaleDateString() : '-'}</td>
+                    <td className="table-cell">{new Date(quotation.invoiceDate).toLocaleDateString('en-GB')}</td>
+                    <td className="table-cell">{quotation.dueDate ? new Date(quotation.dueDate).toLocaleDateString('en-GB') : '-'}</td>
                     <td className="table-cell">{quotation.party?.name}</td>
                     <td className="table-cell">{formatCurrency(quotation.totalAmount)}</td>
                     <td className="table-cell">
@@ -466,6 +468,12 @@ const Quotations = () => {
                         >
                           PDF
                         </button>
+                        <ShareMenu
+                          onShare={(target) => handleShare(quotation.id, target)}
+                          phone={quotation.party?.phone}
+                          email={quotation.party?.email}
+                          partyName={quotation.party?.name}
+                        />
                         <button
                           onClick={() => handleConvertToInvoice(quotation.id)}
                           className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
@@ -517,17 +525,13 @@ const Quotations = () => {
 
                   <div>
                     <label className="label">Customer *</label>
-                    <select
-                      className="input"
+                    <SearchableSelect
                       value={formData.partyId}
-                      onChange={(e) => setFormData({ ...formData, partyId: e.target.value })}
+                      onChange={(id) => setFormData({ ...formData, partyId: id })}
+                      options={parties.map((p) => ({ id: p.id, name: p.name }))}
+                      placeholder="Select Customer"
                       required
-                    >
-                      <option value="">Select Customer</option>
-                      {parties.map((party) => (
-                        <option key={party.id} value={party.id}>{party.name}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div>
@@ -547,8 +551,7 @@ const Quotations = () => {
 
                   <div>
                     <label className="label">Quotation Date *</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.invoiceDate}
                       onChange={(e) => setFormData({ ...formData, invoiceDate: e.target.value })}
@@ -558,8 +561,7 @@ const Quotations = () => {
 
                   <div>
                     <label className="label">Expiry Date</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.dueDate}
                       onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
@@ -568,8 +570,7 @@ const Quotations = () => {
 
                   <div>
                     <label className="label">Delivery Time</label>
-                    <input
-                      type="date"
+                    <DateInput
                       className="input"
                       value={formData.deliveryTime}
                       onChange={(e) => setFormData({ ...formData, deliveryTime: e.target.value })}
@@ -759,15 +760,15 @@ const Quotations = () => {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Quotation Date</p>
-                  <p className="font-medium">{new Date(viewingQuotation.invoiceDate).toLocaleDateString()}</p>
+                  <p className="font-medium">{new Date(viewingQuotation.invoiceDate).toLocaleDateString('en-GB')}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Expiry Date</p>
-                  <p className="font-medium">{viewingQuotation.dueDate ? new Date(viewingQuotation.dueDate).toLocaleDateString() : '-'}</p>
+                  <p className="font-medium">{viewingQuotation.dueDate ? new Date(viewingQuotation.dueDate).toLocaleDateString('en-GB') : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Delivery Time</p>
-                  <p className="font-medium">{viewingQuotation.deliveryTime ? new Date(viewingQuotation.deliveryTime).toLocaleDateString() : '-'}</p>
+                  <p className="font-medium">{viewingQuotation.deliveryTime ? new Date(viewingQuotation.deliveryTime).toLocaleDateString('en-GB') : '-'}</p>
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Document Type</p>
@@ -848,6 +849,13 @@ const Quotations = () => {
                 >
                   Download PDF
                 </button>
+                <ShareMenu
+                  variant="button"
+                  onShare={(target) => handleShare(viewingQuotation.id, target)}
+                  phone={viewingQuotation.party?.phone}
+                  email={viewingQuotation.party?.email}
+                  partyName={viewingQuotation.party?.name}
+                />
                 <button
                   onClick={() => handleConvertToInvoice(viewingQuotation.id)}
                   className="btn btn-primary"

@@ -9,6 +9,7 @@ declare global {
         signInWithGoogle: () => Promise<any>;
         signOut: () => Promise<any>;
         getAuthStatus: () => Promise<any>;
+        onAuthInvalidated: (callback: () => void) => () => void;
       };
       sync: {
         syncNow: () => Promise<any>;
@@ -29,6 +30,7 @@ declare global {
         update: (id: string, data: any) => Promise<any>;
         delete: (id: string) => Promise<any>;
         getLedger: (id: string) => Promise<any>;
+        getStatement: (args: { partyId: string; fromDate: string; toDate: string }) => Promise<any>;
       };
       item: {
         getAll: () => Promise<any>;
@@ -144,6 +146,20 @@ declare global {
         getCached: (gstin: string) => Promise<any>;
         clearExpiredCache: () => Promise<any>;
         getStateList: () => Promise<any>;
+      };
+      share: {
+        sharePdf: (args: {
+          pdfBytes: Uint8Array;
+          filename: string;
+          target: 'whatsapp' | 'email';
+          subject?: string;
+          phone?: string;
+          email?: string;
+        }) => Promise<{
+          success: boolean;
+          data?: { savedPath: string; clipboardCopied: boolean; recipientPrefilled: boolean };
+          error?: string;
+        }>;
       };
     };
   }

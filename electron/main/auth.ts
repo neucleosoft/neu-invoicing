@@ -15,6 +15,17 @@ const oauth2Client = new google.auth.OAuth2(
   REDIRECT_URI
 )
 
+// Persist refreshed access tokens. googleapis auto-refreshes when the access
+// token expires, but the new credentials only live in memory unless we save
+// them back. Without this, every app restart starts with a stale access token
+// and (eventually, when the in-memory refresh chain breaks) sync fails.
+oauth2Client.on('tokens', (tokens) => {
+  const existing = (store.get('google_tokens') as any) || {}
+  // Refresh responses don't include refresh_token — keep the old one.
+  const merged = { ...existing, ...tokens }
+  store.set('google_tokens', merged)
+})
+
 const SCOPES = [
   'https://www.googleapis.com/auth/drive.appdata',
   'https://www.googleapis.com/auth/userinfo.profile',
@@ -133,4 +144,29 @@ export const getOAuth2Client = () => {
     oauth2Client.setCredentials(tokens)
   }
   return oauth2Client
+}
+
+// Returns true if the error from googleapis indicates the user needs to
+// re-authenticate (refresh token revoked, expired, or invalid_grant).
+export const isAuthError = (err: unknown): boolean => {
+  if (!err || typeof err !== 'object') return false
+  const e = err as any
+  const code = e.response?.status || e.code
+  if (code === 401 || code === 403) return true
+  const msg = String(e.message || '').toLowerCase()
+  return (
+    msg.includes('invalid_grant') ||
+    msg.includes('invalid grant') ||
+    msg.includes('token has been expired') ||
+    msg.includes('token has been revoked') ||
+    msg.includes('no access') ||
+    msg.includes('no refresh token')
+  )
+}
+
+// Wipe persisted tokens so the next sync attempt prompts re-auth.
+export const clearStoredCredentials = () => {
+  store.delete('google_tokens')
+  store.delete('user_info')
+  oauth2Client.setCredentials({})
 }

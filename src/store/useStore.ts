@@ -1,6 +1,32 @@
 import { create } from 'zustand'
 import { AuthStatus, Company, SyncStatus } from '../types'
 
+export type ThemePreference = 'light' | 'dark' | 'system'
+
+const THEME_STORAGE_KEY = 'themePreference'
+
+const readStoredPreference = (): ThemePreference => {
+  try {
+    const v = localStorage.getItem(THEME_STORAGE_KEY)
+    if (v === 'light' || v === 'dark' || v === 'system') return v
+  } catch {
+    // localStorage unavailable
+  }
+  return 'system'
+}
+
+const systemPrefersDark = (): boolean => {
+  try {
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  } catch {
+    return false
+  }
+}
+
+const initialPreference = readStoredPreference()
+const initialDarkMode =
+  initialPreference === 'dark' || (initialPreference === 'system' && systemPrefersDark())
+
 interface AppState {
   // Auth
   authStatus: AuthStatus | null
@@ -17,6 +43,10 @@ interface AppState {
   // UI State
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
+
+  // Theme
+  themePreference: ThemePreference
+  setThemePreference: (pref: ThemePreference) => void
   darkMode: boolean
   setDarkMode: (dark: boolean) => void
 
@@ -41,7 +71,19 @@ export const useStore = create<AppState>((set) => ({
   // UI
   sidebarOpen: true,
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
-  darkMode: false,
+
+  // Theme
+  themePreference: initialPreference,
+  setThemePreference: (pref) => {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, pref)
+    } catch {
+      // localStorage unavailable
+    }
+    const dark = pref === 'dark' || (pref === 'system' && systemPrefersDark())
+    set({ themePreference: pref, darkMode: dark })
+  },
+  darkMode: initialDarkMode,
   setDarkMode: (dark) => set({ darkMode: dark }),
 
   // Loading
