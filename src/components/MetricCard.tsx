@@ -50,10 +50,10 @@ const TONE: Record<Tone, { card: string; label: string; value: string; iconBg: s
 
 const valueSize = (value: string | number): string => {
   const len = String(value).length
-  if (len >= 15) return 'text-base'
-  if (len >= 13) return 'text-lg'
-  if (len >= 11) return 'text-xl'
-  return 'text-2xl'
+  if (len >= 15) return 'text-sm'
+  if (len >= 13) return 'text-base'
+  if (len >= 11) return 'text-lg'
+  return 'text-xl'
 }
 
 interface Props {
@@ -68,22 +68,22 @@ interface Props {
 const MetricCard = ({ label, value, icon: Icon, tone, to, hint }: Props) => {
   const t = TONE[tone]
   const inner = (
-    <div className={`relative overflow-hidden rounded-xl p-5 ${t.card} transition-shadow hover:shadow-md`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className={`text-xs font-semibold uppercase tracking-wider ${t.label}`}>{label}</p>
-          <p className={`${valueSize(value)} font-bold ${t.value} mt-2 leading-tight`}>{value}</p>
-          {hint && (
-            <p className={`text-xs mt-1 ${t.label} opacity-80`}>{hint}</p>
-          )}
-        </div>
-        <div className={`shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-lg ${t.iconBg}`}>
-          <Icon className={`w-5 h-5 ${t.iconFg}`} strokeWidth={2} />
-        </div>
+    <div className={`relative overflow-hidden rounded-xl p-4 ${t.card} transition-shadow hover:shadow-md flex flex-col h-full`}>
+      <div className={`inline-flex items-center justify-center w-8 h-8 rounded-lg ${t.iconBg} mb-3`}>
+        <Icon className={`w-4 h-4 ${t.iconFg}`} strokeWidth={2} />
       </div>
+      <p className={`text-[11px] font-semibold uppercase tracking-wider ${t.label} leading-snug break-words`}>
+        {label}
+      </p>
+      <p className={`${valueSize(value)} font-bold ${t.value} mt-1 leading-tight break-words`}>
+        {value}
+      </p>
+      {hint && (
+        <p className={`text-[11px] mt-1 ${t.label} opacity-80 leading-snug`}>{hint}</p>
+      )}
     </div>
   )
-  return to ? <Link to={to} className="block">{inner}</Link> : inner
+  return to ? <Link to={to} className="block h-full">{inner}</Link> : inner
 }
 
 export default MetricCard

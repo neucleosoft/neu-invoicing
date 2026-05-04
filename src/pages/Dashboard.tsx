@@ -7,15 +7,24 @@ import {
   AlertTriangle,
   Landmark,
   Clock,
+  Users,
   Package,
   BarChart3,
 } from 'lucide-react'
 import { DashboardMetrics, SalesInvoice, Item } from '../types'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { formatCurrency } from '../utils/currency'
 import { formatInvoiceStatus } from '../utils/invoiceStatus'
 import { useStore } from '../store/useStore'
 import MetricCard from '../components/MetricCard'
+
+const chartRangeLabel = (days: number) => {
+  if (days === 7) return 'Last 7 Days'
+  if (days === 30) return 'Last 30 Days'
+  if (days === 90) return 'Last 90 Days'
+  if (days === 365) return 'Last 1 Year'
+  return `Last ${days} Days`
+}
 
 interface LatestTransaction {
   id: string
@@ -36,10 +45,28 @@ const Dashboard = () => {
   const [cashBankBalance, setCashBankBalance] = useState(0)
   const [overdueCount, setOverdueCount] = useState(0)
   const [latestTransactions, setLatestTransactions] = useState<LatestTransaction[]>([])
+  const [chartRange, setChartRange] = useState<7 | 30 | 90 | 365>(30)
+  const [chartLoading, setChartLoading] = useState(false)
 
   useEffect(() => {
     loadDashboardData()
   }, [])
+
+  useEffect(() => {
+    let cancelled = false
+    setChartLoading(true)
+    window.electronAPI.dashboard.getSalesChartData(chartRange)
+      .then((res) => {
+        if (cancelled) return
+        if (res.success && res.data) setSalesChart(res.data)
+      })
+      .finally(() => {
+        if (!cancelled) setChartLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [chartRange])
 
   const loadDashboardData = async () => {
     try {
@@ -61,11 +88,7 @@ const Dashboard = () => {
         setLowStockItems(lowStockResult.data)
       }
 
-      // Load sales chart data
-      const chartResult = await window.electronAPI.dashboard.getSalesChartData(6)
-      if (chartResult.success && chartResult.data) {
-        setSalesChart(chartResult.data)
-      }
+      // Sales chart is loaded by a dedicated effect keyed on chartRange.
 
       // Load cash & bank balance
       try {
@@ -224,12 +247,45 @@ const Dashboard = () => {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Invoice Chart */}
         <div className="card">
-          <h2 className="text-xl font-semibold mb-4">Invoice Trend (Last 6 Months)</h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-xl font-semibold">
+              Invoice Trend{' '}
+              <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
+                ({chartRangeLabel(chartRange)})
+              </span>
+            </h2>
+            <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
+              {([7, 30, 90, 365] as const).map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setChartRange(d)}
+                  className={`px-3 py-1 text-xs font-medium transition-colors ${
+                    chartRange === d
+                      ? 'bg-primary-600 text-white'
+                      : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
+                >
+                  {d === 365 ? '1Y' : `${d}D`}
+                </button>
+              ))}
+            </div>
+          </div>
           <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={salesChart}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="month" />
-              <YAxis />
+            <AreaChart data={salesChart} margin={{ top: 5, right: 10, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="salesGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#0ea5e9" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="#0ea5e9" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke={darkMode ? '#374151' : '#e5e7eb'} />
+              <XAxis
+                dataKey="label"
+                interval="preserveStartEnd"
+                minTickGap={chartRange >= 90 ? 40 : 20}
+                tick={{ fill: darkMode ? '#9ca3af' : '#6b7280', fontSize: 12 }}
+              />
+              <YAxis tick={{ fill: darkMode ? '#9ca3af' : '#6b7280', fontSize: 12 }} />
               <Tooltip
                 contentStyle={
                   darkMode
@@ -238,10 +294,17 @@ const Dashboard = () => {
                 }
                 labelStyle={{ color: darkMode ? '#f3f4f6' : '#111827' }}
                 itemStyle={{ color: darkMode ? '#f3f4f6' : '#111827' }}
-                cursor={{ fill: darkMode ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}
+                formatter={(value: number) => [formatCurrency(value), 'Amount']}
               />
-              <Bar dataKey="amount" fill="#0ea5e9" />
-            </BarChart>
+              <Area
+                type="monotone"
+                dataKey="amount"
+                stroke="#0ea5e9"
+                strokeWidth={2}
+                fill="url(#salesGradient)"
+                isAnimationActive={!chartLoading}
+              />
+            </AreaChart>
           </ResponsiveContainer>
         </div>
 
@@ -359,6 +422,10 @@ const Dashboard = () => {
       <div className="card">
         <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Link to="/parties" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <Users className="w-8 h-8 mb-2 text-primary-600 dark:text-primary-400" strokeWidth={1.5} />
+            <span className="text-sm font-medium">Add Party</span>
+          </Link>
           <Link to="/items" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <Package className="w-8 h-8 mb-2 text-primary-600 dark:text-primary-400" strokeWidth={1.5} />
             <span className="text-sm font-medium">Add Item</span>

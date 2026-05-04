@@ -83,7 +83,7 @@ declare global {
       dashboard: {
         getMetrics: () => Promise<any>;
         getRecentInvoices: (limit: number) => Promise<any>;
-        getSalesChartData: (months: number) => Promise<any>;
+        getSalesChartData: (days: number) => Promise<any>;
         getLatestTransactions: (limit: number) => Promise<any>;
       };
       report: {

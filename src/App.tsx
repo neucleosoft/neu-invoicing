@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom'
-import { Loader2 } from 'lucide-react'
 import { useStore } from './store/useStore'
 import { ToastProvider } from './components/Toast'
 import { ConfirmProvider } from './components/ConfirmDialog'
@@ -23,9 +22,18 @@ import CashBank from './pages/CashBank'
 import CustomerStatement from './pages/CustomerStatement'
 import Settings from './pages/Settings'
 
+type BootStage = 'connecting' | 'syncing' | 'workspace'
+
+const STAGE_LABEL: Record<BootStage, string> = {
+  connecting: 'Connecting',
+  syncing: 'Syncing your data',
+  workspace: 'Loading workspace',
+}
+
 function App() {
   const { authStatus, setAuthStatus, company, setCompany, setSyncStatus } = useStore()
   const [initializing, setInitializing] = useState(true)
+  const [bootStage, setBootStage] = useState<BootStage>('connecting')
 
   useEffect(() => {
     const checkAuth = async () => {
@@ -40,6 +48,7 @@ function App() {
         if (status.isAuthenticated) {
           // Sync first — if cloud has newer data, download it before checking company
           // This way we don't show onboarding when cloud already has the user's data
+          setBootStage('syncing')
           try {
             await window.electronAPI.sync.syncNow()
           } catch (syncError) {
@@ -47,6 +56,7 @@ function App() {
             console.log('Sync failed, continuing with local data:', syncError)
           }
 
+          setBootStage('workspace')
           const companyResult = await window.electronAPI.company.get()
           if (companyResult.success && companyResult.data) {
             setCompany(companyResult.data)
@@ -83,14 +93,36 @@ function App() {
   if (initializing || authStatus === null) {
     return (
       <ToastProvider><ConfirmProvider>
-        <div className="flex flex-col items-center justify-center h-screen bg-gray-50 dark:bg-gray-900 gap-5">
-          <div className="relative">
-            <div className="absolute inset-0 rounded-full bg-primary-500/20 blur-xl animate-pulse" />
-            <Loader2 className="relative w-16 h-16 text-primary-600 dark:text-primary-400 animate-spin" strokeWidth={2} />
+        <div
+          className="flex flex-col items-center justify-center h-screen gap-6"
+          style={{
+            background:
+              'radial-gradient(ellipse at top, rgba(14,165,233,0.10) 0%, transparent 55%)',
+          }}
+        >
+          <div className="relative w-[88px] h-[88px]">
+            <div
+              className="absolute inset-0 rounded-full border-[3px] border-sky-500/20 border-t-sky-500 animate-spin"
+              aria-hidden
+            />
+            <div
+              className="absolute top-1/2 left-1/2 w-[60px] h-[60px] -translate-x-1/2 -translate-y-1/2 rounded-2xl bg-white dark:bg-slate-800 shadow-[0_8px_20px_-6px_rgba(14,116,144,0.28)] dark:shadow-[0_8px_22px_-6px_rgba(0,0,0,0.55)] flex items-center justify-center p-2 box-border"
+            >
+              <img
+                src="./COMPANY%20LOGO.png"
+                alt=""
+                className="w-full h-full object-contain pointer-events-none select-none"
+              />
+            </div>
           </div>
-          <p className="text-sm font-medium text-gray-600 dark:text-gray-400 tracking-wide animate-pulse">
-            Please wait…
-          </p>
+          <div className="text-center">
+            <p className="text-2xl font-bold tracking-tight text-slate-800 dark:text-sky-50">
+              neu<span className="text-sky-500">Invoicing</span>
+            </p>
+            <p className="mt-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400">
+              {STAGE_LABEL[bootStage]}
+            </p>
+          </div>
         </div>
       </ConfirmProvider></ToastProvider>
     )
