@@ -548,7 +548,7 @@ declare global {
       dashboard: {
         getMetrics: () => Promise<{ success: boolean; data?: DashboardMetrics; error?: string }>
         getRecentInvoices: (limit: number) => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>
-        getSalesChartData: (months: number) => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getSalesChartData: (days: number) => Promise<{ success: boolean; data?: any[]; error?: string }>
         getLatestTransactions: (limit: number) => Promise<{ success: boolean; data?: any[]; error?: string }>
       }
       report: {

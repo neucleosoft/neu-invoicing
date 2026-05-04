@@ -122,8 +122,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getMetrics: () => ipcRenderer.invoke("dashboard:getMetrics"),
     getRecentInvoices: (limit: number) =>
       ipcRenderer.invoke("dashboard:getRecentInvoices", limit),
-    getSalesChartData: (months: number) =>
-      ipcRenderer.invoke("dashboard:getSalesChartData", months),
+    getSalesChartData: (days: number) =>
+      ipcRenderer.invoke("dashboard:getSalesChartData", days),
     getLatestTransactions: (limit: number) =>
       ipcRenderer.invoke("dashboard:getLatestTransactions", limit),
   },

@@ -192,11 +192,12 @@ export const setupDashboardHandlers = () => {
     }
   })
 
-  // Get sales chart data
-  ipcMain.handle('dashboard:getSalesChartData', async (_, months: number = 6) => {
+  // Get sales chart data (daily buckets for the last `days` days, inclusive of today)
+  ipcMain.handle('dashboard:getSalesChartData', async (_, days: number = 30) => {
     try {
       const startDate = new Date()
-      startDate.setMonth(startDate.getMonth() - months)
+      startDate.setHours(0, 0, 0, 0)
+      startDate.setDate(startDate.getDate() - (days - 1))
 
       const invoices = await prisma.salesInvoice.findMany({
         where: {
@@ -211,21 +212,28 @@ export const setupDashboardHandlers = () => {
         }
       })
 
-      // Group by month
-      const monthlyData: { [key: string]: number } = {}
+      const dayKey = (d: Date) =>
+        `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+      // Pre-fill every day in range with 0 so the chart is contiguous
+      const dailyData: { [key: string]: number } = {}
+      const cursor = new Date(startDate)
+      for (let i = 0; i < days; i++) {
+        dailyData[dayKey(cursor)] = 0
+        cursor.setDate(cursor.getDate() + 1)
+      }
 
       invoices.forEach(invoice => {
-        const monthKey = `${invoice.invoiceDate.getFullYear()}-${String(invoice.invoiceDate.getMonth() + 1).padStart(2, '0')}`
-        if (!monthlyData[monthKey]) {
-          monthlyData[monthKey] = 0
+        const key = dayKey(invoice.invoiceDate)
+        if (key in dailyData) {
+          dailyData[key] += invoice.totalAmount
         }
-        monthlyData[monthKey] += invoice.totalAmount
       })
 
-      const chartData = Object.entries(monthlyData).map(([month, amount]) => ({
-        month,
-        amount
-      }))
+      const chartData = Object.entries(dailyData).map(([date, amount]) => {
+        const [, mm, dd] = date.split('-')
+        return { date, label: `${dd}/${mm}`, amount }
+      })
 
       return { success: true, data: chartData }
     } catch (error) {
