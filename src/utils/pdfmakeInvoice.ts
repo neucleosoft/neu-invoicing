@@ -647,10 +647,17 @@ function buildAmountInWords(totalAmount: number): Content {
   }
 }
 
-// ─── Footer: Bank Details | Terms & Conditions | Authorised Signatory ────────
+// ─── Footer: Notes (if any) | Bank Details, Terms | Authorised Signatory ─────
 
 function buildFooter(inv: InvoiceData, logo: string): Content {
   const company = inv.company
+  const hasNotes = !!(inv.notes && inv.notes.trim())
+
+  // Notes (rendered only when present)
+  const notesStack: Content[] = [
+    { text: 'Notes', bold: true, fontSize: 9, margin: [0, 10, 0, 5] as [number, number, number, number] },
+    { text: inv.notes || '', fontSize: 9, lineHeight: 1.2 },
+  ]
 
   // Bank Details
   const bankStack: Content[] = [
@@ -690,6 +697,32 @@ function buildFooter(inv: InvoiceData, logo: string): Content {
     { text: (company?.name || '').toUpperCase(), bold: true, fontSize: 9, alignment: 'center' as const },
   ]
 
+  const layout = {
+    hLineWidth: (i: number, _node: any) => i === 0 ? 0 : 0.5,
+    vLineWidth: () => 0.5,
+    hLineColor: () => '#000',
+    vLineColor: () => '#000',
+    paddingLeft: () => 4,
+    paddingRight: () => 4,
+    paddingTop: () => 5,
+    paddingBottom: () => 5,
+  }
+
+  // With notes: 2x2 grid matching the reference layout.
+  // Without notes: keep the original 3-column layout untouched.
+  if (hasNotes) {
+    return {
+      table: {
+        widths: ['50%', '50%'],
+        body: [
+          [{ stack: notesStack }, { stack: bankStack }],
+          [{ stack: termsStack }, { stack: sigStack }],
+        ],
+      },
+      layout,
+    }
+  }
+
   return {
     table: {
       widths: ['36%', '34%', '30%'],
@@ -697,20 +730,10 @@ function buildFooter(inv: InvoiceData, logo: string): Content {
         [
           { stack: bankStack },
           { stack: termsStack },
-          // fillColor not set — just push content down with top margin on the logo
           { stack: sigStack },
-        ]
-      ]
+        ],
+      ],
     },
-    layout: {
-      hLineWidth: (i: number, _node: any) => i === 0 ? 0 : 0.5,
-      vLineWidth: () => 0.5,
-      hLineColor: () => '#000',
-      vLineColor: () => '#000',
-      paddingLeft: () => 4,
-      paddingRight: () => 4,
-      paddingTop: () => 5,
-      paddingBottom: () => 5,
-    },
+    layout,
   }
 }
