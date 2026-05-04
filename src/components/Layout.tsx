@@ -93,10 +93,11 @@ const Layout = () => {
 
   // Main process tells us tokens are no longer valid → bounce to /login.
   useEffect(() => {
-    window.electronAPI.auth.onAuthInvalidated?.(() => {
+    const unsubscribe = window.electronAPI.auth.onAuthInvalidated?.(() => {
       setAuthStatus({ isAuthenticated: false, user: null })
       navigate('/login')
     })
+    return unsubscribe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 

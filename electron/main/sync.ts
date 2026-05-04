@@ -168,7 +168,7 @@ const performSync = async () => {
     console.error('Sync error:', error)
     const authProblem = isAuthError(error)
     const friendly = authProblem
-      ? 'Google sign-in expired. Please sign out and sign in again.'
+      ? 'Google sign-in expired. Please sign in again.'
       : error instanceof Error ? error.message : 'Sync failed'
 
     if (authProblem) {

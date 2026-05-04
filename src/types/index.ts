@@ -444,7 +444,7 @@ declare global {
         signInWithGoogle: () => Promise<any>
         signOut: () => Promise<any>
         getAuthStatus: () => Promise<AuthStatus>
-        onAuthInvalidated: (callback: () => void) => void
+        onAuthInvalidated: (callback: () => void) => () => void
       }
       sync: {
         syncNow: () => Promise<any>

@@ -8,7 +8,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     signOut: () => ipcRenderer.invoke("auth:signOut"),
     getAuthStatus: () => ipcRenderer.invoke("auth:getAuthStatus"),
     onAuthInvalidated: (callback: () => void) => {
-      ipcRenderer.on("auth:invalidated", () => callback());
+      const handler = () => callback();
+      ipcRenderer.on("auth:invalidated", handler);
+      return () => ipcRenderer.removeListener("auth:invalidated", handler);
     },
   },
 
