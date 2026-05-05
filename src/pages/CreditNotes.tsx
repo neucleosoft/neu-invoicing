@@ -137,7 +137,7 @@ const CreditNotes = () => {
       setPartyInvoices([])
       return
     }
-    const result = await window.electronAPI.sales.getAll('INVOICE')
+    const result = await window.electronAPI.sales.getAll()
     if (result.success && result.data) {
       const filtered = result.data.filter((inv: any) => inv.partyId === partyId)
       setPartyInvoices(filtered.map((inv: any) => ({
