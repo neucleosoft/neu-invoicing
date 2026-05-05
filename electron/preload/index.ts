@@ -60,7 +60,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Sales
   sales: {
-    getAll: (type?: string) => ipcRenderer.invoke("sales:getAll", type),
+    getAll: () => ipcRenderer.invoke("sales:getAll"),
     getById: (id: string) => ipcRenderer.invoke("sales:getById", id),
     create: (data: any) => ipcRenderer.invoke("sales:create", data),
     update: (id: string, data: any) =>
