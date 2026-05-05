@@ -95,6 +95,7 @@ export const setupPurchaseHandlers = () => {
                 const taxableAmount = item.quantity * item.rate - (item.discount || 0)
                 return {
                   itemId: item.itemId,
+                  hsnCode: item.hsnCode || '',
                   quantity: item.quantity,
                   rate: item.rate,
                   discount: item.discount || 0,

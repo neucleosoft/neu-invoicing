@@ -39,7 +39,10 @@ interface CreditDebitNote {
       id: string
       name: string
       unit?: string
+      hsnCode?: string
+      skuHsn?: string
     }
+    hsnCode?: string
     quantity: number
     rate: number
     taxRate: number
@@ -59,10 +62,13 @@ interface Item {
   name: string
   salePrice: number
   taxRate: number
+  hsnCode?: string
+  skuHsn?: string
 }
 
 interface NoteItem {
   itemId: string
+  hsnCode: string
   quantity: number
   rate: number
   discount: number
@@ -193,6 +199,7 @@ const CreditNotes = () => {
       }
       setNoteItems(fullNote.items?.map((item: any) => ({
         itemId: item.item?.id || item.itemId,
+        hsnCode: item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '',
         quantity: item.quantity,
         rate: item.rate,
         discount: item.discount || 0,
@@ -210,6 +217,7 @@ const CreditNotes = () => {
     }
     setNoteItems([...noteItems, {
       itemId: '',
+      hsnCode: '',
       quantity: 1,
       rate: 0,
       discount: 0,
@@ -222,12 +230,13 @@ const CreditNotes = () => {
     const newItems = [...noteItems]
     newItems[index] = { ...newItems[index], [field]: value }
 
-    // If item selected, populate rate and tax
+    // If item selected, populate rate, tax, and HSN/SKU
     if (field === 'itemId') {
       const item = items.find(i => i.id === value)
       if (item) {
         newItems[index].rate = item.salePrice
         newItems[index].taxRate = item.taxRate
+        newItems[index].hsnCode = item.hsnCode || item.skuHsn || ''
       }
     }
 
@@ -476,7 +485,7 @@ const CreditNotes = () => {
       {/* Create/Edit Note Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">{editingNote ? 'Edit Note' : 'Create New Note'}</h2>
@@ -585,7 +594,18 @@ const CreditNotes = () => {
                             </select>
                           </div>
 
-                          <div className="w-20">
+                          <div className="w-32">
+                            <label className="label text-xs">HSN/SKU</label>
+                            <input
+                              type="text"
+                              className="input"
+                              value={item.hsnCode}
+                              onChange={(e) => updateNoteItem(index, 'hsnCode', e.target.value)}
+                              placeholder="HSN/SKU"
+                            />
+                          </div>
+
+                          <div className="w-24">
                             <label className="label text-xs">Qty</label>
                             <NumberInput
                               className="input"
@@ -596,7 +616,7 @@ const CreditNotes = () => {
                             />
                           </div>
 
-                          <div className="w-28">
+                          <div className="w-32">
                             <label className="label text-xs">Rate</label>
                             <NumberInput
                               className="input"
@@ -608,7 +628,7 @@ const CreditNotes = () => {
                           </div>
 
                           <div className="w-24">
-                            <label className="label text-xs">Discount</label>
+                            <label className="label text-xs">Disc</label>
                             <NumberInput
                               className="input"
                               value={item.discount}
@@ -617,7 +637,7 @@ const CreditNotes = () => {
                             />
                           </div>
 
-                          <div className="w-20">
+                          <div className="w-24">
                             <label className="label text-xs">Tax %</label>
                             <NumberInput
                               className="input"
@@ -627,7 +647,7 @@ const CreditNotes = () => {
                             />
                           </div>
 
-                          <div className="w-28">
+                          <div className="w-32">
                             <label className="label text-xs">Amount</label>
                             <input
                               type="text"
@@ -793,6 +813,7 @@ const CreditNotes = () => {
                   <thead>
                     <tr>
                       <th className="table-header sticky top-0 z-10">Item</th>
+                      <th className="table-header sticky top-0 z-10">HSN/SKU</th>
                       <th className="table-header sticky top-0 z-10">Qty</th>
                       <th className="table-header sticky top-0 z-10">Rate</th>
                       <th className="table-header sticky top-0 z-10">Discount</th>
@@ -804,6 +825,7 @@ const CreditNotes = () => {
                     {viewingNote.items?.map((item, index) => (
                       <tr key={index} className="border-t">
                         <td className="table-cell">{item.item?.name}</td>
+                        <td className="table-cell text-gray-500">{item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '-'}</td>
                         <td className="table-cell">{item.quantity}</td>
                         <td className="table-cell">{formatCurrency(item.rate)}</td>
                         <td className="table-cell">{formatCurrency(item.discount)}</td>
