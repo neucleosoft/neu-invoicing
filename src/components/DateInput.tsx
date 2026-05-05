@@ -75,8 +75,8 @@ export default function DateInput({
       autoComplete="off"
       autoFocus={autoFocus}
       title={title}
-      minDate={parseDateValue(min)}
-      maxDate={parseDateValue(max)}
+      minDate={parseDateValue(min) ?? undefined}
+      maxDate={parseDateValue(max) ?? undefined}
       portalId="date-picker-portal"
       popperClassName="z-[70]"
       showPopperArrow={false}
