@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
 import { downloadChallanPDF, getChallanPDFBytes, buildChallanFilename } from '../utils/pdfmakeChallan'
+import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
 import ShareMenu from '../components/ShareMenu'
@@ -83,6 +84,8 @@ const DeliveryChallan = () => {
   const [parties, setParties] = useState<Party[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [searchTerm, setSearchTerm] = useState('')
+  const [bulkDownloading, setBulkDownloading] = useState(false)
+  const [bulkRange, setBulkRange] = useState<BulkRange>('all')
 
   // Form state
   const [formData, setFormData] = useState({
@@ -184,6 +187,41 @@ const DeliveryChallan = () => {
     } catch (error) {
       console.error('Error generating challan PDF:', error)
       toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleBulkDownloadPdfs = async (matching: Challan[]) => {
+    if (matching.length === 0) {
+      toast.info('No delivery challans to download')
+      return
+    }
+    const partyName = matching[0]?.party?.name || searchTerm || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const items = matching.map(c => ({
+        id: c.id,
+        filename: `${c.challanNumber.replace(/\//g, '_')}.pdf`,
+      }))
+      const result = await bulkDownloadPdfs({
+        items,
+        zipFilename: buildZipFilename('Delivery_Challans', partyName),
+        getBytes: async (id) => {
+          const challanData = await loadChallanPDFData(id)
+          if (!challanData) return null
+          return await getChallanPDFBytes(challanData)
+        },
+      })
+      if (result.added > 0) {
+        toast.success(`Downloaded ${result.added} PDF${result.added === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}`)
+      } else {
+        toast.error('Failed to generate any PDFs')
+      }
+    } catch (error) {
+      console.error('Bulk PDF download error:', error)
+      toast.error('Failed to bulk-download PDFs')
+    } finally {
+      setBulkDownloading(false)
     }
   }
 
@@ -425,14 +463,41 @@ const DeliveryChallan = () => {
       </div>
 
       {/* Search */}
-      <div>
+      <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
-          className="input max-w-md"
+          className="input max-w-md flex-1 min-w-[240px]"
           placeholder="Search by challan number or party name..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
+        {searchTerm.trim() && filteredChallans.length > 0 && (() => {
+          const rangeStart = getBulkRangeStart(bulkRange)
+          const bulkFiltered = rangeStart
+            ? filteredChallans.filter(c => new Date(c.challanDate) >= rangeStart)
+            : filteredChallans
+          return (
+            <>
+              <select
+                className="input w-auto"
+                value={bulkRange}
+                onChange={(e) => setBulkRange(e.target.value as BulkRange)}
+              >
+                {BULK_RANGE_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => handleBulkDownloadPdfs(bulkFiltered)}
+                disabled={bulkDownloading || bulkFiltered.length === 0}
+                className="btn btn-primary text-sm"
+              >
+                {bulkDownloading ? 'Downloading…' : `Download All (${bulkFiltered.length})`}
+              </button>
+            </>
+          )
+        })()}
       </div>
 
       {/* Challans Table */}

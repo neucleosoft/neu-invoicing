@@ -5,6 +5,7 @@ import SearchableSelect from '../components/SearchableSelect'
 import { ProformaInvoice, ProformaInvoiceStatus } from '../types'
 import { downloadProformaInvoicePDF } from '../utils/pdfmakeProformaInvoice'
 import { getInvoicePDFBytes } from '../utils/generateInvoicePDF'
+import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
 import ShareMenu from '../components/ShareMenu'
@@ -72,6 +73,8 @@ const ProformaInvoices = () => {
   const [items, setItems] = useState<Item[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [proformaInvoiceItems, setProformaInvoiceItems] = useState<ProformaInvoiceFormItem[]>([])
+  const [bulkDownloading, setBulkDownloading] = useState(false)
+  const [bulkRange, setBulkRange] = useState<BulkRange>('all')
   const toast = useToast()
   const confirm = useConfirm()
   const { company } = useStore()
@@ -145,6 +148,42 @@ const ProformaInvoices = () => {
     } catch (error) {
       console.error('Error generating proforma invoice PDF:', error)
       toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleBulkDownloadPdfs = async (matching: ProformaInvoice[]) => {
+    if (matching.length === 0) {
+      toast.info('No proforma invoices to download')
+      return
+    }
+    const partyName = matching[0]?.party?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const items = matching.map(p => ({
+        id: p.id,
+        filename: `${p.invoiceNumber.replace(/\//g, '_')}.pdf`,
+      }))
+      const result = await bulkDownloadPdfs({
+        items,
+        zipFilename: buildZipFilename('Proforma_Invoices', partyName),
+        getBytes: async (id) => {
+          const pdfData = await loadProformaInvoicePDFData(id)
+          if (!pdfData) return null
+          const { bytes } = await getInvoicePDFBytes(pdfData)
+          return bytes
+        },
+      })
+      if (result.added > 0) {
+        toast.success(`Downloaded ${result.added} PDF${result.added === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}`)
+      } else {
+        toast.error('Failed to generate any PDFs')
+      }
+    } catch (error) {
+      console.error('Bulk PDF download error:', error)
+      toast.error('Failed to bulk-download PDFs')
+    } finally {
+      setBulkDownloading(false)
     }
   }
 
@@ -404,14 +443,41 @@ const ProformaInvoices = () => {
         </button>
       </div>
 
-      <div>
+      <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
-          className="input max-w-md"
+          className="input max-w-md flex-1 min-w-[240px]"
           placeholder="Search by PI number or party name..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
+        {searchQuery.trim() && filteredProformaInvoices.length > 0 && (() => {
+          const rangeStart = getBulkRangeStart(bulkRange)
+          const bulkFiltered = rangeStart
+            ? filteredProformaInvoices.filter(p => new Date(p.invoiceDate) >= rangeStart)
+            : filteredProformaInvoices
+          return (
+            <>
+              <select
+                className="input w-auto"
+                value={bulkRange}
+                onChange={(e) => setBulkRange(e.target.value as BulkRange)}
+              >
+                {BULK_RANGE_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => handleBulkDownloadPdfs(bulkFiltered)}
+                disabled={bulkDownloading || bulkFiltered.length === 0}
+                className="btn btn-primary text-sm"
+              >
+                {bulkDownloading ? 'Downloading…' : `Download All (${bulkFiltered.length})`}
+              </button>
+            </>
+          )
+        })()}
       </div>
 
       <div className="card">
