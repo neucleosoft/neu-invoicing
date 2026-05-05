@@ -7,6 +7,7 @@ import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { FileText } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
+import { useStore } from '../store/useStore'
 
 interface CreditDebitNote {
   id: string
@@ -89,6 +90,7 @@ const CreditNotes = () => {
   const [searchQuery, setSearchQuery] = useState('')
   const toast = useToast()
   const confirm = useConfirm()
+  const { company } = useStore()
 
   // Form state
   const [formData, setFormData] = useState({
@@ -97,7 +99,8 @@ const CreditNotes = () => {
     referenceInvoiceId: '',
     noteDate: new Date().toISOString().split('T')[0],
     reason: '',
-    notes: ''
+    notes: '',
+    termsConditions: ''
   })
 
   const [noteItems, setNoteItems] = useState<NoteItem[]>([])
@@ -182,7 +185,8 @@ const CreditNotes = () => {
         referenceInvoiceId: fullNote.referenceInvoiceId || '',
         noteDate: fullNote.noteDate.split('T')[0],
         reason: fullNote.reason || '',
-        notes: fullNote.notes || ''
+        notes: fullNote.notes || '',
+        termsConditions: (fullNote as any).termsConditions || ''
       })
       if (fullNote.party?.id) {
         loadPartyInvoices(fullNote.party.id)
@@ -326,11 +330,20 @@ const CreditNotes = () => {
       referenceInvoiceId: '',
       noteDate: new Date().toISOString().split('T')[0],
       reason: '',
-      notes: ''
+      notes: '',
+      termsConditions: ''
     })
     setNoteItems([])
     setEditingNote(null)
     setPartyInvoices([])
+  }
+
+  const handleNewNote = () => {
+    setFormData(prev => ({
+      ...prev,
+      termsConditions: company?.termsConditions || ''
+    }))
+    setShowModal(true)
   }
 
   const filteredNotes = notes.filter(note => {
@@ -349,7 +362,7 @@ const CreditNotes = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Credit / Debit Notes</h1>
         <button
-          onClick={() => setShowModal(true)}
+          onClick={handleNewNote}
           className="btn btn-primary"
         >
           + New Note
@@ -389,7 +402,7 @@ const CreditNotes = () => {
             icon={FileText}
             title="No credit/debit notes yet"
             description="Issue credit or debit notes to adjust invoices and bills with automatic ledger entries."
-            action={{ label: '+ Create your first note', onClick: () => setShowModal(true) }}
+            action={{ label: '+ Create your first note', onClick: handleNewNote }}
           />
         ) : (
           <div className="overflow-auto max-h-[calc(100vh-280px)]">
@@ -657,16 +670,29 @@ const CreditNotes = () => {
                   </div>
                 )}
 
-                {/* Notes */}
-                <div>
-                  <label className="label">Notes</label>
-                  <textarea
-                    className="input"
-                    rows={3}
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    placeholder="Internal notes..."
-                  />
+                {/* Notes & Terms */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Notes</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.notes}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      placeholder="Internal notes..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Terms & Conditions</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.termsConditions}
+                      onChange={(e) => setFormData({ ...formData, termsConditions: e.target.value })}
+                      placeholder="Terms that appear on note..."
+                    />
+                  </div>
                 </div>
 
                 {/* Actions */}

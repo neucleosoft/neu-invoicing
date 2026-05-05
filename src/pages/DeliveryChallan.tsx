@@ -11,6 +11,7 @@ import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { Truck, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
+import { useStore } from '../store/useStore'
 
 interface Challan {
   id: string
@@ -92,6 +93,7 @@ const DeliveryChallan = () => {
     transportMode: '',
     vehicleNumber: '',
     notes: '',
+    termsConditions: '',
     poNumber: '',
     ewayBillNo: '',
     warrantyPeriod: '',
@@ -102,6 +104,7 @@ const DeliveryChallan = () => {
   const [challanItems, setChallanItems] = useState<ChallanItem[]>([])
   const toast = useToast()
   const confirm = useConfirm()
+  const { company } = useStore()
 
   useEffect(() => {
     loadChallans()
@@ -210,7 +213,11 @@ const DeliveryChallan = () => {
   const handleNewChallan = async () => {
     const result = await window.electronAPI.challan.generateChallanNumber()
     if (result.success) {
-      setFormData(prev => ({ ...prev, challanNumber: result.data || '' }))
+      setFormData(prev => ({
+        ...prev,
+        challanNumber: result.data || '',
+        termsConditions: company?.termsConditions || '',
+      }))
     }
     setShowModal(true)
   }
@@ -228,6 +235,7 @@ const DeliveryChallan = () => {
         transportMode: fullChallan.transportMode || '',
         vehicleNumber: fullChallan.vehicleNumber || '',
         notes: fullChallan.notes || '',
+        termsConditions: fullChallan.termsConditions || '',
         poNumber: fullChallan.poNumber || '',
         ewayBillNo: fullChallan.ewayBillNo || '',
         warrantyPeriod: fullChallan.warrantyPeriod || '',
@@ -381,6 +389,7 @@ const DeliveryChallan = () => {
       transportMode: '',
       vehicleNumber: '',
       notes: '',
+      termsConditions: '',
       poNumber: '',
       ewayBillNo: '',
       warrantyPeriod: '',
@@ -718,16 +727,29 @@ const DeliveryChallan = () => {
                   </div>
                 )}
 
-                {/* Notes */}
-                <div>
-                  <label className="label">Notes</label>
-                  <textarea
-                    className="input"
-                    rows={3}
-                    value={formData.notes}
-                    onChange={(e) => setFormData({...formData, notes: e.target.value})}
-                    placeholder="Internal notes..."
-                  />
+                {/* Notes & Terms */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Notes</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.notes}
+                      onChange={(e) => setFormData({...formData, notes: e.target.value})}
+                      placeholder="Internal notes..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Terms & Conditions</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.termsConditions}
+                      onChange={(e) => setFormData({...formData, termsConditions: e.target.value})}
+                      placeholder="Terms that appear on challan..."
+                    />
+                  </div>
                 </div>
 
                 {/* Additional Fields (collapsible) */}

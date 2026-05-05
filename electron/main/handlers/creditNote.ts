@@ -140,6 +140,7 @@ export const setupCreditNoteHandlers = () => {
             isInterState,
             status: 'ACTIVE',
             notes: data.notes || null,
+            termsConditions: data.termsConditions ?? null,
             items: {
               create: processedItems
             }
@@ -336,6 +337,7 @@ export const setupCreditNoteHandlers = () => {
             igstAmount: totalIgst,
             isInterState,
             notes: data.notes || null,
+            termsConditions: data.termsConditions ?? null,
             items: {
               create: processedItems
             }
