@@ -1,4 +1,4 @@
-import type { ProformaInvoice, Quotation, SalesDocumentType, SalesInvoice } from './types';
+import type { ProformaInvoice, Quotation, SalesInvoice } from './types';
 
 export {};
 
@@ -41,7 +41,7 @@ declare global {
         getLowStock: () => Promise<any>;
       };
       sales: {
-        getAll: (type?: SalesDocumentType) => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>;
+        getAll: () => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>;
         getById: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
         create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;
         update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>;

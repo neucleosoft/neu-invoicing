@@ -482,7 +482,7 @@ declare global {
         getLowStock: () => Promise<{ success: boolean; data?: Item[]; error?: string }>
       }
       sales: {
-        getAll: (type?: SalesDocumentType) => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>
+        getAll: () => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>
         getById: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
