@@ -15,6 +15,7 @@ import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
 import { FileText, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
+import { useStore } from '../store/useStore'
 
 interface Party {
   id: string
@@ -71,6 +72,7 @@ const Quotations = () => {
   const [quotationItems, setQuotationItems] = useState<QuotationItem[]>([])
   const toast = useToast()
   const confirm = useConfirm()
+  const { company } = useStore()
 
   const [formData, setFormData] = useState({
     partyId: '',
@@ -79,6 +81,7 @@ const Quotations = () => {
     dueDate: '',
     invoiceNumber: '',
     notes: '',
+    termsConditions: '',
     deliveryTime: '',
   })
 
@@ -206,6 +209,7 @@ const Quotations = () => {
         invoiceDate: new Date(fullQuotation.invoiceDate).toISOString().split('T')[0],
         dueDate: fullQuotation.dueDate ? new Date(fullQuotation.dueDate).toISOString().split('T')[0] : '',
         notes: fullQuotation.notes || '',
+        termsConditions: fullQuotation.termsConditions || '',
         deliveryTime: fullQuotation.deliveryTime ? new Date(fullQuotation.deliveryTime).toISOString().split('T')[0] : '',
       })
       setQuotationItems(fullQuotation.items?.map((item: any) => ({
@@ -309,6 +313,7 @@ const Quotations = () => {
       dueDate: formData.dueDate || null,
       deliveryTime: formData.deliveryTime || null,
       notes: formData.notes,
+      termsConditions: formData.termsConditions,
       items: quotationItems,
       subtotalAmount: subtotal,
       taxAmount,
@@ -346,6 +351,7 @@ const Quotations = () => {
       dueDate: '',
       invoiceNumber: '',
       notes: '',
+      termsConditions: '',
       deliveryTime: '',
     })
     setQuotationItems([])
@@ -359,6 +365,7 @@ const Quotations = () => {
         ...prev,
         invoiceNumber: result.data || '',
         status: 'DRAFT',
+        termsConditions: company?.termsConditions || '',
       }))
     }
     setShowModal(true)
@@ -707,15 +714,28 @@ const Quotations = () => {
                   </div>
                 )}
 
-                <div>
-                  <label className="label">Notes</label>
-                  <textarea
-                    className="input"
-                    rows={3}
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    placeholder="Quotation notes..."
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Notes</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.notes}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      placeholder="Quotation notes..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Terms & Conditions</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.termsConditions}
+                      onChange={(e) => setFormData({ ...formData, termsConditions: e.target.value })}
+                      placeholder="Terms that appear on quotation..."
+                    />
+                  </div>
                 </div>
 
                 <div className="flex justify-end gap-3 pt-4 border-t">

@@ -17,6 +17,7 @@ import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
 import { Wallet, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
+import { useStore } from '../store/useStore'
 
 interface Party {
   id: string
@@ -61,6 +62,7 @@ const Sales = () => {
   const [customEnd, setCustomEnd] = useState('')
   const toast = useToast()
   const confirm = useConfirm()
+  const { company } = useStore()
 
   // Form state
   const [formData, setFormData] = useState({
@@ -424,6 +426,7 @@ const Sales = () => {
           ...prev,
           invoiceNumber: result.data || '',
           type: 'INVOICE',
+          termsConditions: company?.termsConditions || '',
         }))
       }
     setShowModal(true)

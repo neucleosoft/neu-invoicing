@@ -17,6 +17,7 @@ import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
 import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
+import { useStore } from '../store/useStore'
 
 interface Party {
   id: string
@@ -73,6 +74,7 @@ const ProformaInvoices = () => {
   const [proformaInvoiceItems, setProformaInvoiceItems] = useState<ProformaInvoiceFormItem[]>([])
   const toast = useToast()
   const confirm = useConfirm()
+  const { company } = useStore()
 
   const [formData, setFormData] = useState({
     partyId: '',
@@ -81,6 +83,7 @@ const ProformaInvoices = () => {
     dueDate: '',
     invoiceNumber: '',
     notes: '',
+    termsConditions: '',
     deliveryTime: '',
   })
 
@@ -211,6 +214,7 @@ const ProformaInvoices = () => {
         invoiceDate: new Date(fullProformaInvoice.invoiceDate).toISOString().split('T')[0],
         dueDate: fullProformaInvoice.dueDate ? new Date(fullProformaInvoice.dueDate).toISOString().split('T')[0] : '',
         notes: fullProformaInvoice.notes || '',
+        termsConditions: fullProformaInvoice.termsConditions || '',
         deliveryTime: fullProformaInvoice.deliveryTime ? new Date(fullProformaInvoice.deliveryTime).toISOString().split('T')[0] : '',
       })
       setProformaInvoiceItems(fullProformaInvoice.items?.map((item: any) => ({
@@ -314,6 +318,7 @@ const ProformaInvoices = () => {
       dueDate: formData.dueDate || null,
       deliveryTime: formData.deliveryTime || null,
       notes: formData.notes,
+      termsConditions: formData.termsConditions,
       items: proformaInvoiceItems,
       subtotalAmount: subtotal,
       taxAmount,
@@ -351,6 +356,7 @@ const ProformaInvoices = () => {
       dueDate: '',
       invoiceNumber: '',
       notes: '',
+      termsConditions: '',
       deliveryTime: '',
     })
     setProformaInvoiceItems([])
@@ -364,6 +370,7 @@ const ProformaInvoices = () => {
         ...prev,
         invoiceNumber: result.data || '',
         status: 'DRAFT',
+        termsConditions: company?.termsConditions || '',
       }))
     }
     setShowModal(true)
@@ -712,15 +719,28 @@ const ProformaInvoices = () => {
                   </div>
                 )}
 
-                <div>
-                  <label className="label">Notes</label>
-                  <textarea
-                    className="input"
-                    rows={3}
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    placeholder="Proforma invoice notes..."
-                  />
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Notes</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.notes}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      placeholder="Proforma invoice notes..."
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Terms & Conditions</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.termsConditions}
+                      onChange={(e) => setFormData({ ...formData, termsConditions: e.target.value })}
+                      placeholder="Terms that appear on proforma invoice..."
+                    />
+                  </div>
                 </div>
 
                 <div className="flex justify-end gap-3 pt-4 border-t">

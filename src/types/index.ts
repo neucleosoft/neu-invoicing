@@ -178,6 +178,7 @@ export interface Quotation {
   totalAmount: number
   status: QuotationStatus
   notes?: string
+  termsConditions?: string
   placeOfSupply?: string
   placeOfSupplyName?: string
   isInterState?: boolean
@@ -230,6 +231,7 @@ export interface ProformaInvoice {
   totalAmount: number
   status: ProformaInvoiceStatus
   notes?: string
+  termsConditions?: string
   placeOfSupply?: string
   placeOfSupplyName?: string
   isInterState?: boolean

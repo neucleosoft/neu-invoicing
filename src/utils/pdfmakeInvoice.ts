@@ -681,12 +681,13 @@ function buildFooter(inv: InvoiceData, logo: string): Content {
     })
   }
 
-  // Terms and Conditions
+  // Terms and Conditions — per-invoice override, fall back to company default
+  const effectiveTerms = inv.termsConditions || company?.termsConditions
   const termsStack: Content[] = [
     { text: 'Terms and Conditions', bold: true, fontSize: 9, margin: [0, 0, 0, 3] as [number, number, number, number] },
   ]
-  if (company?.termsConditions) {
-    termsStack.push({ text: company.termsConditions, fontSize: 8, lineHeight: 1.2 })
+  if (effectiveTerms) {
+    termsStack.push({ text: effectiveTerms, fontSize: 8, lineHeight: 1.2 })
   }
 
   // Authorised Signatory
