@@ -19,10 +19,9 @@ export interface Company {
   updatedAt: string
 }
 
-export interface Party {
+interface BaseParty {
   id: string
   name: string
-  type: 'CUSTOMER' | 'SUPPLIER'
   phone?: string
   email?: string
   billingAddress?: string
@@ -45,6 +44,16 @@ export interface Party {
   createdAt: string
   updatedAt: string
 }
+
+export interface Customer extends BaseParty {
+  type: 'CUSTOMER'
+}
+
+export interface Supplier extends BaseParty {
+  type: 'SUPPLIER'
+}
+
+export type Party = Customer | Supplier
 
 // GST Lookup Types
 export interface GstValidationResult {
@@ -97,6 +106,23 @@ export interface Item {
   updatedAt: string
 }
 
+export interface SupplierItem {
+  id: string
+  supplierId: string
+  supplier?: Supplier
+  linkedItemId?: string | null
+  linkedItem?: Item | null
+  name: string
+  supplierSku?: string | null
+  description?: string | null
+  hsnCode?: string | null
+  unit: string
+  lastPurchasePrice: number
+  defaultTaxRate: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type SalesDocumentType = 'INVOICE'
 export type InvoiceStatus = 'DRAFT' | 'PAID' | 'PARTIAL' | 'OVERDUE'
 export type QuotationStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'
@@ -111,6 +137,8 @@ export interface SalesInvoice {
   type: SalesDocumentType
   partyId: string
   party?: Party
+  customerId?: string
+  customer?: Customer
   subtotal: number
   discount: number
   taxAmount: number
@@ -172,6 +200,8 @@ export interface Quotation {
   dueDate?: string
   partyId: string
   party?: Party
+  customerId?: string
+  customer?: Customer
   subtotal: number
   discount: number
   taxAmount: number
@@ -225,6 +255,8 @@ export interface ProformaInvoice {
   dueDate?: string
   partyId: string
   party?: Party
+  customerId?: string
+  customer?: Customer
   subtotal: number
   discount: number
   taxAmount: number
@@ -277,6 +309,8 @@ export interface PurchaseBill {
   billDate: string
   partyId: string
   party?: Party
+  supplierId?: string
+  supplier?: Supplier
   subtotal: number
   discount: number
   taxAmount: number
@@ -285,9 +319,38 @@ export interface PurchaseBill {
   balanceDue: number
   status: 'DRAFT' | 'PAID' | 'PARTIAL' | 'OVERDUE'
   notes?: string
+  // Supplier's own invoice number (what's printed on their bill). Distinct from billNumber,
+  // which is OUR internal sequence and is unique-constrained.
+  supplierInvoiceNumber?: string | null
+  supplierInvoiceDate?: string | null
+  attachmentData?: Uint8Array
+  attachmentMimeType?: string
   items: PurchaseBillItem[]
   createdAt: string
   updatedAt: string
+}
+
+export interface ExtractedBillItem {
+  name: string
+  hsnCode: string | null
+  quantity: number
+  rate: number
+  taxRate: number
+  total: number
+}
+
+export interface ExtractedBillData {
+  supplierName: string | null
+  supplierGstin: string | null
+  billNumber: string | null
+  billDate: string | null
+  subtotal: number
+  taxAmount: number
+  totalAmount: number
+  cgstAmount: number
+  sgstAmount: number
+  igstAmount: number
+  items: ExtractedBillItem[]
 }
 
 export interface PurchaseBillItem {
@@ -295,6 +358,8 @@ export interface PurchaseBillItem {
   purchaseBillId: string
   itemId: string
   item?: Item
+  supplierItemId?: string
+  supplierItem?: SupplierItem
   quantity: number
   rate: number
   taxRate: number
@@ -307,6 +372,10 @@ export interface PaymentTransaction {
   type: 'PAYMENT_IN' | 'PAYMENT_OUT'
   partyId: string
   party?: Party
+  customerId?: string | null
+  customer?: Customer | null
+  supplierId?: string | null
+  supplier?: Supplier | null
   amount: number
   paymentMode: 'CASH' | 'BANK_TRANSFER' | 'CARD' | 'CHEQUE' | 'UPI' | 'OTHER'
   paymentDate: string
@@ -460,18 +529,32 @@ declare global {
         uploadLogo: (filePath: string) => Promise<{ success: boolean; path?: string; error?: string }>
         selectImage: () => Promise<{ success: boolean; path?: string; error?: string }>
       }
-      party: {
-        getAll: (type?: string) => Promise<{ success: boolean; data?: Party[]; error?: string }>
-        getById: (id: string) => Promise<{ success: boolean; data?: Party; error?: string }>
-        create: (data: Partial<Party>) => Promise<{ success: boolean; data?: Party; error?: string }>
-        update: (id: string, data: Partial<Party>) => Promise<{ success: boolean; data?: Party; error?: string }>
+      customer: {
+        getAll: () => Promise<{ success: boolean; data?: Customer[]; error?: string }>
+        getById: (id: string) => Promise<{ success: boolean; data?: Customer; error?: string }>
+        create: (data: Partial<Customer>) => Promise<{ success: boolean; data?: Customer; error?: string }>
+        update: (id: string, data: Partial<Customer>) => Promise<{ success: boolean; data?: Customer; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
         getLedger: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
         getStatement: (args: {
-          partyId: string
+          customerId: string
           fromDate: string
           toDate: string
         }) => Promise<{ success: boolean; data?: any; error?: string }>
+      }
+      supplier: {
+        getAll: () => Promise<{ success: boolean; data?: Supplier[]; error?: string }>
+        getById: (id: string) => Promise<{ success: boolean; data?: Supplier; error?: string }>
+        create: (data: Partial<Supplier>) => Promise<{ success: boolean; data?: Supplier; error?: string }>
+        update: (id: string, data: Partial<Supplier>) => Promise<{ success: boolean; data?: Supplier; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+      }
+      supplierItem: {
+        getAll: (supplierId?: string) => Promise<{ success: boolean; data?: SupplierItem[]; error?: string }>
+        getById: (id: string) => Promise<{ success: boolean; data?: SupplierItem; error?: string }>
+        create: (data: Partial<SupplierItem>) => Promise<{ success: boolean; data?: SupplierItem; error?: string }>
+        update: (id: string, data: Partial<SupplierItem>) => Promise<{ success: boolean; data?: SupplierItem; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
       }
       item: {
         getAll: () => Promise<{ success: boolean; data?: Item[]; error?: string }>
@@ -515,6 +598,7 @@ declare global {
         update: (id: string, data: any) => Promise<{ success: boolean; data?: PurchaseBill; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
         generateBillNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
+        extractFromImage: (args: { fileBytes: Uint8Array; mimeType: string }) => Promise<{ success: boolean; data?: ExtractedBillData; error?: string }>
       }
       payment: {
         recordPaymentIn: (data: any) => Promise<{ success: boolean; data?: PaymentTransaction; error?: string }>

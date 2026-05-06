@@ -25,8 +25,8 @@ export const setupReportHandlers = () => {
         }
       }
 
-      if (filters.partyId) {
-        where.partyId = filters.partyId
+      if (filters.customerId) {
+        where.customerId = filters.customerId
       }
 
       if (filters.status) {
@@ -36,7 +36,7 @@ export const setupReportHandlers = () => {
       const invoices = await prisma.salesInvoice.findMany({
         where,
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true
@@ -101,9 +101,8 @@ export const setupReportHandlers = () => {
   // Outstanding Receivables
   ipcMain.handle('report:getReceivables', async () => {
     try {
-      const parties = await prisma.party.findMany({
+      const customers = await prisma.customer.findMany({
         where: {
-          type: 'CUSTOMER',
           currentBalance: {
             gt: 0
           }
@@ -121,12 +120,12 @@ export const setupReportHandlers = () => {
         orderBy: { currentBalance: 'desc' }
       })
 
-      const totalReceivables = parties.reduce((sum, party) => sum + party.currentBalance, 0)
+      const totalReceivables = customers.reduce((sum, customer) => sum + customer.currentBalance, 0)
 
       return {
         success: true,
         data: {
-          parties,
+          parties: customers,
           totalReceivables
         }
       }
@@ -141,9 +140,8 @@ export const setupReportHandlers = () => {
   // Outstanding Payables
   ipcMain.handle('report:getPayables', async () => {
     try {
-      const parties = await prisma.party.findMany({
+      const suppliers = await prisma.supplier.findMany({
         where: {
-          type: 'SUPPLIER',
           currentBalance: {
             gt: 0
           }
@@ -161,12 +159,12 @@ export const setupReportHandlers = () => {
         orderBy: { currentBalance: 'desc' }
       })
 
-      const totalPayables = parties.reduce((sum, party) => sum + party.currentBalance, 0)
+      const totalPayables = suppliers.reduce((sum, supplier) => sum + supplier.currentBalance, 0)
 
       return {
         success: true,
         data: {
-          parties,
+          parties: suppliers,
           totalPayables
         }
       }
@@ -208,7 +206,7 @@ export const setupReportHandlers = () => {
           invoiceNumber: true,
           taxAmount: true,
           totalAmount: true,
-          party: {
+          customer: {
             select: {
               name: true
             }
@@ -232,7 +230,7 @@ export const setupReportHandlers = () => {
           billNumber: true,
           taxAmount: true,
           totalAmount: true,
-          party: {
+          supplier: {
             select: {
               name: true
             }

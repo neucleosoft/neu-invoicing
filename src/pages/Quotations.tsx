@@ -43,6 +43,7 @@ interface QuotationItem {
   amount: number
 }
 
+
 const statusOptions: QuotationStatus[] = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED']
 
 const statusBadgeClass = (status: string) => {
@@ -78,7 +79,7 @@ const Quotations = () => {
   const { company } = useStore()
 
   const [formData, setFormData] = useState({
-    partyId: '',
+    customerId: '',
     status: 'DRAFT' as QuotationStatus,
     invoiceDate: new Date().toISOString().split('T')[0],
     dueDate: '',
@@ -107,7 +108,7 @@ const Quotations = () => {
   }
 
   const loadParties = async () => {
-    const result = await window.electronAPI.party.getAll('CUSTOMER')
+    const result = await window.electronAPI.customer.getAll()
     if (result.success && result.data) {
       setParties(result.data)
     }
@@ -127,7 +128,8 @@ const Quotations = () => {
     return {
       ...result.data,
       type: 'QUOTATION',
-      party: result.data.party,
+      // PDF utilities expect a `.party` field on input — alias `.customer` here at the boundary.
+      party: result.data.customer,
       items: result.data.items || [],
       company,
     }
@@ -152,7 +154,7 @@ const Quotations = () => {
       toast.info('No quotations to download')
       return
     }
-    const partyName = matching[0]?.party?.name || searchQuery || 'all'
+    const partyName = matching[0]?.customer?.name || searchQuery || 'all'
 
     setBulkDownloading(true)
     try {
@@ -243,7 +245,7 @@ const Quotations = () => {
       setEditingQuotation(fullQuotation)
       setFormData({
         invoiceNumber: fullQuotation.invoiceNumber || '',
-        partyId: fullQuotation.party?.id || '',
+        customerId: fullQuotation.customerId || fullQuotation.customer?.id || '',
         status: (fullQuotation.status as QuotationStatus) || 'DRAFT',
         invoiceDate: new Date(fullQuotation.invoiceDate).toISOString().split('T')[0],
         dueDate: fullQuotation.dueDate ? new Date(fullQuotation.dueDate).toISOString().split('T')[0] : '',
@@ -332,7 +334,7 @@ const Quotations = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.partyId) {
+    if (!formData.customerId) {
       toast.info('Please select a customer')
       return
     }
@@ -346,7 +348,7 @@ const Quotations = () => {
 
     const quotationData = {
       invoiceNumber: formData.invoiceNumber,
-      partyId: formData.partyId,
+      customerId: formData.customerId,
       status: formData.status,
       invoiceDate: formData.invoiceDate,
       dueDate: formData.dueDate || null,
@@ -384,7 +386,7 @@ const Quotations = () => {
 
   const resetForm = () => {
     setFormData({
-      partyId: '',
+      customerId: '',
       status: 'DRAFT',
       invoiceDate: new Date().toISOString().split('T')[0],
       dueDate: '',
@@ -416,7 +418,7 @@ const Quotations = () => {
     if (!searchQuery.trim()) return true
     const query = searchQuery.toLowerCase()
     const matchesNumber = quotation.invoiceNumber?.toLowerCase().includes(query)
-    const matchesParty = quotation.party?.name?.toLowerCase().includes(query)
+    const matchesParty = quotation.customer?.name?.toLowerCase().includes(query)
     return matchesNumber || matchesParty
   })
 
@@ -424,7 +426,7 @@ const Quotations = () => {
     { key: 'invoiceNumber', accessor: (i) => i.invoiceNumber },
     { key: 'invoiceDate', accessor: (i) => new Date(i.invoiceDate).getTime() },
     { key: 'dueDate', accessor: (i) => i.dueDate ? new Date(i.dueDate).getTime() : 0 },
-    { key: 'party', accessor: (i) => i.party?.name || '' },
+    { key: 'party', accessor: (i) => i.customer?.name || '' },
     { key: 'totalAmount', accessor: (i) => i.totalAmount },
     { key: 'status', accessor: (i) => i.status || '' },
   ])
@@ -513,7 +515,7 @@ const Quotations = () => {
                     <td className="table-cell font-medium">{quotation.invoiceNumber}</td>
                     <td className="table-cell">{new Date(quotation.invoiceDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{quotation.dueDate ? new Date(quotation.dueDate).toLocaleDateString('en-GB') : '-'}</td>
-                    <td className="table-cell">{quotation.party?.name}</td>
+                    <td className="table-cell">{quotation.customer?.name}</td>
                     <td className="table-cell">{formatCurrency(quotation.totalAmount)}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${statusBadgeClass(quotation.status)}`}>
@@ -543,9 +545,9 @@ const Quotations = () => {
                         </button>
                         <ShareMenu
                           onShare={(target) => handleShare(quotation.id, target)}
-                          phone={quotation.party?.phone}
-                          email={quotation.party?.email}
-                          partyName={quotation.party?.name}
+                          phone={quotation.customer?.phone}
+                          email={quotation.customer?.email}
+                          partyName={quotation.customer?.name}
                         />
                         <button
                           onClick={() => handleConvertToInvoice(quotation.id)}
@@ -599,8 +601,8 @@ const Quotations = () => {
                   <div>
                     <label className="label">Customer *</label>
                     <SearchableSelect
-                      value={formData.partyId}
-                      onChange={(id) => setFormData({ ...formData, partyId: id })}
+                      value={formData.customerId}
+                      onChange={(id) => setFormData({ ...formData, customerId: id })}
                       options={parties.map((p) => ({ id: p.id, name: p.name }))}
                       placeholder="Select Customer"
                       required
@@ -864,10 +866,10 @@ const Quotations = () => {
 
               <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Customer</p>
-                <p className="font-semibold">{viewingQuotation.party?.name}</p>
-                {viewingQuotation.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingQuotation.party.phone}</p>}
-                {viewingQuotation.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingQuotation.party.email}</p>}
-                {viewingQuotation.party?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingQuotation.party.billingAddress}</p>}
+                <p className="font-semibold">{viewingQuotation.customer?.name}</p>
+                {viewingQuotation.customer?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingQuotation.customer.phone}</p>}
+                {viewingQuotation.customer?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingQuotation.customer.email}</p>}
+                {viewingQuotation.customer?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingQuotation.customer.billingAddress}</p>}
               </div>
 
               <div className="mb-6">
@@ -938,9 +940,9 @@ const Quotations = () => {
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingQuotation.id, target)}
-                  phone={viewingQuotation.party?.phone}
-                  email={viewingQuotation.party?.email}
-                  partyName={viewingQuotation.party?.name}
+                  phone={viewingQuotation.customer?.phone}
+                  email={viewingQuotation.customer?.email}
+                  partyName={viewingQuotation.customer?.name}
                 />
                 <button
                   onClick={() => handleConvertToInvoice(viewingQuotation.id)}

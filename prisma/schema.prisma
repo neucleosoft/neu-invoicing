@@ -31,11 +31,12 @@ model Company {
   updatedAt       DateTime @updatedAt
 }
 
-// Customers and Suppliers
-model Party {
+// Customers (sales-side parties — was "Party" with type=CUSTOMER)
+// DB table is still "Party" via @@map; suppliers moved to separate Supplier table.
+model Customer {
   id              String    @id @default(cuid())
   name            String
-  type            String // CUSTOMER or SUPPLIER
+  type            String // legacy field — always "CUSTOMER" after Supplier split
   phone           String?
   email           String?
   billingAddress  String?
@@ -59,14 +60,69 @@ model Party {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  // Relations
+  // Relations (sales-side documents only — purchases use Supplier)
   salesInvoices    SalesInvoice[]
   quotations       Quotation[]
   proformaInvoices ProformaInvoice[]
-  purchaseBills    PurchaseBill[]
   payments         PaymentTransaction[]
   deliveryChallans DeliveryChallan[]
   creditDebitNotes CreditDebitNote[]
+
+  @@map("Party")
+}
+
+// Suppliers (purchase-side parties — own table, separate from Customer)
+model Supplier {
+  id              String    @id @default(cuid())
+  name            String
+  phone           String?
+  email           String?
+  billingAddress  String?
+  shippingAddress String?
+  taxId           String? // GSTIN
+  openingBalance  Float     @default(0)
+  currentBalance  Float     @default(0) // amount we owe this supplier
+  // GST-specific fields
+  stateCode       String?
+  stateName       String?
+  gstType         String    @default("REGULAR")
+  // Additional GST lookup fields
+  legalName       String?
+  tradeName       String?
+  gstStatus       String?
+  city            String?
+  district        String?
+  pincode         String?
+  fetchedFromGst  Boolean   @default(false)
+  lastGstFetch    DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  // Relations
+  purchaseBills PurchaseBill[]
+  supplierItems SupplierItem[]
+  payments      PaymentTransaction[]
+}
+
+// Catalog of items each supplier sells YOU (separate from your sellable Item catalog).
+// Created on-the-fly by AI extraction; can optionally link back to Item for stock tracking.
+model SupplierItem {
+  id                String   @id @default(cuid())
+  supplierId        String
+  supplier          Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  name              String
+  hsnCode           String?
+  unit              String   @default("pcs")
+  lastPurchasePrice Float    @default(0)
+  defaultTaxRate    Float    @default(0)
+  // Optional link to your sellable Item — only set when a purchased item is also a sellable item
+  linkedItemId      String?
+  linkedItem        Item?    @relation(fields: [linkedItemId], references: [id])
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  // Relations
+  purchaseBillItems PurchaseBillItem[]
 }
 
 // Items (Products and Services)
@@ -92,7 +148,8 @@ model Item {
   salesInvoiceItems    SalesInvoiceItem[]
   quotationItems       QuotationItem[]
   proformaInvoiceItems ProformaInvoiceItem[]
-  purchaseBillItems    PurchaseBillItem[]
+  // Note: PurchaseBillItem now references SupplierItem; Item is reachable through SupplierItem.linkedItem.
+  supplierItems        SupplierItem[]
   stockMovements       StockMovement[]
   deliveryChallanItems DeliveryChallanItem[]
   creditDebitNoteItems CreditDebitNoteItem[]
@@ -105,8 +162,8 @@ model SalesInvoice {
   invoiceDate              DateTime          @default(now())
   dueDate                  DateTime?
   type                     String            @default("INVOICE") // INVOICE
-  partyId                  String
-  party                    Party             @relation(fields: [partyId], references: [id])
+  customerId               String            @map("partyId")
+  customer                 Customer          @relation(fields: [customerId], references: [id])
   subtotal                 Float             @default(0)
   discount                 Float             @default(0)
   taxAmount                Float             @default(0)
@@ -179,8 +236,8 @@ model Quotation {
   invoiceNumber     String          @unique
   invoiceDate       DateTime        @default(now())
   dueDate           DateTime?
-  partyId           String
-  party             Party           @relation(fields: [partyId], references: [id])
+  customerId        String          @map("partyId")
+  customer          Customer        @relation(fields: [customerId], references: [id])
   subtotal          Float           @default(0)
   discount          Float           @default(0)
   taxAmount         Float           @default(0)
@@ -236,8 +293,8 @@ model ProformaInvoice {
   invoiceNumber          String             @unique
   invoiceDate            DateTime           @default(now())
   dueDate                DateTime?
-  partyId                String
-  party                  Party              @relation(fields: [partyId], references: [id])
+  customerId             String             @map("partyId")
+  customer               Customer           @relation(fields: [customerId], references: [id])
   subtotal               Float              @default(0)
   discount               Float              @default(0)
   taxAmount              Float              @default(0)
@@ -292,8 +349,8 @@ model PurchaseBill {
   id                    String    @id @default(cuid())
   billNumber            String    @unique
   billDate              DateTime  @default(now())
-  partyId               String
-  party                 Party     @relation(fields: [partyId], references: [id])
+  supplierId            String
+  supplier              Supplier  @relation(fields: [supplierId], references: [id])
   subtotal              Float     @default(0)
   discount              Float     @default(0)
   taxAmount             Float     @default(0)
@@ -314,6 +371,9 @@ model PurchaseBill {
   supplierInvoiceNumber String? // Supplier's invoice number
   supplierInvoiceDate   DateTime? // Supplier's invoice date
   itcEligibility        String    @default("ELIGIBLE") // ELIGIBLE, INELIGIBLE, PARTIAL
+  // Attachment — original bill image/PDF uploaded by user (used for AI extraction + audit trail)
+  attachmentData        Bytes? // raw file bytes (BLOB), null when no attachment
+  attachmentMimeType    String? // e.g., "image/jpeg", "image/png", "application/pdf"
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -327,8 +387,8 @@ model PurchaseBillItem {
   id             String       @id @default(cuid())
   purchaseBillId String
   purchaseBill   PurchaseBill @relation(fields: [purchaseBillId], references: [id], onDelete: Cascade)
-  itemId         String
-  item           Item         @relation(fields: [itemId], references: [id])
+  supplierItemId String
+  supplierItem   SupplierItem @relation(fields: [supplierItemId], references: [id])
   quantity       Float
   rate           Float
   discount       Float        @default(0)
@@ -352,8 +412,10 @@ model PurchaseBillItem {
 model PaymentTransaction {
   id             String        @id @default(cuid())
   type           String // PAYMENT_IN or PAYMENT_OUT
-  partyId        String
-  party          Party         @relation(fields: [partyId], references: [id])
+  customerId     String?       @map("partyId")
+  customer       Customer?     @relation(fields: [customerId], references: [id])
+  supplierId     String?
+  supplier       Supplier?     @relation(fields: [supplierId], references: [id])
   amount         Float
   paymentMode    String        @default("CASH") // CASH, BANK_TRANSFER, CARD, CHEQUE, UPI, OTHER
   paymentDate    DateTime      @default(now())
@@ -405,8 +467,8 @@ model DeliveryChallan {
   id                   String                @id @default(cuid())
   challanNumber        String                @unique
   challanDate          DateTime              @default(now())
-  partyId              String
-  party                Party                 @relation(fields: [partyId], references: [id])
+  customerId           String                @map("partyId")
+  customer             Customer              @relation(fields: [customerId], references: [id])
   subtotal             Float                 @default(0)
   taxAmount            Float                 @default(0)
   totalAmount          Float                 @default(0)
@@ -447,8 +509,8 @@ model CreditDebitNote {
   noteNumber         String                @unique
   noteDate           DateTime              @default(now())
   type               String // CREDIT_NOTE or DEBIT_NOTE
-  partyId            String
-  party              Party                 @relation(fields: [partyId], references: [id])
+  customerId         String                @map("partyId")
+  customer           Customer              @relation(fields: [customerId], references: [id])
   referenceInvoiceId String?
   referenceInvoice   SalesInvoice?         @relation(fields: [referenceInvoiceId], references: [id])
   reason             String?

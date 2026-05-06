@@ -16,7 +16,7 @@ export const setupSalesHandlers = () => {
       const invoices = await prisma.salesInvoice.findMany({
         where: { type: 'INVOICE' },
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true
@@ -40,7 +40,7 @@ export const setupSalesHandlers = () => {
       const invoice = await prisma.salesInvoice.findFirst({
         where: { id, type: 'INVOICE' },
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true
@@ -82,7 +82,7 @@ export const setupSalesHandlers = () => {
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
             type: 'INVOICE',
-            partyId: data.partyId,
+            customerId: data.customerId,
             subtotal: values.subtotal,
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
@@ -113,13 +113,13 @@ export const setupSalesHandlers = () => {
           },
           include: {
             items: { include: { item: true } },
-            party: true
+            customer: true
           }
         })
 
-        // Update party balance
-        await tx.party.update({
-          where: { id: data.partyId },
+        // Update customer balance
+        await tx.customer.update({
+          where: { id: data.customerId},
           data: { currentBalance: { increment: balanceDue } }
         })
 
@@ -198,7 +198,7 @@ export const setupSalesHandlers = () => {
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
             type: 'INVOICE',
-            partyId: data.partyId,
+            customerId: data.customerId,
             subtotal: values.subtotal,
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
@@ -225,26 +225,26 @@ export const setupSalesHandlers = () => {
           },
           include: {
             items: { include: { item: true } },
-            party: true
+            customer: true
           }
         })
 
-        // Update party balance — handle party change correctly
-        if (data.partyId !== existingInvoice.partyId) {
-          // Party changed: reverse old party's balance, apply to new party
-          await tx.party.update({
-            where: { id: existingInvoice.partyId },
+        // Update customer balance — handle customer change correctly
+        if (data.customerId !== existingInvoice.customerId) {
+          // Customer changed: reverse the old customer's balance, apply to the new customer
+          await tx.customer.update({
+            where: { id: existingInvoice.customerId},
             data: { currentBalance: { decrement: existingInvoice.balanceDue } }
           })
-          await tx.party.update({
-            where: { id: data.partyId },
+          await tx.customer.update({
+            where: { id: data.customerId},
             data: { currentBalance: { increment: balanceDue } }
           })
         } else {
           const balanceDiff = balanceDue - existingInvoice.balanceDue
           if (balanceDiff !== 0) {
-            await tx.party.update({
-              where: { id: data.partyId },
+            await tx.customer.update({
+              where: { id: data.customerId},
               data: { currentBalance: { increment: balanceDiff } }
             })
           }
@@ -278,8 +278,8 @@ export const setupSalesHandlers = () => {
         throw new Error('Invoice not found')
       }
 
-      await prisma.party.update({
-        where: { id: invoice.partyId },
+      await prisma.customer.update({
+        where: { id: invoice.customerId },
         data: {
           currentBalance: {
             decrement: invoice.balanceDue

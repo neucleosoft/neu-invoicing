@@ -112,7 +112,7 @@ export const setupDashboardHandlers = () => {
           type: 'INVOICE'
         },
         include: {
-          party: true
+          customer: true
         },
         orderBy: { invoiceDate: 'desc' },
         take: limit
@@ -133,17 +133,25 @@ export const setupDashboardHandlers = () => {
       const [invoices, payments, challans] = await Promise.all([
         prisma.salesInvoice.findMany({
           where: { type: 'INVOICE' },
-          include: { party: true },
+          include: { customer: true },
           orderBy: { invoiceDate: 'desc' },
           take: limit
         }),
         prisma.paymentTransaction.findMany({
-          include: { party: true },
+          include: {
+            customer: true,
+            supplier: true,
+            purchaseBill: {
+              include: {
+                supplier: true
+              }
+            }
+          },
           orderBy: { paymentDate: 'desc' },
           take: limit
         }),
         prisma.deliveryChallan.findMany({
-          include: { party: true },
+          include: { customer: true },
           orderBy: { challanDate: 'desc' },
           take: limit
         }).catch(() => [])
@@ -156,7 +164,7 @@ export const setupDashboardHandlers = () => {
           date: inv.invoiceDate,
           type: 'Invoice',
           number: inv.invoiceNumber,
-          party: inv.party?.name || '',
+          party: inv.customer?.name || '',
           amount: inv.totalAmount
         })
       })
@@ -166,7 +174,9 @@ export const setupDashboardHandlers = () => {
           date: p.paymentDate,
           type: p.type === 'PAYMENT_IN' ? 'Payment In' : 'Payment Out',
           number: p.id.slice(-8).toUpperCase(),
-          party: p.party?.name || '',
+          party: p.type === 'PAYMENT_OUT'
+            ? p.supplier?.name || p.purchaseBill?.supplier?.name || ''
+            : p.customer?.name || '',
           amount: p.amount
         })
       })
@@ -176,7 +186,7 @@ export const setupDashboardHandlers = () => {
           date: c.challanDate,
           type: 'Challan',
           number: c.challanNumber,
-          party: c.party?.name || '',
+          party: c.customer?.name || '',
           amount: c.totalAmount
         })
       })

@@ -34,7 +34,7 @@ export const setupChallanHandlers = () => {
     try {
       const challans = await prisma.deliveryChallan.findMany({
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true
@@ -58,7 +58,7 @@ export const setupChallanHandlers = () => {
       const challan = await prisma.deliveryChallan.findUnique({
         where: { id },
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true
@@ -102,7 +102,7 @@ export const setupChallanHandlers = () => {
           data: {
             challanNumber: data.challanNumber,
             challanDate: new Date(data.challanDate),
-            partyId: data.partyId,
+            customerId: data.customerId,
             subtotal,
             taxAmount,
             totalAmount,
@@ -132,7 +132,7 @@ export const setupChallanHandlers = () => {
           },
           include: {
             items: { include: { item: true } },
-            party: true
+            customer: true
           }
         })
 
@@ -218,7 +218,7 @@ export const setupChallanHandlers = () => {
         data: {
           challanNumber: data.challanNumber || existingChallan.challanNumber,
           challanDate: new Date(data.challanDate),
-          partyId: data.partyId,
+          customerId: data.customerId,
           subtotal,
           taxAmount,
           totalAmount,
@@ -248,7 +248,7 @@ export const setupChallanHandlers = () => {
         },
         include: {
           items: { include: { item: true } },
-          party: true
+          customer: true
         }
       })
 
@@ -348,7 +348,7 @@ export const setupChallanHandlers = () => {
             invoiceNumber: newInvoiceNumber,
             invoiceDate: new Date(),
             type: 'INVOICE',
-            partyId: challan.partyId,
+            customerId: challan.customerId,
             subtotal: challan.subtotal,
             discount: 0,
             taxAmount: challan.taxAmount,
@@ -370,7 +370,7 @@ export const setupChallanHandlers = () => {
           },
           include: {
             items: { include: { item: true } },
-            party: true
+            customer: true
           }
         })
 
@@ -383,9 +383,9 @@ export const setupChallanHandlers = () => {
           }
         })
 
-        // Update party balance (since it's now an invoice)
-        await tx.party.update({
-          where: { id: challan.partyId },
+        // Update customer balance (since it's now an invoice)
+        await tx.customer.update({
+          where: { id: challan.customerId },
           data: {
             currentBalance: { increment: challan.totalAmount }
           }

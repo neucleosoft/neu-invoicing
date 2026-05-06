@@ -12,7 +12,7 @@ export const setupCreditNoteHandlers = () => {
       const notes = await prisma.creditDebitNote.findMany({
         where,
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true
@@ -36,7 +36,7 @@ export const setupCreditNoteHandlers = () => {
       const note = await prisma.creditDebitNote.findUnique({
         where: { id },
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true
@@ -58,15 +58,15 @@ export const setupCreditNoteHandlers = () => {
   ipcMain.handle('creditNote:create', async (_, data) => {
     try {
       const note = await prisma.$transaction(async (tx: any) => {
-        // Get party and company details for GST calculation
-        const party = await tx.party.findUnique({ where: { id: data.partyId } })
+        // Get customer and company details for GST calculation
+        const customer = await tx.customer.findUnique({ where: { id: data.customerId} })
         const company = await tx.company.findFirst()
 
-        if (!party) throw new Error('Party not found')
+        if (!customer) throw new Error('Customer not found')
 
         const companyStateCode = company?.stateCode || ''
-        const partyStateCode = party.stateCode || ''
-        const isInterState = companyStateCode !== partyStateCode && partyStateCode !== ''
+        const customerStateCode = customer.stateCode || ''
+        const isInterState = companyStateCode !== customerStateCode && customerStateCode !== ''
 
         // Calculate totals with GST components
         let subtotal = 0
@@ -128,7 +128,7 @@ export const setupCreditNoteHandlers = () => {
             noteNumber: data.noteNumber,
             noteDate: new Date(data.noteDate),
             type: data.type,
-            partyId: data.partyId,
+            customerId: data.customerId,
             referenceInvoiceId: data.referenceInvoiceId || null,
             reason: data.reason || null,
             subtotal,
@@ -147,22 +147,22 @@ export const setupCreditNoteHandlers = () => {
           },
           include: {
             items: { include: { item: true } },
-            party: true,
+            customer: true,
             referenceInvoice: true
           }
         })
 
-        // Update party balance
-        // CREDIT_NOTE: reduces what the party owes (decrement balance)
-        // DEBIT_NOTE: increases what the party owes (increment balance)
+        // Update customer balance
+        // CREDIT_NOTE: reduces what the customer owes (decrement balance)
+        // DEBIT_NOTE: increases what the customer owes (increment balance)
         if (data.type === 'CREDIT_NOTE') {
-          await tx.party.update({
-            where: { id: data.partyId },
+          await tx.customer.update({
+            where: { id: data.customerId},
             data: { currentBalance: { decrement: totalAmount } }
           })
         } else {
-          await tx.party.update({
-            where: { id: data.partyId },
+          await tx.customer.update({
+            where: { id: data.customerId},
             data: { currentBalance: { increment: totalAmount } }
           })
         }
@@ -223,13 +223,13 @@ export const setupCreditNoteHandlers = () => {
 
         // Reverse old balance changes
         if (existingNote.type === 'CREDIT_NOTE') {
-          await tx.party.update({
-            where: { id: existingNote.partyId },
+          await tx.customer.update({
+            where: { id: existingNote.customerId},
             data: { currentBalance: { increment: existingNote.totalAmount } }
           })
         } else {
-          await tx.party.update({
-            where: { id: existingNote.partyId },
+          await tx.customer.update({
+            where: { id: existingNote.customerId},
             data: { currentBalance: { decrement: existingNote.totalAmount } }
           })
         }
@@ -254,12 +254,12 @@ export const setupCreditNoteHandlers = () => {
           }
         }
 
-        // Get party and company for GST recalculation
-        const party = await tx.party.findUnique({ where: { id: data.partyId } })
+        // Get customer and company for GST recalculation
+        const customer = await tx.customer.findUnique({ where: { id: data.customerId} })
         const company = await tx.company.findFirst()
         const companyStateCode = company?.stateCode || ''
-        const partyStateCode = party?.stateCode || ''
-        const isInterState = companyStateCode !== partyStateCode && partyStateCode !== ''
+        const customerStateCode = customer?.stateCode || ''
+        const isInterState = companyStateCode !== customerStateCode && customerStateCode !== ''
 
         // Calculate new totals with GST components
         let subtotal = 0
@@ -326,7 +326,7 @@ export const setupCreditNoteHandlers = () => {
           data: {
             noteDate: new Date(data.noteDate),
             type: data.type,
-            partyId: data.partyId,
+            customerId: data.customerId,
             referenceInvoiceId: data.referenceInvoiceId || null,
             reason: data.reason || null,
             subtotal,
@@ -344,20 +344,20 @@ export const setupCreditNoteHandlers = () => {
           },
           include: {
             items: { include: { item: true } },
-            party: true,
+            customer: true,
             referenceInvoice: true
           }
         })
 
         // Apply new balance changes
         if (data.type === 'CREDIT_NOTE') {
-          await tx.party.update({
-            where: { id: data.partyId },
+          await tx.customer.update({
+            where: { id: data.customerId},
             data: { currentBalance: { decrement: totalAmount } }
           })
         } else {
-          await tx.party.update({
-            where: { id: data.partyId },
+          await tx.customer.update({
+            where: { id: data.customerId},
             data: { currentBalance: { increment: totalAmount } }
           })
         }
@@ -418,13 +418,13 @@ export const setupCreditNoteHandlers = () => {
       await prisma.$transaction(async (tx: any) => {
         // Reverse balance changes
         if (existingNote.type === 'CREDIT_NOTE') {
-          await tx.party.update({
-            where: { id: existingNote.partyId },
+          await tx.customer.update({
+            where: { id: existingNote.customerId},
             data: { currentBalance: { increment: existingNote.totalAmount } }
           })
         } else {
-          await tx.party.update({
-            where: { id: existingNote.partyId },
+          await tx.customer.update({
+            where: { id: existingNote.customerId},
             data: { currentBalance: { decrement: existingNote.totalAmount } }
           })
         }

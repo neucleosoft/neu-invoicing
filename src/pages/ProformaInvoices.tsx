@@ -45,6 +45,7 @@ interface ProformaInvoiceFormItem {
   amount: number
 }
 
+
 const statusOptions: ProformaInvoiceStatus[] = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED']
 
 const statusBadgeClass = (status: string) => {
@@ -80,7 +81,7 @@ const ProformaInvoices = () => {
   const { company } = useStore()
 
   const [formData, setFormData] = useState({
-    partyId: '',
+    customerId: '',
     status: 'DRAFT' as ProformaInvoiceStatus,
     invoiceDate: new Date().toISOString().split('T')[0],
     dueDate: '',
@@ -109,7 +110,7 @@ const ProformaInvoices = () => {
   }
 
   const loadParties = async () => {
-    const result = await window.electronAPI.party.getAll('CUSTOMER')
+    const result = await window.electronAPI.customer.getAll()
     if (result.success && result.data) {
       setParties(result.data)
     }
@@ -129,7 +130,8 @@ const ProformaInvoices = () => {
     return {
       ...result.data,
       type: 'PROFORMA_INVOICE',
-      party: result.data.party,
+      // PDF utilities expect a `.party` field on input — alias `.customer` here at the boundary.
+      party: result.data.customer,
       items: result.data.items || [],
       company,
       amountPaid: 0,
@@ -156,7 +158,7 @@ const ProformaInvoices = () => {
       toast.info('No proforma invoices to download')
       return
     }
-    const partyName = matching[0]?.party?.name || searchQuery || 'all'
+    const partyName = matching[0]?.customer?.name || searchQuery || 'all'
 
     setBulkDownloading(true)
     try {
@@ -248,7 +250,7 @@ const ProformaInvoices = () => {
       setEditingProformaInvoice(fullProformaInvoice)
       setFormData({
         invoiceNumber: fullProformaInvoice.invoiceNumber || '',
-        partyId: fullProformaInvoice.party?.id || '',
+        customerId: fullProformaInvoice.customerId || fullProformaInvoice.customer?.id || '',
         status: (fullProformaInvoice.status as ProformaInvoiceStatus) || 'DRAFT',
         invoiceDate: new Date(fullProformaInvoice.invoiceDate).toISOString().split('T')[0],
         dueDate: fullProformaInvoice.dueDate ? new Date(fullProformaInvoice.dueDate).toISOString().split('T')[0] : '',
@@ -337,7 +339,7 @@ const ProformaInvoices = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.partyId) {
+    if (!formData.customerId) {
       toast.info('Please select a customer')
       return
     }
@@ -351,7 +353,7 @@ const ProformaInvoices = () => {
 
     const proformaInvoiceData = {
       invoiceNumber: formData.invoiceNumber,
-      partyId: formData.partyId,
+      customerId: formData.customerId,
       status: formData.status,
       invoiceDate: formData.invoiceDate,
       dueDate: formData.dueDate || null,
@@ -389,7 +391,7 @@ const ProformaInvoices = () => {
 
   const resetForm = () => {
     setFormData({
-      partyId: '',
+      customerId: '',
       status: 'DRAFT',
       invoiceDate: new Date().toISOString().split('T')[0],
       dueDate: '',
@@ -421,7 +423,7 @@ const ProformaInvoices = () => {
     if (!searchQuery.trim()) return true
     const query = searchQuery.toLowerCase()
     const matchesNumber = proformaInvoice.invoiceNumber?.toLowerCase().includes(query)
-    const matchesParty = proformaInvoice.party?.name?.toLowerCase().includes(query)
+    const matchesParty = proformaInvoice.customer?.name?.toLowerCase().includes(query)
     return matchesNumber || matchesParty
   })
 
@@ -429,7 +431,7 @@ const ProformaInvoices = () => {
     { key: 'invoiceNumber', accessor: (i) => i.invoiceNumber },
     { key: 'invoiceDate', accessor: (i) => new Date(i.invoiceDate).getTime() },
     { key: 'dueDate', accessor: (i) => i.dueDate ? new Date(i.dueDate).getTime() : 0 },
-    { key: 'party', accessor: (i) => i.party?.name || '' },
+    { key: 'party', accessor: (i) => i.customer?.name || '' },
     { key: 'totalAmount', accessor: (i) => i.totalAmount },
     { key: 'status', accessor: (i) => i.status || '' },
   ])
@@ -518,7 +520,7 @@ const ProformaInvoices = () => {
                     <td className="table-cell font-medium">{proformaInvoice.invoiceNumber}</td>
                     <td className="table-cell">{new Date(proformaInvoice.invoiceDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{proformaInvoice.dueDate ? new Date(proformaInvoice.dueDate).toLocaleDateString('en-GB') : '-'}</td>
-                    <td className="table-cell">{proformaInvoice.party?.name}</td>
+                    <td className="table-cell">{proformaInvoice.customer?.name}</td>
                     <td className="table-cell">{formatCurrency(proformaInvoice.totalAmount)}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${statusBadgeClass(proformaInvoice.status)}`}>
@@ -548,9 +550,9 @@ const ProformaInvoices = () => {
                         </button>
                         <ShareMenu
                           onShare={(target) => handleShare(proformaInvoice.id, target)}
-                          phone={proformaInvoice.party?.phone}
-                          email={proformaInvoice.party?.email}
-                          partyName={proformaInvoice.party?.name}
+                          phone={proformaInvoice.customer?.phone}
+                          email={proformaInvoice.customer?.email}
+                          partyName={proformaInvoice.customer?.name}
                         />
                         <button
                           onClick={() => handleConvertToInvoice(proformaInvoice.id)}
@@ -604,8 +606,8 @@ const ProformaInvoices = () => {
                   <div>
                     <label className="label">Customer *</label>
                     <SearchableSelect
-                      value={formData.partyId}
-                      onChange={(id) => setFormData({ ...formData, partyId: id })}
+                      value={formData.customerId}
+                      onChange={(id) => setFormData({ ...formData, customerId: id })}
                       options={parties.map((p) => ({ id: p.id, name: p.name }))}
                       placeholder="Select Customer"
                       required
@@ -869,10 +871,10 @@ const ProformaInvoices = () => {
 
               <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Customer</p>
-                <p className="font-semibold">{viewingProformaInvoice.party?.name}</p>
-                {viewingProformaInvoice.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingProformaInvoice.party.phone}</p>}
-                {viewingProformaInvoice.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingProformaInvoice.party.email}</p>}
-                {viewingProformaInvoice.party?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingProformaInvoice.party.billingAddress}</p>}
+                <p className="font-semibold">{viewingProformaInvoice.customer?.name}</p>
+                {viewingProformaInvoice.customer?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingProformaInvoice.customer.phone}</p>}
+                {viewingProformaInvoice.customer?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingProformaInvoice.customer.email}</p>}
+                {viewingProformaInvoice.customer?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingProformaInvoice.customer.billingAddress}</p>}
               </div>
 
               <div className="mb-6">
@@ -943,9 +945,9 @@ const ProformaInvoices = () => {
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingProformaInvoice.id, target)}
-                  phone={viewingProformaInvoice.party?.phone}
-                  email={viewingProformaInvoice.party?.email}
-                  partyName={viewingProformaInvoice.party?.name}
+                  phone={viewingProformaInvoice.customer?.phone}
+                  email={viewingProformaInvoice.customer?.email}
+                  partyName={viewingProformaInvoice.customer?.name}
                 />
                 <button
                   onClick={() => handleConvertToInvoice(viewingProformaInvoice.id)}

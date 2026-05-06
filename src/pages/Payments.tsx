@@ -39,17 +39,32 @@ const Payments = () => {
     loadParties()
   }, [paymentType])
 
+  const normalizePayment = (payment: any): PaymentTransaction => ({
+    ...payment,
+    partyId:
+      payment.partyId ||
+      payment.customerId ||
+      payment.supplierId ||
+      payment.purchaseBill?.supplierId ||
+      '',
+    party:
+      payment.party ||
+      payment.customer ||
+      payment.supplier ||
+      payment.purchaseBill?.supplier,
+  })
+
   const loadPayments = async () => {
     const result = await window.electronAPI.payment.getAll(filter === 'ALL' ? undefined : filter)
     if (result.success && result.data) {
-      setPayments(result.data)
+      setPayments(result.data.map(normalizePayment))
     }
   }
 
   const loadParties = async () => {
-    // Load customers for Payment In, suppliers for Payment Out
-    const partyType = paymentType === 'PAYMENT_IN' ? 'CUSTOMER' : 'SUPPLIER'
-    const result = await window.electronAPI.party.getAll(partyType)
+    const result = paymentType === 'PAYMENT_IN'
+      ? await window.electronAPI.customer.getAll()
+      : await window.electronAPI.supplier.getAll()
     if (result.success && result.data) {
       setParties(result.data)
     }
@@ -73,10 +88,22 @@ const Payments = () => {
       return
     }
 
-    const paymentData = {
-      ...formData,
-      amount: parseFloat(formData.amount.toString())
-    }
+    const amount = parseFloat(formData.amount.toString())
+    const paymentData = paymentType === 'PAYMENT_IN'
+      ? {
+          customerId: formData.partyId,
+          amount,
+          paymentMode: formData.paymentMode,
+          paymentDate: formData.paymentDate,
+          notes: formData.notes
+        }
+      : {
+          supplierId: formData.partyId,
+          amount,
+          paymentMode: formData.paymentMode,
+          paymentDate: formData.paymentDate,
+          notes: formData.notes
+        }
 
     let result
     if (paymentType === 'PAYMENT_IN') {

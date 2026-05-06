@@ -15,7 +15,7 @@ export const setupProformaInvoiceHandlers = () => {
     try {
       const proformaInvoices = await prisma.proformaInvoice.findMany({
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true
@@ -38,7 +38,7 @@ export const setupProformaInvoiceHandlers = () => {
       const proformaInvoice = await prisma.proformaInvoice.findUnique({
         where: { id },
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true
@@ -71,7 +71,7 @@ export const setupProformaInvoiceHandlers = () => {
             invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
-            partyId: data.partyId,
+            customerId: data.customerId,
             subtotal: values.subtotal,
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
@@ -96,7 +96,7 @@ export const setupProformaInvoiceHandlers = () => {
           },
           include: {
             items: { include: { item: true } },
-            party: true
+            customer: true
           }
         })
       })
@@ -144,7 +144,7 @@ export const setupProformaInvoiceHandlers = () => {
             invoiceNumber: data.invoiceNumber || existingProformaInvoice.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
-            partyId: data.partyId,
+            customerId: data.customerId,
             subtotal: values.subtotal,
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
@@ -169,7 +169,7 @@ export const setupProformaInvoiceHandlers = () => {
           },
           include: {
             items: { include: { item: true } },
-            party: true
+            customer: true
           }
         })
       })

@@ -23,7 +23,8 @@ import { useStore } from '../store/useStore'
 
 const destinations = [
   { name: 'Dashboard', path: '/', icon: LayoutDashboard, group: 'Navigate' },
-  { name: 'Parties', path: '/parties', icon: Users, group: 'Navigate' },
+  { name: 'Customers', path: '/customers', icon: Users, group: 'Navigate' },
+  { name: 'Suppliers', path: '/suppliers', icon: Users, group: 'Navigate' },
   { name: 'Items', path: '/items', icon: Package, group: 'Navigate' },
   { name: 'Invoices', path: '/invoices', icon: Wallet, group: 'Navigate' },
   { name: 'Quotations', path: '/quotations', icon: FileText, group: 'Navigate' },
