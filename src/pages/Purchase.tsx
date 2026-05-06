@@ -23,10 +23,13 @@ interface Item {
   name: string
   purchasePrice: number
   taxRate: number
+  hsnCode?: string
+  skuHsn?: string
 }
 
 interface BillItem {
   itemId: string
+  hsnCode: string
   quantity: number
   rate: number
   taxRate: number
@@ -133,6 +136,7 @@ const Purchase = () => {
       })
       setBillItems(fullBill.items?.map((item: any) => ({
         itemId: item.item?.id || item.itemId,
+        hsnCode: item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '',
         quantity: item.quantity,
         rate: item.rate,
         taxRate: item.taxRate,
@@ -150,6 +154,7 @@ const Purchase = () => {
     }
     setBillItems([...billItems, {
       itemId: '',
+      hsnCode: '',
       quantity: 1,
       rate: 0,
       taxRate: 0,
@@ -162,12 +167,13 @@ const Purchase = () => {
     const newItems = [...billItems]
     newItems[index] = { ...newItems[index], [field]: value }
 
-    // If item selected, populate rate and tax
+    // If item selected, populate rate, tax, and HSN/SKU
     if (field === 'itemId') {
       const item = items.find(i => i.id === value)
       if (item) {
         newItems[index].rate = item.purchasePrice
         newItems[index].taxRate = item.taxRate
+        newItems[index].hsnCode = item.hsnCode || item.skuHsn || ''
       }
     }
 
@@ -388,7 +394,7 @@ const Purchase = () => {
       {/* Create/Edit Purchase Bill Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">{editingBill ? 'Edit Purchase Bill' : 'Create New Purchase Bill'}</h2>
@@ -455,6 +461,17 @@ const Purchase = () => {
                                 <option key={i.id} value={i.id}>{i.name}</option>
                               ))}
                             </select>
+                          </div>
+
+                          <div className="w-32">
+                            <label className="label text-xs">HSN/SKU</label>
+                            <input
+                              type="text"
+                              className="input"
+                              value={item.hsnCode}
+                              onChange={(e) => updateBillItem(index, 'hsnCode', e.target.value)}
+                              placeholder="HSN/SKU"
+                            />
                           </div>
 
                           <div className="w-24">
@@ -625,6 +642,7 @@ const Purchase = () => {
                   <thead>
                     <tr>
                       <th className="table-header sticky top-0 z-10">Item</th>
+                      <th className="table-header sticky top-0 z-10">HSN/SKU</th>
                       <th className="table-header sticky top-0 z-10">Qty</th>
                       <th className="table-header sticky top-0 z-10">Rate</th>
                       <th className="table-header sticky top-0 z-10">Tax %</th>
@@ -635,6 +653,7 @@ const Purchase = () => {
                     {viewingBill.items?.map((item: any, index: number) => (
                       <tr key={index} className="border-t">
                         <td className="table-cell">{item.item?.name}</td>
+                        <td className="table-cell text-gray-500">{item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '-'}</td>
                         <td className="table-cell">{item.quantity}</td>
                         <td className="table-cell">{formatCurrency(item.rate)}</td>
                         <td className="table-cell">{item.taxRate}%</td>

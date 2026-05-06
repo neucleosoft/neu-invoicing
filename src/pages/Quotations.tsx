@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Quotation, QuotationStatus } from '../types'
 import { downloadInvoicePDF, getInvoicePDFBytes } from '../utils/generateInvoicePDF'
+import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
 import ShareMenu from '../components/ShareMenu'
@@ -70,6 +71,8 @@ const Quotations = () => {
   const [items, setItems] = useState<Item[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [quotationItems, setQuotationItems] = useState<QuotationItem[]>([])
+  const [bulkDownloading, setBulkDownloading] = useState(false)
+  const [bulkRange, setBulkRange] = useState<BulkRange>('all')
   const toast = useToast()
   const confirm = useConfirm()
   const { company } = useStore()
@@ -141,6 +144,42 @@ const Quotations = () => {
     } catch (error) {
       console.error('Error generating quotation PDF:', error)
       toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleBulkDownloadPdfs = async (matching: Quotation[]) => {
+    if (matching.length === 0) {
+      toast.info('No quotations to download')
+      return
+    }
+    const partyName = matching[0]?.party?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const items = matching.map(q => ({
+        id: q.id,
+        filename: `${q.invoiceNumber.replace(/\//g, '_')}.pdf`,
+      }))
+      const result = await bulkDownloadPdfs({
+        items,
+        zipFilename: buildZipFilename('Quotations', partyName),
+        getBytes: async (id) => {
+          const pdfData = await loadQuotationPDFData(id)
+          if (!pdfData) return null
+          const { bytes } = await getInvoicePDFBytes(pdfData)
+          return bytes
+        },
+      })
+      if (result.added > 0) {
+        toast.success(`Downloaded ${result.added} PDF${result.added === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}`)
+      } else {
+        toast.error('Failed to generate any PDFs')
+      }
+    } catch (error) {
+      console.error('Bulk PDF download error:', error)
+      toast.error('Failed to bulk-download PDFs')
+    } finally {
+      setBulkDownloading(false)
     }
   }
 
@@ -399,14 +438,41 @@ const Quotations = () => {
         </button>
       </div>
 
-      <div>
+      <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
-          className="input max-w-md"
+          className="input max-w-md flex-1 min-w-[240px]"
           placeholder="Search by quotation number or party name..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
+        {searchQuery.trim() && filteredQuotations.length > 0 && (() => {
+          const rangeStart = getBulkRangeStart(bulkRange)
+          const bulkFiltered = rangeStart
+            ? filteredQuotations.filter(q => new Date(q.invoiceDate) >= rangeStart)
+            : filteredQuotations
+          return (
+            <>
+              <select
+                className="input w-auto"
+                value={bulkRange}
+                onChange={(e) => setBulkRange(e.target.value as BulkRange)}
+              >
+                {BULK_RANGE_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => handleBulkDownloadPdfs(bulkFiltered)}
+                disabled={bulkDownloading || bulkFiltered.length === 0}
+                className="btn btn-primary text-sm"
+              >
+                {bulkDownloading ? 'Downloading…' : `Download All (${bulkFiltered.length})`}
+              </button>
+            </>
+          )
+        })()}
       </div>
 
       <div className="card">

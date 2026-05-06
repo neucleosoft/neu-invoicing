@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { SalesInvoice } from '../types'
 import { downloadInvoicePDF, getInvoicePDFBytes, InvoiceTemplate } from '../utils/generateInvoicePDF'
+import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { formatInvoiceStatus, getDueCountdown, dueCountdownColorClass } from '../utils/invoiceStatus'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
@@ -60,6 +61,8 @@ const Sales = () => {
   const [dateFilter, setDateFilter] = useState<'all' | '7d' | '1m' | '1y' | 'custom'>('all')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
+  const [bulkDownloading, setBulkDownloading] = useState(false)
+  const [bulkRange, setBulkRange] = useState<BulkRange>('all')
   const toast = useToast()
   const confirm = useConfirm()
   const { company } = useStore()
@@ -160,6 +163,42 @@ const Sales = () => {
     } catch (error) {
       console.error('Error generating PDF:', error)
       toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleBulkDownloadPdfs = async (matching: SalesInvoice[]) => {
+    if (matching.length === 0) {
+      toast.info('No invoices to download')
+      return
+    }
+    const partyName = matching[0]?.party?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const items = matching.map(inv => ({
+        id: inv.id,
+        filename: `${inv.invoiceNumber.replace(/\//g, '_')}.pdf`,
+      }))
+      const result = await bulkDownloadPdfs({
+        items,
+        zipFilename: buildZipFilename('Invoices', partyName),
+        getBytes: async (id) => {
+          const pdfData = await loadInvoicePDFData(id)
+          if (!pdfData) return null
+          const { bytes } = await getInvoicePDFBytes(pdfData, selectedTemplate)
+          return bytes
+        },
+      })
+      if (result.added > 0) {
+        toast.success(`Downloaded ${result.added} PDF${result.added === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}`)
+      } else {
+        toast.error('Failed to generate any PDFs')
+      }
+    } catch (error) {
+      console.error('Bulk PDF download error:', error)
+      toast.error('Failed to bulk-download PDFs')
+    } finally {
+      setBulkDownloading(false)
     }
   }
 
@@ -532,6 +571,33 @@ const Sales = () => {
             {filteredInvoices.length} {filteredInvoices.length === 1 ? 'invoice' : 'invoices'}
           </span>
         )}
+        {searchQuery.trim() && filteredInvoices.length > 0 && (() => {
+          const rangeStart = getBulkRangeStart(bulkRange)
+          const bulkFiltered = rangeStart
+            ? filteredInvoices.filter(inv => new Date(inv.invoiceDate) >= rangeStart)
+            : filteredInvoices
+          return (
+            <>
+              <select
+                className="input w-auto"
+                value={bulkRange}
+                onChange={(e) => setBulkRange(e.target.value as BulkRange)}
+              >
+                {BULK_RANGE_OPTIONS.map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => handleBulkDownloadPdfs(bulkFiltered)}
+                disabled={bulkDownloading || bulkFiltered.length === 0}
+                className="btn btn-primary text-sm"
+              >
+                {bulkDownloading ? 'Downloading…' : `Download All (${bulkFiltered.length})`}
+              </button>
+            </>
+          )
+        })()}
       </div>
 
       {/* Invoices Table */}
