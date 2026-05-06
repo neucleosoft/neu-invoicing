@@ -19,18 +19,21 @@ interface Challan {
   challanNumber: string
   challanDate: string
   status: 'PENDING' | 'DELIVERED' | 'CONVERTED'
+  customerId?: string
   totalAmount: number
   subtotal?: number
   taxAmount?: number
   transportMode?: string
   vehicleNumber?: string
   notes?: string
+  termsConditions?: string
   convertedToInvoiceId?: string
   poNumber?: string
   ewayBillNo?: string
   warrantyPeriod?: string
   dispatchedThrough?: string
-  party?: {
+  customer?: {
+    id?: string
     name: string
     email?: string
     phone?: string
@@ -75,6 +78,7 @@ interface ChallanItem {
   amount: number
 }
 
+
 const DeliveryChallan = () => {
   const [challans, setChallans] = useState<Challan[]>([])
   const [showModal, setShowModal] = useState(false)
@@ -89,7 +93,7 @@ const DeliveryChallan = () => {
 
   // Form state
   const [formData, setFormData] = useState({
-    partyId: '',
+    customerId: '',
     challanNumber: '',
     challanDate: new Date().toISOString().split('T')[0],
     status: 'PENDING' as string,
@@ -123,7 +127,7 @@ const DeliveryChallan = () => {
   }
 
   const loadParties = async () => {
-    const result = await window.electronAPI.party.getAll('CUSTOMER')
+    const result = await window.electronAPI.customer.getAll()
     if (result.success && result.data) {
       setParties(result.data)
     }
@@ -173,7 +177,8 @@ const DeliveryChallan = () => {
     const result = await window.electronAPI.challan.getById(challanId)
     if (!result.success || !result.data) return null
     const company = await loadCompanyForPDF()
-    return { ...result.data, company }
+    // PDF utilities expect a `.party` field on input — alias `.customer` here at the boundary.
+    return { ...result.data, party: result.data.customer, company }
   }
 
   const handleDownloadPDF = async (challanId: string) => {
@@ -195,7 +200,7 @@ const DeliveryChallan = () => {
       toast.info('No delivery challans to download')
       return
     }
-    const partyName = matching[0]?.party?.name || searchTerm || 'all'
+    const partyName = matching[0]?.customer?.name || searchTerm || 'all'
 
     setBulkDownloading(true)
     try {
@@ -266,7 +271,7 @@ const DeliveryChallan = () => {
       const fullChallan = result.data
       setEditingChallan(fullChallan)
       setFormData({
-        partyId: fullChallan.party?.id || fullChallan.partyId || '',
+        customerId: fullChallan.customerId || fullChallan.customer?.id || '',
         challanNumber: fullChallan.challanNumber || '',
         challanDate: new Date(fullChallan.challanDate).toISOString().split('T')[0],
         status: fullChallan.status || 'PENDING',
@@ -371,7 +376,7 @@ const DeliveryChallan = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.partyId) {
+    if (!formData.customerId) {
       toast.info('Please select a customer')
       return
     }
@@ -420,7 +425,7 @@ const DeliveryChallan = () => {
 
   const resetForm = () => {
     setFormData({
-      partyId: '',
+      customerId: '',
       challanNumber: '',
       challanDate: new Date().toISOString().split('T')[0],
       status: 'PENDING',
@@ -446,7 +451,7 @@ const DeliveryChallan = () => {
     const term = searchTerm.toLowerCase()
     return (
       challan.challanNumber.toLowerCase().includes(term) ||
-      (challan.party?.name || '').toLowerCase().includes(term)
+      (challan.customer?.name || '').toLowerCase().includes(term)
     )
   })
 
@@ -535,7 +540,7 @@ const DeliveryChallan = () => {
                   <tr key={challan.id} className="border-t">
                     <td className="table-cell font-medium">{challan.challanNumber}</td>
                     <td className="table-cell">{new Date(challan.challanDate).toLocaleDateString('en-GB')}</td>
-                    <td className="table-cell">{challan.party?.name}</td>
+                    <td className="table-cell">{challan.customer?.name}</td>
                     <td className="table-cell">{formatCurrency(challan.totalAmount)}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
@@ -562,9 +567,9 @@ const DeliveryChallan = () => {
                         </button>
                         <ShareMenu
                           onShare={(target) => handleShare(challan.id, target)}
-                          phone={challan.party?.phone}
-                          email={challan.party?.email}
-                          partyName={challan.party?.name}
+                          phone={challan.customer?.phone}
+                          email={challan.customer?.email}
+                          partyName={challan.customer?.name}
                         />
                         {challan.status !== 'CONVERTED' && (
                           <button
@@ -630,8 +635,8 @@ const DeliveryChallan = () => {
                   <div>
                     <label className="label">Customer *</label>
                     <SearchableSelect
-                      value={formData.partyId}
-                      onChange={(id) => setFormData({...formData, partyId: id})}
+                      value={formData.customerId}
+                      onChange={(id) => setFormData({...formData, customerId: id})}
                       options={parties.map(p => ({ id: p.id, name: p.name }))}
                       placeholder="Select Customer"
                       required
@@ -955,10 +960,10 @@ const DeliveryChallan = () => {
               {/* Customer Info */}
               <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Customer</p>
-                <p className="font-semibold">{viewingChallan.party?.name}</p>
-                {viewingChallan.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingChallan.party.phone}</p>}
-                {viewingChallan.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingChallan.party.email}</p>}
-                {viewingChallan.party?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingChallan.party.billingAddress}</p>}
+                <p className="font-semibold">{viewingChallan.customer?.name}</p>
+                {viewingChallan.customer?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingChallan.customer.phone}</p>}
+                {viewingChallan.customer?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingChallan.customer.email}</p>}
+                {viewingChallan.customer?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingChallan.customer.billingAddress}</p>}
               </div>
 
               {/* Items */}
@@ -1031,9 +1036,9 @@ const DeliveryChallan = () => {
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingChallan.id, target)}
-                  phone={viewingChallan.party?.phone}
-                  email={viewingChallan.party?.email}
-                  partyName={viewingChallan.party?.name}
+                  phone={viewingChallan.customer?.phone}
+                  email={viewingChallan.customer?.email}
+                  partyName={viewingChallan.customer?.name}
                 />
                 {(viewingChallan.status === 'PENDING' || viewingChallan.status === 'DELIVERED') && (
                   <button

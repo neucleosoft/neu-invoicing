@@ -903,8 +903,8 @@ const GSTReports = () => {
                     <tr key={inv.id} className="border-t">
                       <td className="px-4 py-2 font-medium">{inv.invoiceNumber}</td>
                       <td className="px-4 py-2">{new Date(inv.invoiceDate).toLocaleDateString('en-GB')}</td>
-                      <td className="px-4 py-2">{inv.party?.name}</td>
-                      <td className="px-4 py-2 font-mono text-sm">{inv.party?.taxId || '-'}</td>
+                      <td className="px-4 py-2">{inv.customer?.name}</td>
+                      <td className="px-4 py-2 font-mono text-sm">{inv.customer?.taxId || '-'}</td>
                       <td className="px-4 py-2 text-right">{formatCurrency(inv.subtotal - (inv.discount || 0))}</td>
                       <td className="px-4 py-2 text-right">{formatCurrency(inv.taxAmount)}</td>
                       <td className="px-4 py-2 text-right font-semibold">{formatCurrency(inv.totalAmount)}</td>

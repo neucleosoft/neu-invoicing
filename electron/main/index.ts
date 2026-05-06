@@ -1,3 +1,5 @@
+import 'dotenv/config'
+
 import path from 'path'
 import fs from 'fs'
 
@@ -5,7 +7,9 @@ import { app, BrowserWindow, protocol } from 'electron'
 import { setupDatabase } from './database'
 import { setupAuthHandlers } from './auth'
 import { setupSyncHandlers } from './sync'
-import { setupPartyHandlers } from './handlers/party'
+import { setupCustomerHandlers } from './handlers/customer'
+import { setupSupplierHandlers } from './handlers/supplier'
+import { setupSupplierItemHandlers } from './handlers/supplierItem'
 import { setupItemHandlers } from './handlers/item'
 import { setupSalesHandlers } from './handlers/sales'
 import { setupQuotationHandlers } from './handlers/quotation'
@@ -105,7 +109,9 @@ app.whenReady().then(async () => {
   setupAuthHandlers()
   setupSyncHandlers()
   setupCompanyHandlers()
-  setupPartyHandlers()
+  setupCustomerHandlers()
+  setupSupplierHandlers()
+  setupSupplierItemHandlers()
   setupItemHandlers()
   setupSalesHandlers()
   setupQuotationHandlers()

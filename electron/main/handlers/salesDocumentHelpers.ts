@@ -89,8 +89,8 @@ export const generateNextProformaInvoiceNumber = async (prisma: any): Promise<st
   return `${prefix}${String(nextNum).padStart(2, '0')}`
 }
 
-export const determineSupplyType = (party: any, totalAmount: number, isInterState: boolean): string => {
-  const hasGstin = party?.taxId && party.taxId.length === 15
+export const determineSupplyType = (customer: any, totalAmount: number, isInterState: boolean): string => {
+  const hasGstin = customer?.taxId && customer.taxId.length === 15
 
   if (hasGstin) {
     return 'B2B'
@@ -102,13 +102,13 @@ export const determineSupplyType = (party: any, totalAmount: number, isInterStat
 }
 
 export const buildSalesDocumentValues = async (tx: any, data: any) => {
-  const party = await tx.party.findUnique({ where: { id: data.partyId } })
+  const customer = await tx.customer.findUnique({ where: { id: data.customerId } })
   const company = await tx.company.findFirst()
 
-  if (!party) throw new Error('Party not found')
+  if (!customer) throw new Error('Customer not found')
 
-  const placeOfSupply = data.placeOfSupply || party.stateCode || company?.stateCode || ''
-  const placeOfSupplyName = data.placeOfSupplyName || party.stateName || company?.stateName || ''
+  const placeOfSupply = data.placeOfSupply || customer.stateCode || company?.stateCode || ''
+  const placeOfSupplyName = data.placeOfSupplyName || customer.stateName || company?.stateName || ''
   const companyStateCode = company?.stateCode || ''
   const isInterState = companyStateCode !== placeOfSupply && placeOfSupply !== ''
 
@@ -171,10 +171,10 @@ export const buildSalesDocumentValues = async (tx: any, data: any) => {
   }
 
   const totalAmount = subtotal + taxAmount - (data.discount || 0)
-  const supplyType = determineSupplyType(party, totalAmount, isInterState)
+  const supplyType = determineSupplyType(customer, totalAmount, isInterState)
 
   return {
-    party,
+    customer,
     placeOfSupply,
     placeOfSupplyName,
     isInterState,
@@ -202,7 +202,7 @@ const createInvoiceFromSourceDocument = async (
       invoiceNumber: newInvoiceNumber,
       invoiceDate: new Date(),
       type: 'INVOICE',
-      partyId: source.partyId,
+      customerId: source.customerId,
       subtotal: source.subtotal,
       discount: source.discount,
       taxAmount: source.taxAmount,
@@ -254,12 +254,12 @@ const createInvoiceFromSourceDocument = async (
           item: true
         }
       },
-      party: true
+      customer: true
     }
   })
 
-  await tx.party.update({
-    where: { id: source.partyId },
+  await tx.customer.update({
+    where: { id: source.customerId },
     data: {
       currentBalance: {
         increment: source.totalAmount

@@ -9,6 +9,7 @@ import {
   Clock,
   Users,
   Package,
+  ShoppingCart,
   BarChart3,
 } from 'lucide-react'
 import { DashboardMetrics, SalesInvoice, Item } from '../types'
@@ -34,6 +35,13 @@ interface LatestTransaction {
   party: string
   amount: number
 }
+
+// Pick whichever side of the transaction this payment has — customer for PAYMENT_IN,
+// supplier for PAYMENT_OUT. Both are direct relations on PaymentTransaction post-split.
+const getPaymentPartyName = (payment: any) =>
+  payment.customer?.name ||
+  payment.supplier?.name ||
+  'Unknown'
 
 const Dashboard = () => {
   const darkMode = useStore((s) => s.darkMode)
@@ -132,7 +140,7 @@ const Dashboard = () => {
               date: inv.invoiceDate,
               type: 'Invoice',
               number: inv.invoiceNumber,
-              party: inv.party?.name || 'Unknown',
+              party: inv.customer?.name || 'Unknown',
               amount: inv.totalAmount
             })
           })
@@ -147,7 +155,7 @@ const Dashboard = () => {
               date: pmt.paymentDate,
               type: pmt.type === 'PAYMENT_IN' ? 'Payment In' : 'Payment Out',
               number: pmt.referenceId || pmt.id?.substring(0, 8) || '-',
-              party: pmt.party?.name || 'Unknown',
+              party: getPaymentPartyName(pmt),
               amount: pmt.amount
             })
           })
@@ -324,7 +332,7 @@ const Dashboard = () => {
                 <div key={invoice.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
                   <div>
                     <p className="font-medium">{invoice.invoiceNumber}</p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">{invoice.party?.name}</p>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">{invoice.customer?.name}</p>
                   </div>
                   <div className="text-right">
                     <p className="font-medium">{formatCurrency(invoice.totalAmount)}</p>
@@ -421,10 +429,14 @@ const Dashboard = () => {
       {/* Quick Actions */}
       <div className="card">
         <h2 className="text-xl font-semibold mb-4">Quick Actions</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Link to="/parties" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <Link to="/customers" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <Users className="w-8 h-8 mb-2 text-primary-600 dark:text-primary-400" strokeWidth={1.5} />
-            <span className="text-sm font-medium">Add Party</span>
+            <span className="text-sm font-medium">Add Customer</span>
+          </Link>
+          <Link to="/suppliers" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
+            <ShoppingCart className="w-8 h-8 mb-2 text-primary-600 dark:text-primary-400" strokeWidth={1.5} />
+            <span className="text-sm font-medium">Add Supplier</span>
           </Link>
           <Link to="/items" className="flex flex-col items-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
             <Package className="w-8 h-8 mb-2 text-primary-600 dark:text-primary-400" strokeWidth={1.5} />

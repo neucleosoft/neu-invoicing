@@ -69,7 +69,7 @@ const Sales = () => {
 
   // Form state
   const [formData, setFormData] = useState({
-    partyId: '',
+    customerId: '',
     type: 'INVOICE' as const,
     status: 'DRAFT' as string,
     invoiceDate: new Date().toISOString().split('T')[0],
@@ -146,7 +146,9 @@ const Sales = () => {
     const company = await loadCompanyForPDF()
     return {
       ...result.data,
-      party: result.data.party,
+      // PDF utilities expect a `.party` field on their input — alias `.customer` to `.party`
+      // here at the boundary so the rest of the renderer can use `.customer` everywhere.
+      party: result.data.customer,
       items: result.data.items || [],
       company,
     }
@@ -171,7 +173,7 @@ const Sales = () => {
       toast.info('No invoices to download')
       return
     }
-    const partyName = matching[0]?.party?.name || searchQuery || 'all'
+    const partyName = matching[0]?.customer?.name || searchQuery || 'all'
 
     setBulkDownloading(true)
     try {
@@ -224,7 +226,7 @@ const Sales = () => {
   }
 
   const loadParties = async () => {
-    const result = await window.electronAPI.party.getAll('CUSTOMER')
+    const result = await window.electronAPI.customer.getAll()
     if (result.success && result.data) {
       setParties(result.data)
     }
@@ -264,7 +266,7 @@ const Sales = () => {
       setEditingInvoice(fullInvoice)
       setFormData({
         invoiceNumber: fullInvoice.invoiceNumber || '',
-        partyId: fullInvoice.party?.id || '',
+        customerId: fullInvoice.customerId || fullInvoice.customer?.id || '',
         type: 'INVOICE',
         status: fullInvoice.status || 'DRAFT',
         invoiceDate: new Date(fullInvoice.invoiceDate).toISOString().split('T')[0],
@@ -364,7 +366,7 @@ const Sales = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.partyId) {
+    if (!formData.customerId) {
       toast.info('Please select a customer')
       return
     }
@@ -380,7 +382,7 @@ const Sales = () => {
       // Update existing invoice
       const invoiceData = {
         invoiceNumber: formData.invoiceNumber,
-        partyId: formData.partyId,
+        customerId: formData.customerId,
         type: 'INVOICE',
         status: formData.status,
         invoiceDate: formData.invoiceDate,
@@ -437,7 +439,7 @@ const Sales = () => {
 
   const resetForm = () => {
     setFormData({
-      partyId: '',
+      customerId: '',
       type: 'INVOICE',
       status: 'DRAFT',
       invoiceDate: new Date().toISOString().split('T')[0],
@@ -500,7 +502,7 @@ const Sales = () => {
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase()
       const matchesNumber = invoice.invoiceNumber?.toLowerCase().includes(query)
-      const matchesParty = invoice.party?.name?.toLowerCase().includes(query)
+      const matchesParty = invoice.customer?.name?.toLowerCase().includes(query)
       if (!matchesNumber && !matchesParty) return false
     }
     if (dateStart || dateEnd) {
@@ -514,7 +516,7 @@ const Sales = () => {
   const { sortedItems: sortedInvoices, sortKey, sortDir, toggleSort } = useSortable(filteredInvoices, [
     { key: 'invoiceNumber', accessor: (i) => i.invoiceNumber },
     { key: 'invoiceDate', accessor: (i) => new Date(i.invoiceDate).getTime() },
-    { key: 'party', accessor: (i) => i.party?.name || '' },
+    { key: 'party', accessor: (i) => i.customer?.name || '' },
     { key: 'totalAmount', accessor: (i) => i.totalAmount },
     { key: 'status', accessor: (i) => i.status || '' },
   ])
@@ -639,7 +641,7 @@ const Sales = () => {
                   <tr key={invoice.id} className="border-t">
                     <td className="table-cell font-medium">{invoice.invoiceNumber}</td>
                     <td className="table-cell">{new Date(invoice.invoiceDate).toLocaleDateString('en-GB')}</td>
-                    <td className="table-cell">{invoice.party?.name}</td>
+                    <td className="table-cell">{invoice.customer?.name}</td>
                     <td className="table-cell">{formatCurrency(invoice.totalAmount)}</td>
                     <td className="table-cell">
                       <div className="flex flex-col items-start gap-1">
@@ -688,9 +690,9 @@ const Sales = () => {
                         </button>
                         <ShareMenu
                           onShare={(target) => handleShare(invoice.id, target)}
-                          phone={invoice.party?.phone}
-                          email={invoice.party?.email}
-                          partyName={invoice.party?.name}
+                          phone={invoice.customer?.phone}
+                          email={invoice.customer?.email}
+                          partyName={invoice.customer?.name}
                         />
                         <button onClick={() => handleDelete(invoice.id)} className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
                           Delete
@@ -737,8 +739,8 @@ const Sales = () => {
                   <div>
                     <label className="label">Customer *</label>
                     <SearchableSelect
-                      value={formData.partyId}
-                      onChange={(id) => setFormData({...formData, partyId: id})}
+                      value={formData.customerId}
+                      onChange={(id) => setFormData({...formData, customerId: id})}
                       options={parties.map(p => ({ id: p.id, name: p.name }))}
                       placeholder="Select Customer"
                       required
@@ -1101,10 +1103,10 @@ const Sales = () => {
               {/* Customer Info */}
               <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Customer</p>
-                <p className="font-semibold">{viewingInvoice.party?.name}</p>
-                {viewingInvoice.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingInvoice.party.phone}</p>}
-                {viewingInvoice.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingInvoice.party.email}</p>}
-                {viewingInvoice.party?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingInvoice.party.billingAddress}</p>}
+                <p className="font-semibold">{viewingInvoice.customer?.name}</p>
+                {viewingInvoice.customer?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingInvoice.customer.phone}</p>}
+                {viewingInvoice.customer?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingInvoice.customer.email}</p>}
+                {viewingInvoice.customer?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingInvoice.customer.billingAddress}</p>}
               </div>
 
               {/* Items */}
@@ -1185,9 +1187,9 @@ const Sales = () => {
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingInvoice.id, target)}
-                  phone={viewingInvoice.party?.phone}
-                  email={viewingInvoice.party?.email}
-                  partyName={viewingInvoice.party?.name}
+                  phone={viewingInvoice.customer?.phone}
+                  email={viewingInvoice.customer?.email}
+                  partyName={viewingInvoice.customer?.name}
                 />
                 <button
                   onClick={() => handleDownloadPDF(viewingInvoice.id)}

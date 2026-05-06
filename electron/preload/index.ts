@@ -34,17 +34,37 @@ contextBridge.exposeInMainWorld("electronAPI", {
     selectImage: () => ipcRenderer.invoke("company:selectImage"),
   },
 
-  // Parties
-  party: {
-    getAll: (type?: string) => ipcRenderer.invoke("party:getAll", type),
-    getById: (id: string) => ipcRenderer.invoke("party:getById", id),
-    create: (data: any) => ipcRenderer.invoke("party:create", data),
+  // Customers
+  customer: {
+    getAll: () => ipcRenderer.invoke("customer:getAll"),
+    getById: (id: string) => ipcRenderer.invoke("customer:getById", id),
+    create: (data: any) => ipcRenderer.invoke("customer:create", data),
     update: (id: string, data: any) =>
-      ipcRenderer.invoke("party:update", id, data),
-    delete: (id: string) => ipcRenderer.invoke("party:delete", id),
-    getLedger: (id: string) => ipcRenderer.invoke("party:getLedger", id),
-    getStatement: (args: { partyId: string; fromDate: string; toDate: string }) =>
-      ipcRenderer.invoke("party:getStatement", args),
+      ipcRenderer.invoke("customer:update", id, data),
+    delete: (id: string) => ipcRenderer.invoke("customer:delete", id),
+    getLedger: (id: string) => ipcRenderer.invoke("customer:getLedger", id),
+    getStatement: (args: { customerId: string; fromDate: string; toDate: string }) =>
+      ipcRenderer.invoke("customer:getStatement", args),
+  },
+
+  // Suppliers
+  supplier: {
+    getAll: () => ipcRenderer.invoke("supplier:getAll"),
+    getById: (id: string) => ipcRenderer.invoke("supplier:getById", id),
+    create: (data: any) => ipcRenderer.invoke("supplier:create", data),
+    update: (id: string, data: any) =>
+      ipcRenderer.invoke("supplier:update", id, data),
+    delete: (id: string) => ipcRenderer.invoke("supplier:delete", id),
+  },
+
+  // Supplier items
+  supplierItem: {
+    getAll: (supplierId?: string) => ipcRenderer.invoke("supplierItem:getAll", supplierId),
+    getById: (id: string) => ipcRenderer.invoke("supplierItem:getById", id),
+    create: (data: any) => ipcRenderer.invoke("supplierItem:create", data),
+    update: (id: string, data: any) =>
+      ipcRenderer.invoke("supplierItem:update", id, data),
+    delete: (id: string) => ipcRenderer.invoke("supplierItem:delete", id),
   },
 
   // Items
@@ -108,6 +128,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("purchase:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("purchase:delete", id),
     generateBillNumber: () => ipcRenderer.invoke("purchase:generateBillNumber"),
+    extractFromImage: (args: { fileBytes: Uint8Array; mimeType: string }) =>
+      ipcRenderer.invoke("purchase:extractFromImage", args),
   },
 
   // Payments

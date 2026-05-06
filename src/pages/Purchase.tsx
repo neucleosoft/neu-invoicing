@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { PurchaseBill } from '../types'
+import { ExtractedBillData, PurchaseBill, Supplier } from '../types'
 import { formatCurrency } from '../utils/currency'
 import { formatInvoiceStatus } from '../utils/invoiceStatus'
 import NumberInput from '../components/NumberInput'
@@ -9,14 +9,8 @@ import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
-import { ShoppingCart, Search as SearchIcon } from 'lucide-react'
+import { Camera, ShoppingCart, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
-
-interface Party {
-  id: string
-  name: string
-  type: string
-}
 
 interface Item {
   id: string
@@ -35,7 +29,27 @@ interface BillItem {
   taxRate: number
   discount: number
   amount: number
+  // Underscore prefix signals: not persisted, only for UI hints during extraction
+  _extractedName?: string
 }
+
+const normalizeBill = (bill: any): PurchaseBill => ({
+  ...bill,
+  partyId: bill.partyId || bill.supplierId || '',
+  party: bill.party || bill.supplier,
+  items: (bill.items || []).map((item: any) => ({
+    ...item,
+    itemId: item.itemId || item.supplierItemId || item.supplierItem?.id || '',
+    item: item.item || item.supplierItem?.linkedItem || {
+      id: item.supplierItem?.id,
+      name: item.supplierItem?.name,
+      purchasePrice: item.supplierItem?.lastPurchasePrice || item.rate || 0,
+      taxRate: item.supplierItem?.defaultTaxRate || item.taxRate || 0,
+      hsnCode: item.supplierItem?.hsnCode || item.hsnCode || '',
+      skuHsn: item.supplierItem?.linkedItem?.skuHsn,
+    },
+  })),
+})
 
 const Purchase = () => {
   const [bills, setBills] = useState<PurchaseBill[]>([])
@@ -44,18 +58,32 @@ const Purchase = () => {
   const [showViewModal, setShowViewModal] = useState(false)
   const [viewingBill, setViewingBill] = useState<PurchaseBill | null>(null)
   const [editingBill, setEditingBill] = useState<PurchaseBill | null>(null)
-  const [suppliers, setSuppliers] = useState<Party[]>([])
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [searchQuery, setSearchQuery] = useState('')
 
   // Form state
   const [formData, setFormData] = useState({
-    partyId: '',
+    supplierId: '',
+    billNumber: '',
+    // The supplier's own invoice number (e.g., "HARI-2024-001"). Separate from our internal
+    // billNumber, which is unique-constrained and auto-generated.
+    supplierInvoiceNumber: '',
     billDate: new Date().toISOString().split('T')[0],
     notes: ''
   })
 
   const [billItems, setBillItems] = useState<BillItem[]>([])
+
+  // AI extraction state
+  const [extracting, setExtracting] = useState(false)
+  const [attachmentBytes, setAttachmentBytes] = useState<Uint8Array | null>(null)
+  const [attachmentMimeType, setAttachmentMimeType] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Set when AI extraction returns a supplier name we couldn't match — drives the inline "+ Create supplier" panel.
+  const [unmatchedSupplier, setUnmatchedSupplier] = useState<{ name: string; gstin?: string } | null>(null)
+  const [creatingSupplier, setCreatingSupplier] = useState(false)
 
   const location = useLocation()
   const navigate = useNavigate()
@@ -63,8 +91,17 @@ const Purchase = () => {
   useEffect(() => {
     loadBills()
     loadSuppliers()
-    loadItems()
   }, [])
+
+  // Items are scoped per-supplier — refetch whenever the supplier changes (or clear if none picked).
+  useEffect(() => {
+    if (formData.supplierId) {
+      loadItems(formData.supplierId)
+    } else {
+      setItems([])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.supplierId])
 
   // Auto-open the create-bill modal when navigated here from Dashboard's "+ New Purchase"
   useEffect(() => {
@@ -83,7 +120,7 @@ const Purchase = () => {
     try {
       const result = await window.electronAPI.purchase.getAll()
       if (result.success && result.data) {
-        setBills(result.data)
+        setBills(result.data.map(normalizeBill))
       }
     } finally {
       setLoading(false)
@@ -91,16 +128,23 @@ const Purchase = () => {
   }
 
   const loadSuppliers = async () => {
-    const result = await window.electronAPI.party.getAll('SUPPLIER')
+    const result = await window.electronAPI.supplier.getAll()
     if (result.success && result.data) {
       setSuppliers(result.data)
     }
   }
 
-  const loadItems = async () => {
-    const result = await window.electronAPI.item.getAll()
+  const loadItems = async (supplierId: string) => {
+    const result = await window.electronAPI.supplierItem.getAll(supplierId)
     if (result.success && result.data) {
-      setItems(result.data)
+      setItems(result.data.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        purchasePrice: item.lastPurchasePrice || 0,
+        taxRate: item.defaultTaxRate || 0,
+        hsnCode: item.hsnCode || item.linkedItem?.hsnCode || '',
+        skuHsn: item.linkedItem?.skuHsn,
+      })))
     }
   }
 
@@ -119,7 +163,7 @@ const Purchase = () => {
   const handleView = async (id: string) => {
     const result = await window.electronAPI.purchase.getById(id)
     if (result.success && result.data) {
-      setViewingBill(result.data)
+      setViewingBill(normalizeBill(result.data))
       setShowViewModal(true)
     }
   }
@@ -127,15 +171,22 @@ const Purchase = () => {
   const handleEdit = async (bill: PurchaseBill) => {
     const result = await window.electronAPI.purchase.getById(bill.id)
     if (result.success && result.data) {
-      const fullBill = result.data
+      const fullBill = normalizeBill(result.data)
       setEditingBill(fullBill)
       setFormData({
-        partyId: fullBill.party?.id || fullBill.partyId || '',
-        billDate: fullBill.billDate.split('T')[0],
+        supplierId: fullBill.supplier?.id || fullBill.supplierId || fullBill.party?.id || fullBill.partyId || '',
+        billNumber: fullBill.billNumber || '',
+        supplierInvoiceNumber: fullBill.supplierInvoiceNumber || '',
+        // IPC structured-clone preserves Date objects, so billDate may be a Date instance
+        // (not the string the type claims). Wrap in `new Date()` so this works for both shapes.
+        billDate: new Date(fullBill.billDate).toISOString().split('T')[0],
         notes: fullBill.notes || ''
       })
       setBillItems(fullBill.items?.map((item: any) => ({
-        itemId: item.item?.id || item.itemId,
+        // normalizeBill already resolved itemId to the SupplierItem.id (the dropdown's value space).
+        // The previous fallback `item.item?.id` would resolve to the *linked Item*'s id when one
+        // existed — wrong key, dropdown showed blank.
+        itemId: item.itemId,
         hsnCode: item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '',
         quantity: item.quantity,
         rate: item.rate,
@@ -143,12 +194,172 @@ const Purchase = () => {
         discount: item.discount || 0,
         amount: item.total
       })) || [])
+      // Reset extraction state — when editing an existing bill, we don't replay extraction.
+      // The attachment that's already in the DB stays there (we don't re-send it on update unless
+      // a new file is uploaded).
+      setAttachmentBytes(null)
+      setAttachmentMimeType(null)
       setShowModal(true)
     }
   }
 
+  // Try to auto-pick the supplier from extracted bill data.
+  // GSTIN match wins (definitive). Falls back to case-insensitive name match.
+  const findSupplierFromExtraction = (extracted: ExtractedBillData): Supplier | null => {
+    if (extracted.supplierGstin) {
+      const byGstin = suppliers.find(
+        (s) =>
+          s.taxId?.toLowerCase().trim() ===
+          extracted.supplierGstin?.toLowerCase().trim()
+      )
+      if (byGstin) return byGstin
+    }
+    if (extracted.supplierName) {
+      const byName = suppliers.find(
+        (s) =>
+          s.name.toLowerCase().trim() ===
+          extracted.supplierName?.toLowerCase().trim()
+      )
+      if (byName) return byName
+    }
+    return null
+  }
+
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setExtracting(true)
+    try {
+      // Read the file bytes once. Same bytes go to (a) the API and (b) DB on save.
+      const arrayBuffer = await file.arrayBuffer()
+      const bytes = new Uint8Array(arrayBuffer)
+
+      const result = await window.electronAPI.purchase.extractFromImage({
+        fileBytes: bytes,
+        mimeType: file.type
+      })
+
+      if (!result.success || !result.data) {
+        toast.error(result.error || 'Failed to extract bill data')
+        return
+      }
+
+      const extracted = result.data
+
+      // Pre-fill header fields from extraction (only fill what we got back).
+      const matchedSupplier = findSupplierFromExtraction(extracted)
+
+      // Fetch the matched supplier's catalog *now* so we can preselect existing rows for
+      // extracted items that already live in the catalog. Without this, every re-extraction
+      // shows "Will save as new item" — even though the backend would correctly dedupe on save.
+      let catalogItems: { id: string; name: string; hsnCode?: string | null; defaultTaxRate?: number }[] = []
+      if (matchedSupplier) {
+        const catalogRes = await window.electronAPI.supplierItem.getAll(matchedSupplier.id)
+        if (catalogRes.success && catalogRes.data) {
+          catalogItems = catalogRes.data
+        }
+      }
+
+      setFormData((prev) => ({
+        ...prev,
+        supplierId: matchedSupplier?.id || prev.supplierId,
+        // The number on the supplier's bill is THEIR invoice number, not our internal billNumber
+        // (which is unique-constrained and auto-generated on save). Stuffing extracted.billNumber
+        // into our billNumber column was the cause of the unique-violation when re-extracting bills.
+        supplierInvoiceNumber: extracted.billNumber || prev.supplierInvoiceNumber,
+        billDate: extracted.billDate || prev.billDate
+      }))
+
+      // Surface inline "+ Create supplier" UI when extraction returned a name we can't match.
+      if (!matchedSupplier && extracted.supplierName) {
+        setUnmatchedSupplier({
+          name: extracted.supplierName,
+          gstin: extracted.supplierGstin || undefined,
+        })
+      } else {
+        setUnmatchedSupplier(null)
+      }
+
+      // Pre-fill line items. For each extracted item, try to match against the supplier's catalog
+      // using the same normalizer the backend uses (`normalizeItemName` in purchase.ts) so the
+      // UI hint and the save-time dedupe never disagree. PDF extraction often returns names
+      // with odd whitespace, hyphen-vs-space, or punctuation drift — strict equality misses these.
+      if (extracted.items && extracted.items.length > 0) {
+        const normalizeItemName = (name: string) =>
+          (name || '')
+            .toLowerCase()
+            .replace(/[-/.]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim()
+
+        const findCatalogMatch = (name: string) => {
+          const target = normalizeItemName(name)
+          if (!target) return undefined
+          return catalogItems.find((c) => normalizeItemName(c.name) === target)
+        }
+
+        setBillItems(
+          extracted.items.map((item) => {
+            const match = findCatalogMatch(item.name || '')
+            return {
+              itemId: match?.id || '',
+              hsnCode: item.hsnCode || match?.hsnCode || '',
+              quantity: item.quantity || 0,
+              rate: item.rate || 0,
+              // Fall back to the catalog's default tax rate when extraction left it blank.
+              taxRate: item.taxRate || match?.defaultTaxRate || 0,
+              discount: 0,
+              amount: item.total || 0,
+              _extractedName: item.name,
+            }
+          })
+        )
+      }
+
+      // Keep the bytes for save. They go into the BLOB column.
+      setAttachmentBytes(bytes)
+      setAttachmentMimeType(file.type)
+
+      toast.success('Bill data extracted! Review fields and confirm the supplier and items.')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to read file')
+    } finally {
+      setExtracting(false)
+      // Reset the input so re-selecting the same file fires onChange again
+      e.target.value = ''
+    }
+  }
+
+  const handleCreateUnmatchedSupplier = async () => {
+    if (!unmatchedSupplier) return
+    setCreatingSupplier(true)
+    try {
+      const result = await window.electronAPI.supplier.create({
+        name: unmatchedSupplier.name,
+        taxId: unmatchedSupplier.gstin,
+      })
+      if (result.success && result.data) {
+        const created = result.data
+        setSuppliers((prev) =>
+          [...prev, created].sort((a, b) => a.name.localeCompare(b.name))
+        )
+        setFormData((prev) => ({ ...prev, supplierId: created.id }))
+        setUnmatchedSupplier(null)
+        toast.success(`Created supplier "${created.name}"`)
+      } else {
+        toast.error(result.error || 'Failed to create supplier')
+      }
+    } finally {
+      setCreatingSupplier(false)
+    }
+  }
+
   const addBillItem = () => {
-    if (billItems.length >= 1 && billItems[billItems.length - 1].itemId === '') {
+    // A row is "incomplete" only if it has neither a picked itemId nor an extracted name.
+    // Extracted-but-unmapped rows are valid — backend auto-creates a SupplierItem on save.
+    const last = billItems[billItems.length - 1]
+    if (last && !last.itemId && !last._extractedName) {
       toast.info('Please complete the current item first')
       return
     }
@@ -215,7 +426,7 @@ const Purchase = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.partyId) {
+    if (!formData.supplierId) {
       toast.info('Please select a supplier')
       return
     }
@@ -225,16 +436,33 @@ const Purchase = () => {
       return
     }
 
+    // Each line either picks an existing supplier item OR carries an extracted name (auto-creates on save).
+    // A blank line with neither would crash backend with "Each purchase line must have a supplier item".
+    const blankLine = billItems.find((it) => !it.itemId && !it._extractedName)
+    if (blankLine) {
+      toast.info('Each line must have an item picked from the supplier catalog')
+      return
+    }
+
     const { subtotal, taxAmount, total } = calculateTotals()
+
+    // Keep _extractedName: backend's resolveSupplierItem reads it to auto-create SupplierItem rows
+    // for lines the user didn't map to the catalog (typical AI-extraction path).
+    const itemsToSave = billItems
 
     if (editingBill) {
       // Update existing bill
       const billData = {
         ...formData,
-        items: billItems,
+        items: itemsToSave,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
-        totalAmount: total
+        totalAmount: total,
+        // Only include attachment if a new one was uploaded this session
+        ...(attachmentBytes && {
+          attachmentData: attachmentBytes,
+          attachmentMimeType
+        })
       }
 
       const result = await window.electronAPI.purchase.update(editingBill.id, billData)
@@ -248,22 +476,28 @@ const Purchase = () => {
         toast.error('Failed to update purchase bill: ' + (result.error || 'Unknown error'))
       }
     } else {
-      // Create new bill
-      const billNumResult = await window.electronAPI.purchase.generateBillNumber()
-      if (!billNumResult.success) {
-        toast.error('Failed to generate bill number')
-        return
+      // Create new bill — use the extracted/typed bill number if present, otherwise auto-generate
+      let billNumber = formData.billNumber.trim()
+      if (!billNumber) {
+        const billNumResult = await window.electronAPI.purchase.generateBillNumber()
+        if (!billNumResult.success) {
+          toast.error('Failed to generate bill number')
+          return
+        }
+        billNumber = billNumResult.data || ''
       }
 
       const billData = {
         ...formData,
-        billNumber: billNumResult.data,
-        items: billItems,
+        billNumber,
+        items: itemsToSave,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
         totalAmount: total,
         balanceDue: total,
-        status: 'DRAFT'
+        status: 'DRAFT',
+        attachmentData: attachmentBytes,
+        attachmentMimeType
       }
 
       const result = await window.electronAPI.purchase.create(billData)
@@ -281,12 +515,17 @@ const Purchase = () => {
 
   const resetForm = () => {
     setFormData({
-      partyId: '',
+      supplierId: '',
+      billNumber: '',
+      supplierInvoiceNumber: '',
       billDate: new Date().toISOString().split('T')[0],
       notes: ''
     })
     setBillItems([])
     setEditingBill(null)
+    setAttachmentBytes(null)
+    setAttachmentMimeType(null)
+    setUnmatchedSupplier(null)
   }
 
   const totals = calculateTotals()
@@ -404,17 +643,97 @@ const Purchase = () => {
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-6">
+                {/* AI Extract from Photo */}
+                <div className="flex items-center justify-between gap-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                  <div>
+                    <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                      Have a photo or PDF of the bill?
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
+                      We'll auto-fill the form. You'll review before saving.
+                    </p>
+                    {attachmentBytes && (
+                      <p className="text-xs text-green-700 dark:text-green-300 mt-1 font-medium">
+                        ✓ Attached ({(attachmentBytes.byteLength / 1024).toFixed(1)} KB, {attachmentMimeType})
+                      </p>
+                    )}
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*,application/pdf"
+                    onChange={handleFileSelect}
+                    style={{ display: 'none' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={extracting}
+                    className="btn btn-primary gap-2 flex items-center"
+                  >
+                    {extracting ? (
+                      <>
+                        <span className="animate-spin">⏳</span>
+                        Extracting…
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="w-4 h-4" />
+                        Extract from Photo
+                      </>
+                    )}
+                  </button>
+                </div>
+
                 {/* Basic Info */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="label">Supplier *</label>
                     <SearchableSelect
-                      value={formData.partyId}
-                      onChange={(id) => setFormData({...formData, partyId: id})}
-                      options={suppliers.map(s => ({ id: s.id, name: s.name }))}
+                      value={formData.supplierId}
+                      onChange={(id) => {
+                        // When supplier changes, the per-supplier catalog reloads — items previously
+                        // selected belong to the old supplier and won't exist in the new dropdown.
+                        // Reset itemIds so user re-picks. _extractedName stays so extraction lines
+                        // still auto-create on save.
+                        if (id !== formData.supplierId) {
+                          setBillItems((prev) => prev.map((it) => ({ ...it, itemId: '' })))
+                        }
+                        setFormData({ ...formData, supplierId: id })
+                      }}
+                      options={suppliers.map((s) => ({ id: s.id, name: s.name }))}
                       placeholder="Select Supplier"
                       required
                     />
+                    {unmatchedSupplier && !formData.supplierId && (
+                      <div className="mt-2 p-3 rounded-lg border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
+                        <p className="text-sm text-amber-900 dark:text-amber-100">
+                          <strong>"{unmatchedSupplier.name}"</strong> isn't in your suppliers yet.
+                        </p>
+                        {unmatchedSupplier.gstin && (
+                          <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
+                            GSTIN: {unmatchedSupplier.gstin}
+                          </p>
+                        )}
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            type="button"
+                            onClick={handleCreateUnmatchedSupplier}
+                            disabled={creatingSupplier}
+                            className="btn btn-primary text-sm"
+                          >
+                            {creatingSupplier ? 'Creating…' : '+ Create supplier'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setUnmatchedSupplier(null)}
+                            className="btn btn-secondary text-sm"
+                          >
+                            Skip
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -424,6 +743,31 @@ const Purchase = () => {
                       value={formData.billDate}
                       onChange={(e) => setFormData({...formData, billDate: e.target.value})}
                       required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Supplier's Invoice Number</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={formData.supplierInvoiceNumber}
+                      onChange={(e) => setFormData({...formData, supplierInvoiceNumber: e.target.value})}
+                      placeholder="As printed on the supplier's bill"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Internal Bill #</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={formData.billNumber}
+                      onChange={(e) => setFormData({...formData, billNumber: e.target.value})}
+                      placeholder="Auto-generated if left blank"
+                      // Editing internal bill # of an existing bill could collide with another row's
+                      // unique number — keep it read-only after creation.
+                      readOnly={!!editingBill}
                     />
                   </div>
                 </div>
@@ -454,13 +798,36 @@ const Purchase = () => {
                               className="input"
                               value={item.itemId}
                               onChange={(e) => updateBillItem(index, 'itemId', e.target.value)}
-                              required
+                              // Required only when this row has no extracted name. Extraction-driven
+                              // lines may keep itemId empty — backend auto-creates a SupplierItem
+                              // row from _extractedName on save.
+                              required={!item._extractedName}
+                              disabled={!formData.supplierId}
                             >
-                              <option value="">Select Item</option>
-                              {items.map(i => (
+                              <option value="">
+                                {item._extractedName
+                                  ? `+ Add "${item._extractedName}" to catalog`
+                                  : formData.supplierId
+                                  ? 'Select Item'
+                                  : 'Pick a supplier first'}
+                              </option>
+                              {items.map((i) => (
                                 <option key={i.id} value={i.id}>{i.name}</option>
                               ))}
                             </select>
+                            {item._extractedName && (
+                              <p className="text-xs mt-1 truncate" title={item._extractedName}>
+                                {item.itemId ? (
+                                  <span className="text-blue-600 dark:text-blue-400">
+                                    From bill: <span className="font-medium">{item._extractedName}</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-emerald-700 dark:text-emerald-400">
+                                    ✨ Will save as new item: <span className="font-medium">"{item._extractedName}"</span>
+                                  </span>
+                                )}
+                              </p>
+                            )}
                           </div>
 
                           <div className="w-32">

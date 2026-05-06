@@ -7,8 +7,10 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import Onboarding from './pages/Onboarding'
 import Dashboard from './pages/Dashboard'
-import Parties from './pages/Parties'
+import Customers from './pages/Customers'
+import Suppliers from './pages/Suppliers'
 import Items from './pages/Items'
+import SupplierItems from './pages/SupplierItems'
 import Sales from './pages/Sales'
 import Quotations from './pages/Quotations'
 import ProformaInvoices from './pages/ProformaInvoices'
@@ -162,8 +164,11 @@ function App() {
           <Route path="/onboarding" element={<Navigate to="/" replace />} />
           <Route path="/" element={<Layout />}>
             <Route index element={<Dashboard />} />
-            <Route path="parties" element={<Parties />} />
+            <Route path="parties" element={<Navigate to="/customers" replace />} />
+            <Route path="customers" element={<Customers />} />
+            <Route path="suppliers" element={<Suppliers />} />
             <Route path="items" element={<Items />} />
+            <Route path="supplier-items" element={<SupplierItems />} />
             <Route path="sales" element={<Navigate to="/invoices" replace />} />
             <Route path="invoices" element={<Sales />} />
             <Route path="quotations" element={<Quotations />} />

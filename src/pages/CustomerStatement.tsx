@@ -11,7 +11,7 @@ import {
   StatementLine,
 } from '../utils/pdfmakeStatement'
 
-interface Party {
+interface CustomerOption {
   id: string
   name: string
   type: string
@@ -49,29 +49,29 @@ const formatDate = (iso: string) => {
 
 const CustomerStatement = () => {
   const toast = useToast()
-  const [parties, setParties] = useState<Party[]>([])
-  const [partyId, setPartyId] = useState('')
+  const [customers, setCustomers] = useState<CustomerOption[]>([])
+  const [customerId, setCustomerId] = useState('')
   const [fromDate, setFromDate] = useState(startOfFiscalYear())
   const [toDate, setToDate] = useState(today())
   const [loading, setLoading] = useState(false)
   const [statement, setStatement] = useState<StatementData | null>(null)
 
   useEffect(() => {
-    loadParties()
+    loadCustomers()
   }, [])
 
-  const loadParties = async () => {
-    const result = await window.electronAPI.party.getAll('CUSTOMER')
-    if (result.success && result.data) setParties(result.data)
+  const loadCustomers = async () => {
+    const result = await window.electronAPI.customer.getAll()
+    if (result.success && result.data) setCustomers(result.data)
   }
 
-  const partyOptions = useMemo(
-    () => parties.map((p) => ({ id: p.id, name: p.name })),
-    [parties]
+  const customerOptions = useMemo(
+    () => customers.map((customer) => ({ id: customer.id, name: customer.name })),
+    [customers]
   )
 
   const generate = async () => {
-    if (!partyId) {
+    if (!customerId) {
       toast.error('Please select a customer.')
       return
     }
@@ -86,8 +86,8 @@ const CustomerStatement = () => {
 
     setLoading(true)
     try {
-      const result = await window.electronAPI.party.getStatement({
-        partyId,
+      const result = await window.electronAPI.customer.getStatement({
+        customerId,
         fromDate,
         toDate,
       })
@@ -133,9 +133,9 @@ const CustomerStatement = () => {
           <div className="md:col-span-2">
             <label className="label">Customer *</label>
             <SearchableSelect
-              value={partyId}
-              onChange={setPartyId}
-              options={partyOptions}
+              value={customerId}
+              onChange={setCustomerId}
+              options={customerOptions}
               placeholder="Select Customer"
             />
           </div>

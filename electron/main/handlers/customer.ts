@@ -2,58 +2,52 @@ import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 import { triggerSyncAfterChange } from '../sync'
 
-export const setupPartyHandlers = () => {
+export const setupCustomerHandlers = () => {
   const prisma = getPrisma()
 
-  // Get all parties
-  ipcMain.handle('party:getAll', async (_, type?: string) => {
+  // Get all customers
+  ipcMain.handle('customer:getAll', async () => {
     try {
-      const where = type ? { type: type as any } : {}
-      const parties = await prisma.party.findMany({
-        where,
+      const customers = await prisma.customer.findMany({
         orderBy: { name: 'asc' }
       })
-      return { success: true, data: parties }
+      return { success: true, data: customers }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch parties'
+        error: error instanceof Error ? error.message : 'Failed to fetch customers'
       }
     }
   })
 
-  // Get party by ID
-  ipcMain.handle('party:getById', async (_, id: string) => {
+  // Get customer by ID (with recent sales)
+  ipcMain.handle('customer:getById', async (_, id: string) => {
     try {
-      const party = await prisma.party.findUnique({
+      const customer = await prisma.customer.findUnique({
         where: { id },
         include: {
           salesInvoices: {
             orderBy: { invoiceDate: 'desc' },
             take: 10
-          },
-          purchaseBills: {
-            orderBy: { billDate: 'desc' },
-            take: 10
           }
         }
       })
-      return { success: true, data: party }
+      return { success: true, data: customer }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch party'
+        error: error instanceof Error ? error.message : 'Failed to fetch customer'
       }
     }
   })
 
-  // Create party
-  ipcMain.handle('party:create', async (_, data) => {
+  // Create customer
+  ipcMain.handle('customer:create', async (_, data) => {
     try {
-      const party = await prisma.party.create({
+      const customer = await prisma.customer.create({
         data: {
           name: data.name,
-          type: data.type,
+          type: data.type || 'CUSTOMER',
           phone: data.phone,
           email: data.email,
           billingAddress: data.billingAddress,
@@ -61,7 +55,6 @@ export const setupPartyHandlers = () => {
           taxId: data.taxId,
           openingBalance: data.openingBalance || 0,
           currentBalance: data.openingBalance || 0,
-          // GST-specific fields
           stateCode: data.stateCode,
           stateName: data.stateName,
           gstType: data.gstType || 'REGULAR',
@@ -77,19 +70,19 @@ export const setupPartyHandlers = () => {
       })
 
       await triggerSyncAfterChange()
-      return { success: true, data: party }
+      return { success: true, data: customer }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to create party'
+        error: error instanceof Error ? error.message : 'Failed to create customer'
       }
     }
   })
 
-  // Update party
-  ipcMain.handle('party:update', async (_, id: string, data) => {
+  // Update customer
+  ipcMain.handle('customer:update', async (_, id: string, data) => {
     try {
-      const party = await prisma.party.update({
+      const customer = await prisma.customer.update({
         where: { id },
         data: {
           name: data.name,
@@ -99,7 +92,6 @@ export const setupPartyHandlers = () => {
           billingAddress: data.billingAddress,
           shippingAddress: data.shippingAddress,
           taxId: data.taxId,
-          // GST-specific fields
           stateCode: data.stateCode,
           stateName: data.stateName,
           gstType: data.gstType,
@@ -115,40 +107,38 @@ export const setupPartyHandlers = () => {
       })
 
       await triggerSyncAfterChange()
-      return { success: true, data: party }
+      return { success: true, data: customer }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to update party'
+        error: error instanceof Error ? error.message : 'Failed to update customer'
       }
     }
   })
 
-  // Delete party
-  ipcMain.handle('party:delete', async (_, id: string) => {
+  // Delete customer (only if no records)
+  ipcMain.handle('customer:delete', async (_, id: string) => {
     try {
-      // Check if party has related records
-      const party = await prisma.party.findUnique({
+      const customer = await prisma.customer.findUnique({
         where: { id },
         include: {
           salesInvoices: { take: 1 },
-          purchaseBills: { take: 1 },
           payments: { take: 1 }
         }
       })
 
-      if (!party) {
-        return { success: false, error: 'Party not found' }
+      if (!customer) {
+        return { success: false, error: 'Customer not found' }
       }
 
-      if (party.salesInvoices.length > 0 || party.purchaseBills.length > 0 || party.payments.length > 0) {
+      if (customer.salesInvoices.length > 0 || customer.payments.length > 0) {
         return {
           success: false,
-          error: 'Cannot delete party with existing invoices, bills, or payments. Delete those records first.'
+          error: 'Cannot delete customer with existing invoices or payments. Delete those records first.'
         }
       }
 
-      await prisma.party.delete({
+      await prisma.customer.delete({
         where: { id }
       })
 
@@ -157,34 +147,30 @@ export const setupPartyHandlers = () => {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to delete party'
+        error: error instanceof Error ? error.message : 'Failed to delete customer'
       }
     }
   })
 
-  // Get party ledger
-  // Customer statement — chronological list of all transactions for a party
-  // within a date range, with running balance (positive = party owes us).
+  // Customer statement — chronological list of all transactions for a customer
+  // within a date range, with running balance (positive = customer owes us).
   ipcMain.handle(
-    'party:getStatement',
-    async (_, args: { partyId: string; fromDate: string; toDate: string }) => {
+    'customer:getStatement',
+    async (_, args: { customerId: string; fromDate: string; toDate: string }) => {
       try {
-        const party = await prisma.party.findUnique({ where: { id: args.partyId } })
-        if (!party) {
-          return { success: false, error: 'Party not found' }
+        const customer = await prisma.customer.findUnique({ where: { id: args.customerId } })
+        if (!customer) {
+          return { success: false, error: 'Customer not found' }
         }
 
         const from = new Date(args.fromDate)
         const to = new Date(args.toDate)
-        // Make `to` end-of-day so transactions on toDate are included.
         to.setHours(23, 59, 59, 999)
 
-        // Fetch all relevant transactions in one go (we need pre-range data
-        // for the opening balance plus everything in-range).
         const [invoices, payments, notes] = await Promise.all([
           prisma.salesInvoice.findMany({
             where: {
-              partyId: args.partyId,
+              customerId: args.customerId,
               type: 'INVOICE',
               invoiceDate: { lte: to },
             },
@@ -192,7 +178,7 @@ export const setupPartyHandlers = () => {
           }),
           prisma.paymentTransaction.findMany({
             where: {
-              partyId: args.partyId,
+              customerId: args.customerId,
               type: 'PAYMENT_IN',
               paymentDate: { lte: to },
             },
@@ -206,7 +192,7 @@ export const setupPartyHandlers = () => {
           }),
           prisma.creditDebitNote.findMany({
             where: {
-              partyId: args.partyId,
+              customerId: args.customerId,
               status: 'ACTIVE',
               noteDate: { lte: to },
             },
@@ -278,8 +264,7 @@ export const setupPartyHandlers = () => {
 
         entries.sort((a, b) => a.date.getTime() - b.date.getTime())
 
-        // Split into pre-range (folded into opening balance) and in-range (line items).
-        let openingBalance = party.openingBalance ?? 0
+        let openingBalance = customer.openingBalance ?? 0
         const lines: Array<Entry & { balance: number }> = []
         let running = 0
 
@@ -301,7 +286,7 @@ export const setupPartyHandlers = () => {
         return {
           success: true,
           data: {
-            party,
+            customer,
             fromDate: args.fromDate,
             toDate: args.toDate,
             openingBalance,
@@ -320,16 +305,13 @@ export const setupPartyHandlers = () => {
     }
   )
 
-  ipcMain.handle('party:getLedger', async (_, id: string) => {
+  ipcMain.handle('customer:getLedger', async (_, id: string) => {
     try {
-      const party = await prisma.party.findUnique({
+      const customer = await prisma.customer.findUnique({
         where: { id },
         include: {
           salesInvoices: {
             orderBy: { invoiceDate: 'desc' }
-          },
-          purchaseBills: {
-            orderBy: { billDate: 'desc' }
           },
           payments: {
             orderBy: { paymentDate: 'desc' }
@@ -337,7 +319,7 @@ export const setupPartyHandlers = () => {
         }
       })
 
-      return { success: true, data: party }
+      return { success: true, data: customer }
     } catch (error) {
       return {
         success: false,

@@ -16,7 +16,7 @@ export const setupQuotationHandlers = () => {
     try {
       const quotations = await prisma.quotation.findMany({
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true,
@@ -39,7 +39,7 @@ export const setupQuotationHandlers = () => {
       const quotation = await prisma.quotation.findUnique({
         where: { id },
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true,
@@ -74,7 +74,7 @@ export const setupQuotationHandlers = () => {
             invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
-            partyId: data.partyId,
+            customerId: data.customerId,
             subtotal: values.subtotal,
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
@@ -99,7 +99,7 @@ export const setupQuotationHandlers = () => {
           },
           include: {
             items: { include: { item: true } },
-            party: true,
+            customer: true,
           },
         })
       })
@@ -149,7 +149,7 @@ export const setupQuotationHandlers = () => {
             invoiceNumber: data.invoiceNumber || existingQuotation.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
-            partyId: data.partyId,
+            customerId: data.customerId,
             subtotal: values.subtotal,
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
@@ -174,7 +174,7 @@ export const setupQuotationHandlers = () => {
           },
           include: {
             items: { include: { item: true } },
-            party: true,
+            customer: true,
           },
         })
       })

@@ -15,13 +15,14 @@ interface CreditDebitNote {
   noteDate: string
   type: 'CREDIT_NOTE' | 'DEBIT_NOTE'
   status: 'ACTIVE' | 'CANCELLED'
+  customerId?: string
   subtotal: number
   taxAmount: number
   totalAmount: number
   reason?: string
   notes?: string
   referenceInvoiceId?: string
-  party?: {
+  customer?: {
     id: string
     name: string
     email?: string
@@ -101,7 +102,7 @@ const CreditNotes = () => {
   // Form state
   const [formData, setFormData] = useState({
     type: 'CREDIT_NOTE' as 'CREDIT_NOTE' | 'DEBIT_NOTE',
-    partyId: '',
+    customerId: '',
     referenceInvoiceId: '',
     noteDate: new Date().toISOString().split('T')[0],
     reason: '',
@@ -125,7 +126,7 @@ const CreditNotes = () => {
   }
 
   const loadParties = async () => {
-    const result = await window.electronAPI.party.getAll()
+    const result = await window.electronAPI.customer.getAll()
     if (result.success && result.data) {
       setParties(result.data)
     }
@@ -138,14 +139,14 @@ const CreditNotes = () => {
     }
   }
 
-  const loadPartyInvoices = async (partyId: string) => {
-    if (!partyId) {
+  const loadPartyInvoices = async (customerId: string) => {
+    if (!customerId) {
       setPartyInvoices([])
       return
     }
     const result = await window.electronAPI.sales.getAll()
     if (result.success && result.data) {
-      const filtered = result.data.filter((inv: any) => inv.partyId === partyId)
+      const filtered = result.data.filter((inv: any) => inv.customerId === customerId)
       setPartyInvoices(filtered.map((inv: any) => ({
         id: inv.id,
         invoiceNumber: inv.invoiceNumber,
@@ -155,9 +156,9 @@ const CreditNotes = () => {
     }
   }
 
-  const handlePartyChange = (partyId: string) => {
-    setFormData({ ...formData, partyId, referenceInvoiceId: '' })
-    loadPartyInvoices(partyId)
+  const handlePartyChange = (customerId: string) => {
+    setFormData({ ...formData, customerId, referenceInvoiceId: '' })
+    loadPartyInvoices(customerId)
   }
 
   const handleDelete = async (id: string) => {
@@ -187,15 +188,15 @@ const CreditNotes = () => {
       setEditingNote(fullNote)
       setFormData({
         type: fullNote.type,
-        partyId: fullNote.party?.id || '',
+        customerId: fullNote.customer?.id || '',
         referenceInvoiceId: fullNote.referenceInvoiceId || '',
         noteDate: fullNote.noteDate.split('T')[0],
         reason: fullNote.reason || '',
         notes: fullNote.notes || '',
         termsConditions: (fullNote as any).termsConditions || ''
       })
-      if (fullNote.party?.id) {
-        loadPartyInvoices(fullNote.party.id)
+      if (fullNote.customer?.id) {
+        loadPartyInvoices(fullNote.customer.id)
       }
       setNoteItems(fullNote.items?.map((item: any) => ({
         itemId: item.item?.id || item.itemId,
@@ -280,7 +281,7 @@ const CreditNotes = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.partyId) {
+    if (!formData.customerId) {
       toast.info('Please select a party')
       return
     }
@@ -335,7 +336,7 @@ const CreditNotes = () => {
   const resetForm = () => {
     setFormData({
       type: 'CREDIT_NOTE',
-      partyId: '',
+      customerId: '',
       referenceInvoiceId: '',
       noteDate: new Date().toISOString().split('T')[0],
       reason: '',
@@ -360,7 +361,7 @@ const CreditNotes = () => {
     const query = searchQuery.toLowerCase()
     return (
       note.noteNumber.toLowerCase().includes(query) ||
-      (note.party?.name || '').toLowerCase().includes(query)
+      (note.customer?.name || '').toLowerCase().includes(query)
     )
   })
 
@@ -440,7 +441,7 @@ const CreditNotes = () => {
                         {note.type === 'CREDIT_NOTE' ? 'CREDIT NOTE' : 'DEBIT NOTE'}
                       </span>
                     </td>
-                    <td className="table-cell">{note.party?.name}</td>
+                    <td className="table-cell">{note.customer?.name}</td>
                     <td className="table-cell">
                       {note.referenceInvoice?.invoiceNumber || '-'}
                     </td>
@@ -512,7 +513,7 @@ const CreditNotes = () => {
                   <div>
                     <label className="label">Party *</label>
                     <SearchableSelect
-                      value={formData.partyId}
+                      value={formData.customerId}
                       onChange={(id) => handlePartyChange(id)}
                       options={parties.map(p => ({ id: p.id, name: p.name }))}
                       placeholder="Select Party"
@@ -780,10 +781,10 @@ const CreditNotes = () => {
               {/* Party Info */}
               <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Party</p>
-                <p className="font-semibold">{viewingNote.party?.name}</p>
-                {viewingNote.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingNote.party.phone}</p>}
-                {viewingNote.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingNote.party.email}</p>}
-                {viewingNote.party?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingNote.party.billingAddress}</p>}
+                <p className="font-semibold">{viewingNote.customer?.name}</p>
+                {viewingNote.customer?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingNote.customer.phone}</p>}
+                {viewingNote.customer?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingNote.customer.email}</p>}
+                {viewingNote.customer?.billingAddress && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingNote.customer.billingAddress}</p>}
               </div>
 
               {/* Reference Invoice */}

@@ -109,7 +109,7 @@ export const setupItemHandlers = () => {
         where: { id },
         include: {
           salesInvoiceItems: { take: 1 },
-          purchaseBillItems: { take: 1 }
+          supplierItems: { take: 1 }
         }
       })
 
@@ -117,10 +117,10 @@ export const setupItemHandlers = () => {
         return { success: false, error: 'Item not found' }
       }
 
-      if (item.salesInvoiceItems.length > 0 || item.purchaseBillItems.length > 0) {
+      if (item.salesInvoiceItems.length > 0 || item.supplierItems.length > 0) {
         return {
           success: false,
-          error: 'Cannot delete item used in invoices or bills. Delete those records first.'
+          error: 'Cannot delete item used in invoices or linked supplier items. Delete those records first.'
         }
       }
 

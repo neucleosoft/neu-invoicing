@@ -81,7 +81,7 @@ export const setupGSTReportHandlers = () => {
       const invoices = await prisma.salesInvoice.findMany({
         where,
         include: {
-          party: true,
+          customer: true,
           items: {
             include: {
               item: true
@@ -101,7 +101,7 @@ export const setupGSTReportHandlers = () => {
       const nilExemptInvoices: any[] = []
 
       for (const invoice of invoices) {
-        const hasGstin = invoice.party?.taxId && invoice.party.taxId.length === 15
+        const hasGstin = invoice.customer?.taxId && invoice.customer.taxId.length === 15
         const isInterState = invoice.isInterState
         const totalValue = invoice.totalAmount
 
@@ -217,10 +217,14 @@ export const setupGSTReportHandlers = () => {
       const bills = await prisma.purchaseBill.findMany({
         where,
         include: {
-          party: true,
+          supplier: true,
           items: {
             include: {
-              item: true
+              supplierItem: {
+                include: {
+                  linkedItem: true
+                }
+              }
             }
           }
         },
@@ -234,7 +238,7 @@ export const setupGSTReportHandlers = () => {
       const nilExemptPurchases: any[] = []
 
       for (const bill of bills) {
-        const hasGstin = bill.party?.taxId && bill.party.taxId.length === 15
+        const hasGstin = bill.supplier?.taxId && bill.supplier.taxId.length === 15
 
         if (bill.reverseCharge) {
           rcmPurchases.push(bill)
@@ -340,7 +344,7 @@ export const setupGSTReportHandlers = () => {
           invoiceDate: { gte: startDate, lte: endDate }
         },
         include: {
-          party: true,
+          customer: true,
           items: true
         }
       })
@@ -351,7 +355,7 @@ export const setupGSTReportHandlers = () => {
           billDate: { gte: startDate, lte: endDate }
         },
         include: {
-          party: true,
+          supplier: true,
           items: true
         }
       })
@@ -375,7 +379,7 @@ export const setupGSTReportHandlers = () => {
       }
 
       // 3.1.1 - Outward supplies to unregistered persons
-      const b2cSupplies = salesInvoices.filter(inv => !inv.party?.taxId || inv.party.taxId.length !== 15)
+      const b2cSupplies = salesInvoices.filter(inv => !inv.customer?.taxId || inv.customer.taxId.length !== 15)
       const outwardUnregistered = {
         taxableValue: b2cSupplies.reduce((sum, inv) => sum + inv.subtotal - (inv.discount || 0), 0),
         igst: b2cSupplies.reduce((sum, inv) => sum + (inv.igstAmount || 0), 0),
@@ -510,7 +514,7 @@ export const setupGSTReportHandlers = () => {
           invoiceDate: { gte: startDate, lte: endDate }
         },
         include: {
-          party: true,
+          customer: true,
           items: true
         }
       })
@@ -521,7 +525,7 @@ export const setupGSTReportHandlers = () => {
           billDate: { gte: startDate, lte: endDate }
         },
         include: {
-          party: true,
+          supplier: true,
           items: true
         }
       })
@@ -559,7 +563,7 @@ export const setupGSTReportHandlers = () => {
       }
 
       for (const inv of salesInvoices) {
-        const hasGstin = inv.party?.taxId && inv.party.taxId.length === 15
+        const hasGstin = inv.customer?.taxId && inv.customer.taxId.length === 15
         const taxableValue = inv.subtotal - (inv.discount || 0)
 
         if (inv.supplyType === 'EXPORT') {
@@ -614,7 +618,7 @@ export const setupGSTReportHandlers = () => {
       }
 
       for (const bill of purchaseBills) {
-        const hasGstin = bill.party?.taxId && bill.party.taxId.length === 15
+        const hasGstin = bill.supplier?.taxId && bill.supplier.taxId.length === 15
         const taxableValue = bill.subtotal - (bill.discount || 0)
 
         if (hasGstin) {
@@ -770,7 +774,7 @@ export const setupGSTReportHandlers = () => {
       if (data.sections?.b2b?.invoices) {
         for (const inv of data.sections.b2b.invoices) {
           b2bSheet.addRow({
-            gstin: inv.party?.taxId || '',
+            gstin: inv.customer?.taxId || '',
             invoiceNumber: inv.invoiceNumber,
             invoiceDate: new Date(inv.invoiceDate).toLocaleDateString('en-GB'),
             invoiceValue: inv.totalAmount,
@@ -1118,14 +1122,14 @@ async function generateHSNSummaryForYear(salesInvoices: any[], purchaseBills: an
 
   for (const bill of purchaseBills) {
     for (const item of bill.items) {
-      const hsnCode = item.hsnCode || item.item?.hsnCode || 'NA'
+      const hsnCode = item.hsnCode || item.supplierItem?.hsnCode || item.supplierItem?.linkedItem?.hsnCode || 'NA'
       const key = hsnCode
 
       if (!inwardHSNMap[key]) {
         inwardHSNMap[key] = {
           hsnCode,
-          description: item.item?.name || '',
-          uqc: item.item?.unit || 'NOS',
+          description: item.supplierItem?.name || item.supplierItem?.linkedItem?.name || '',
+          uqc: item.supplierItem?.unit || item.supplierItem?.linkedItem?.unit || 'NOS',
           totalQuantity: 0,
           totalValue: 0,
           taxableValue: 0,

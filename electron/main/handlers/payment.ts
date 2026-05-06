@@ -8,15 +8,15 @@ export const setupPaymentHandlers = () => {
   // Record payment in (from customer)
   ipcMain.handle('payment:recordPaymentIn', async (_, data) => {
     try {
-      if (!data.partyId || !data.amount || data.amount <= 0) {
-        return { success: false, error: 'Invalid payment: partyId and positive amount required' }
+      if (!data.customerId || !data.amount || data.amount <= 0) {
+        return { success: false, error: 'Invalid payment: customerId and positive amount required' }
       }
 
       const payment = await prisma.$transaction(async (tx: any) => {
         const created = await tx.paymentTransaction.create({
           data: {
             type: 'PAYMENT_IN',
-            partyId: data.partyId,
+            customerId: data.customerId,
             amount: data.amount,
             paymentMode: data.paymentMode || 'CASH',
             paymentDate: new Date(data.paymentDate),
@@ -27,9 +27,9 @@ export const setupPaymentHandlers = () => {
           }
         })
 
-        // Update party balance
-        await tx.party.update({
-          where: { id: data.partyId },
+        // Update customer balance
+        await tx.customer.update({
+          where: { id: data.customerId },
           data: { currentBalance: { decrement: data.amount } }
         })
 
@@ -78,15 +78,15 @@ export const setupPaymentHandlers = () => {
   // Record payment out (to supplier)
   ipcMain.handle('payment:recordPaymentOut', async (_, data) => {
     try {
-      if (!data.partyId || !data.amount || data.amount <= 0) {
-        return { success: false, error: 'Invalid payment: partyId and positive amount required' }
+      if (!data.supplierId || !data.amount || data.amount <= 0) {
+        return { success: false, error: 'Invalid payment: supplierId and positive amount required' }
       }
 
       const payment = await prisma.$transaction(async (tx: any) => {
         const created = await tx.paymentTransaction.create({
           data: {
             type: 'PAYMENT_OUT',
-            partyId: data.partyId,
+            supplierId: data.supplierId,
             amount: data.amount,
             paymentMode: data.paymentMode || 'CASH',
             paymentDate: new Date(data.paymentDate),
@@ -97,9 +97,9 @@ export const setupPaymentHandlers = () => {
           }
         })
 
-        // Update party balance (decrement = we paid the supplier, reducing what we owe)
-        await tx.party.update({
-          where: { id: data.partyId },
+        // Update supplier balance (decrement = we paid the supplier, reducing what we owe)
+        await tx.supplier.update({
+          where: { id: data.supplierId },
           data: { currentBalance: { decrement: data.amount } }
         })
 
@@ -152,7 +152,13 @@ export const setupPaymentHandlers = () => {
       const payments = await prisma.paymentTransaction.findMany({
         where,
         include: {
-          party: true
+          customer: true,
+          supplier: true,
+          purchaseBill: {
+            include: {
+              supplier: true
+            }
+          }
         },
         orderBy: { paymentDate: 'desc' }
       })

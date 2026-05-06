@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react'
-import { Party } from '../types'
+import { Party, Supplier } from '../types'
 import { formatCurrency } from '../utils/currency'
 import { validateGSTIN, INDIAN_STATE_CODES } from '../utils/gstValidation'
 import NumberInput from '../components/NumberInput'
@@ -8,8 +8,15 @@ import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
 import SortHeader from '../components/SortHeader'
+import SupplierItemsModal from '../components/SupplierItemsModal'
 import { useSortable } from '../hooks/useSortable'
 import { Users, Search as SearchIcon, Loader2 } from 'lucide-react'
+
+export type PartyDirectoryMode = 'ALL' | 'CUSTOMER' | 'SUPPLIER'
+
+interface PartiesProps {
+  mode?: PartyDirectoryMode
+}
 
 // Avatar color palette (6 colors)
 const AVATAR_COLORS = [
@@ -34,14 +41,16 @@ function getAvatarColor(name: string): string {
   return AVATAR_COLORS[hashName(name) % AVATAR_COLORS.length]
 }
 
-const Parties = () => {
+const Parties = ({ mode = 'ALL' }: PartiesProps) => {
   const [parties, setParties] = useState<Party[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
-  const [filter, setFilter] = useState<'ALL' | 'CUSTOMER' | 'SUPPLIER'>('ALL')
+  const [filter, setFilter] = useState<PartyDirectoryMode>(mode)
   const [searchQuery, setSearchQuery] = useState('')
   const [showModal, setShowModal] = useState(false)
   const [editingParty, setEditingParty] = useState<Party | null>(null)
+  // When set, the supplier-items catalog modal is shown for this supplier.
+  const [catalogSupplier, setCatalogSupplier] = useState<Supplier | null>(null)
   const [formData, setFormData] = useState({
     name: '',
     type: 'CUSTOMER' as 'CUSTOMER' | 'SUPPLIER',
@@ -84,9 +93,26 @@ const Parties = () => {
   const loadParties = async () => {
     setLoading(true)
     try {
-      const result = await window.electronAPI.party.getAll(filter === 'ALL' ? undefined : filter)
-      if (result.success && result.data) {
-        setParties(result.data)
+      if (filter === 'CUSTOMER') {
+        const result = await window.electronAPI.customer.getAll()
+        if (result.success && result.data) {
+          setParties(result.data)
+        }
+      } else if (filter === 'SUPPLIER') {
+        const result = await window.electronAPI.supplier.getAll()
+        if (result.success && result.data) {
+          setParties(result.data)
+        }
+      } else {
+        const [customersResult, suppliersResult] = await Promise.all([
+          window.electronAPI.customer.getAll(),
+          window.electronAPI.supplier.getAll(),
+        ])
+
+        setParties([
+          ...(customersResult.success && customersResult.data ? customersResult.data : []),
+          ...(suppliersResult.success && suppliersResult.data ? suppliersResult.data : []),
+        ])
       }
     } finally {
       setLoading(false)
@@ -129,9 +155,8 @@ const Parties = () => {
     e.preventDefault()
     setSubmitting(true)
 
-    const partyData = {
+    const basePartyData = {
       name: formData.name,
-      type: formData.type,
       phone: formData.phone,
       email: formData.email,
       billingAddress: formData.billingAddress,
@@ -153,9 +178,29 @@ const Parties = () => {
 
     try {
       if (editingParty) {
-        await window.electronAPI.party.update(editingParty.id, partyData)
+        if (editingParty.type === 'CUSTOMER') {
+          await window.electronAPI.customer.update(editingParty.id, {
+            ...basePartyData,
+            type: 'CUSTOMER'
+          })
+        } else {
+          await window.electronAPI.supplier.update(editingParty.id, {
+            ...basePartyData,
+            type: 'SUPPLIER'
+          })
+        }
       } else {
-        await window.electronAPI.party.create(partyData)
+        if (formData.type === 'CUSTOMER') {
+          await window.electronAPI.customer.create({
+            ...basePartyData,
+            type: 'CUSTOMER'
+          })
+        } else {
+          await window.electronAPI.supplier.create({
+            ...basePartyData,
+            type: 'SUPPLIER'
+          })
+        }
       }
       setShowModal(false)
       setEditingParty(null)
@@ -193,7 +238,11 @@ const Parties = () => {
   const handleDelete = async (id: string) => {
     const confirmed = await confirm({ message: 'Are you sure you want to delete this party?', danger: true })
     if (confirmed) {
-      const result = await window.electronAPI.party.delete(id)
+      const party = parties.find((entry) => entry.id === id)
+      if (!party) return
+      const result = party.type === 'CUSTOMER'
+        ? await window.electronAPI.customer.delete(id)
+        : await window.electronAPI.supplier.delete(id)
       if (result.success) {
         loadParties()
       } else {
@@ -263,36 +312,49 @@ const Parties = () => {
     }
   }
 
+  const isFixedMode = mode !== 'ALL'
+  const pageTitle = filter === 'CUSTOMER' ? 'Customers' : filter === 'SUPPLIER' ? 'Suppliers' : 'Parties'
+  const currentEntityLabel = (editingParty?.type || formData.type) === 'CUSTOMER' ? 'Customer' : 'Supplier'
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Parties</h1>
-        {filter === 'CUSTOMER' && (
-          <button onClick={handleAddCustomer} className="btn btn-primary">
-            + Add Customer
-          </button>
-        )}
-        {filter === 'SUPPLIER' && (
-          <button onClick={handleAddSupplier} className="btn btn-primary">
-            + Add Supplier
-          </button>
-        )}
+        <h1 className="text-3xl font-bold">{pageTitle}</h1>
+        <div className="flex gap-3">
+          {!isFixedMode && (
+            <button onClick={handleAddCustomer} className="btn btn-secondary">
+              + Add Customer
+            </button>
+          )}
+          {(filter === 'SUPPLIER' || !isFixedMode) && (
+            <button onClick={handleAddSupplier} className="btn btn-primary">
+              + Add Supplier
+            </button>
+          )}
+          {filter === 'CUSTOMER' && (
+            <button onClick={handleAddCustomer} className="btn btn-primary">
+              + Add Customer
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter Tabs */}
-      <div className="flex space-x-2">
-        {['ALL', 'CUSTOMER', 'SUPPLIER'].map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setFilter(tab as any)}
-            className={`px-4 py-2 rounded-lg font-medium ${
-              filter === tab ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
-            }`}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
+      {!isFixedMode && (
+        <div className="flex space-x-2">
+          {['ALL', 'CUSTOMER', 'SUPPLIER'].map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setFilter(tab as PartyDirectoryMode)}
+              className={`px-4 py-2 rounded-lg font-medium ${
+                filter === tab ? 'bg-primary-600 text-white' : 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Search Bar */}
       <div className="relative">
@@ -327,13 +389,19 @@ const Parties = () => {
           ) : (
             <EmptyState
               icon={Users}
-              title="No parties yet"
-              description="Add customers and suppliers to start tracking balances, invoices, and payments."
+              title={`No ${pageTitle.toLowerCase()} yet`}
+              description={
+                filter === 'CUSTOMER'
+                  ? 'Add customers to start creating invoices, quotations, and statements.'
+                  : filter === 'SUPPLIER'
+                    ? 'Add suppliers to start tracking purchase bills and supplier payments.'
+                    : 'Add customers and suppliers to start tracking balances, invoices, and payments.'
+              }
               action={{
                 label:
                   filter === 'CUSTOMER' ? '+ Add your first customer'
                   : filter === 'SUPPLIER' ? '+ Add your first supplier'
-                  : '+ Add your first party',
+                  : '+ Add your first customer',
                 onClick: filter === 'SUPPLIER' ? handleAddSupplier : handleAddCustomer,
               }}
             />
@@ -411,6 +479,14 @@ const Parties = () => {
                       </div>
                     </td>
                     <td className="table-cell">
+                      {party.type === 'SUPPLIER' && (
+                        <button
+                          onClick={() => setCatalogSupplier(party as Supplier)}
+                          className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 mr-3"
+                        >
+                          Catalog
+                        </button>
+                      )}
                       <button onClick={() => handleEdit(party)} className="text-primary-600 hover:text-primary-700 mr-3">
                         Edit
                       </button>
@@ -432,7 +508,7 @@ const Parties = () => {
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-2xl font-bold">{editingParty ? 'Edit' : 'Add'} Party</h2>
+              <h2 className="text-2xl font-bold">{editingParty ? 'Edit' : 'Add'} {currentEntityLabel}</h2>
               <button
                 type="button"
                 onClick={() => { setShowModal(false); setEditingParty(null); resetForm() }}
@@ -495,17 +571,26 @@ const Parties = () => {
                     placeholder="Business/Person name"
                   />
                 </div>
-                <div>
-                  <label className="label">Type *</label>
-                  <select
-                    value={formData.type}
-                    onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
-                    className="input"
-                  >
-                    <option value="CUSTOMER">Customer</option>
-                    <option value="SUPPLIER">Supplier</option>
-                  </select>
-                </div>
+                {isFixedMode ? (
+                  <div>
+                    <label className="label">Type</label>
+                    <div className="input flex items-center bg-gray-50 dark:bg-gray-900/40">
+                      {currentEntityLabel}
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <label className="label">Type *</label>
+                    <select
+                      value={formData.type}
+                      onChange={(e) => setFormData({ ...formData, type: e.target.value as any })}
+                      className="input"
+                    >
+                      <option value="CUSTOMER">Customer</option>
+                      <option value="SUPPLIER">Supplier</option>
+                    </select>
+                  </div>
+                )}
               </div>
 
               {/* Contact Info */}
@@ -644,12 +729,21 @@ const Parties = () => {
                   className="btn btn-primary inline-flex items-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
                 >
                   {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
-                  {editingParty ? (submitting ? 'Updating…' : 'Update Party') : (submitting ? 'Creating…' : 'Create Party')}
+                  {editingParty
+                    ? (submitting ? 'Updating…' : `Update ${currentEntityLabel}`)
+                    : (submitting ? 'Creating…' : `Create ${currentEntityLabel}`)}
                 </button>
               </div>
             </form>
           </div>
         </div>
+      )}
+
+      {catalogSupplier && (
+        <SupplierItemsModal
+          supplier={catalogSupplier}
+          onClose={() => setCatalogSupplier(null)}
+        />
       )}
     </div>
   )
