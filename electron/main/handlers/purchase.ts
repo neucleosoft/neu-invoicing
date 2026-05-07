@@ -249,6 +249,12 @@ Rules:
 - Numbers must be numbers (not strings), with no currency symbols or commas
 - Dates must be YYYY-MM-DD format
 - The "items" array can be empty if no line items are visible
+- TAX HANDLING: only set per-item "taxRate" when the bill shows a tax %
+  column (or per-line CGST/SGST/IGST values) for each line item. When the
+  bill shows tax only as a single total at the bottom (no per-item tax
+  column), leave every item's "taxRate" at 0 and put the total tax into
+  "taxAmount" (and split into cgst/sgst/igst when those line items exist).
+  Do not distribute a bottom-line tax across items.
 - Return ONLY the JSON object, nothing else.`
 
 type OcrResult =
@@ -507,13 +513,21 @@ export const setupPurchaseHandlers = () => {
 
         // Calculate totals
         let subtotal = 0
-        let taxAmount = 0
+        let computedTax = 0
 
         normalizedItems.forEach((item: any) => {
           const itemTotal = item.quantity * item.rate - (item.discount || 0)
           subtotal += itemTotal
-          taxAmount += (itemTotal * (item.taxRate || 0)) / 100
+          computedTax += (itemTotal * (item.taxRate || 0)) / 100
         })
+
+        // Bill-level tax override: when the original bill shows tax only as a
+        // single total (no per-item tax column), the renderer sends the explicit
+        // `taxAmount` and leaves item.taxRate at 0. Honor it here so totals
+        // match the source document.
+        const taxOverrideProvided =
+          typeof data.taxAmount === 'number' && Number.isFinite(data.taxAmount) && data.taxAmount >= 0
+        const taxAmount = taxOverrideProvided ? data.taxAmount : computedTax
 
         const totalAmount = subtotal + taxAmount - (data.discount || 0)
         const balanceDue = totalAmount - (data.amountPaid || 0)
@@ -538,6 +552,9 @@ export const setupPurchaseHandlers = () => {
             subtotal,
             discount: data.discount || 0,
             taxAmount,
+            cgstAmount: data.cgstAmount || 0,
+            sgstAmount: data.sgstAmount || 0,
+            igstAmount: data.igstAmount || 0,
             totalAmount,
             amountPaid: data.amountPaid || 0,
             balanceDue,
@@ -607,13 +624,17 @@ export const setupPurchaseHandlers = () => {
         const normalizedItems = await normalizePurchaseItems(tx, supplierId, data.items)
 
         let subtotal = 0
-        let taxAmount = 0
+        let computedTax = 0
 
         normalizedItems.forEach((item: any) => {
           const itemTotal = item.quantity * item.rate - (item.discount || 0)
           subtotal += itemTotal
-          taxAmount += (itemTotal * (item.taxRate || 0)) / 100
+          computedTax += (itemTotal * (item.taxRate || 0)) / 100
         })
+
+        const taxOverrideProvided =
+          typeof data.taxAmount === 'number' && Number.isFinite(data.taxAmount) && data.taxAmount >= 0
+        const taxAmount = taxOverrideProvided ? data.taxAmount : computedTax
 
         const totalAmount = subtotal + taxAmount - (data.discount || 0)
         const balanceDue = totalAmount - (existingBill.amountPaid || 0)
@@ -664,6 +685,9 @@ export const setupPurchaseHandlers = () => {
             subtotal,
             discount: data.discount || 0,
             taxAmount,
+            cgstAmount: data.cgstAmount ?? 0,
+            sgstAmount: data.sgstAmount ?? 0,
+            igstAmount: data.igstAmount ?? 0,
             totalAmount,
             balanceDue,
             status: status as any,
