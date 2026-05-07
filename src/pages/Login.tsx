@@ -50,7 +50,7 @@ const Login = () => {
     <div className="flex items-center justify-center h-screen bg-gradient-to-br from-primary-50 to-primary-100 dark:from-gray-900 dark:to-gray-800">
       <div className="card w-full max-w-md">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold text-primary-600 mb-2">neuInvoicing</h1>
+          <h1 className="text-4xl font-bold text-primary-600 mb-2">Neu Invoicing</h1>
           <p className="text-gray-600 dark:text-gray-400">Your business, your data, your control</p>
         </div>
 

@@ -23,7 +23,7 @@
     "electron",
     "google-drive"
   ],
-  "author": "neuInvoicing",
+  "author": "Neu Invoicing",
   "license": "MIT",
   "dependencies": {
     "@prisma/client": "^5.20.0",
@@ -71,7 +71,7 @@
   },
   "build": {
     "appId": "com.neuinvoicing.app",
-    "productName": "neuInvoicing",
+    "productName": "Neu Invoicing",
     "forceCodeSigning": false,
     "asar": false,
     "directories": {

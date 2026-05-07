@@ -1,5 +1,5 @@
 /**
- * Import PDF invoices from old NEUCLEO SOFT billing into neuInvoicing database.
+ * Import PDF invoices from old NEUCLEO SOFT billing into Neu Invoicing database.
  *
  * Usage:
  *   node scripts/import-invoices.js              # Full import

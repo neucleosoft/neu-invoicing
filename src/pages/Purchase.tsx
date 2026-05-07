@@ -11,6 +11,8 @@ import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
 import { Camera, ShoppingCart, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
+import ShareMenu from '../components/ShareMenu'
+import { sharePdf, ShareTarget } from '../utils/sharePdf'
 
 interface Item {
   id: string
@@ -165,6 +167,67 @@ const Purchase = () => {
     if (result.success && result.data) {
       setViewingBill(normalizeBill(result.data))
       setShowViewModal(true)
+    }
+  }
+
+  // Fetch the saved supplier attachment (BLOB) for a bill. Centralized so both
+  // open-in-window and share-via-X paths use the same fetch + Buffer→Uint8Array conversion.
+  const loadAttachment = async (id: string) => {
+    const result = await window.electronAPI.purchase.getById(id)
+    if (!result.success || !result.data) {
+      toast.error(result.error || 'Failed to fetch bill')
+      return null
+    }
+    const bill = result.data as any
+    if (!bill.attachmentData || !bill.attachmentMimeType) {
+      toast.info('No attachment saved on this bill')
+      return null
+    }
+    const bytes =
+      bill.attachmentData instanceof Uint8Array
+        ? bill.attachmentData
+        : new Uint8Array(bill.attachmentData)
+    return { bill, bytes, mimeType: bill.attachmentMimeType as string }
+  }
+
+  // Open the original supplier bill (image/PDF the user uploaded) in a new window.
+  const handleOpenAttachment = async (id: string) => {
+    const att = await loadAttachment(id)
+    if (!att) return
+    const blob = new Blob([att.bytes], { type: att.mimeType })
+    const url = URL.createObjectURL(blob)
+    const opened = window.open(url, '_blank')
+    // Revoke after a delay so the new window has time to load. If blocked, fall back to download.
+    if (!opened) {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${att.bill.billNumber || 'bill'}${att.mimeType === 'application/pdf' ? '.pdf' : ''}`
+      a.click()
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
+  const handleShare = async (id: string, target: ShareTarget) => {
+    try {
+      const att = await loadAttachment(id)
+      if (!att) return
+      const ext = att.mimeType === 'application/pdf'
+        ? '.pdf'
+        : att.mimeType.startsWith('image/')
+        ? `.${att.mimeType.split('/')[1]}`
+        : ''
+      const safeParty = (att.bill.supplier?.name || att.bill.party?.name || 'supplier').replace(/[^a-z0-9]/gi, '_')
+      const filename = `${att.bill.billNumber || 'bill'}_${safeParty}${ext}`
+      const subject = `Bill ${att.bill.billNumber || ''} from ${att.bill.supplier?.name || att.bill.party?.name || ''}`.trim()
+      await sharePdf(att.bytes, filename, target, toast, {
+        subject,
+        phone: att.bill.supplier?.phone || att.bill.party?.phone,
+        email: att.bill.supplier?.email || att.bill.party?.email,
+        partyName: att.bill.supplier?.name || att.bill.party?.name,
+      })
+    } catch (error) {
+      console.error('Error sharing bill:', error)
+      toast.error('Failed to share bill')
     }
   }
 
@@ -619,6 +682,23 @@ const Purchase = () => {
                       >
                         Edit
                       </button>
+                      {(bill as any).attachmentMimeType && (
+                        <>
+                          <button
+                            onClick={() => handleOpenAttachment(bill.id)}
+                            className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+                            title="Open original supplier bill"
+                          >
+                            PDF
+                          </button>
+                          <ShareMenu
+                            onShare={(target) => handleShare(bill.id, target)}
+                            phone={bill.party?.phone}
+                            email={bill.party?.email}
+                            partyName={bill.party?.name}
+                          />
+                        </>
+                      )}
                       <button onClick={() => handleDelete(bill.id)} className="text-red-600 hover:text-red-700">Delete</button>
                     </div>
                   </td>
@@ -1077,6 +1157,23 @@ const Purchase = () => {
                 >
                   Close
                 </button>
+                {(viewingBill as any).attachmentMimeType && (
+                  <>
+                    <ShareMenu
+                      variant="button"
+                      onShare={(target) => handleShare(viewingBill.id, target)}
+                      phone={viewingBill.party?.phone}
+                      email={viewingBill.party?.email}
+                      partyName={viewingBill.party?.name}
+                    />
+                    <button
+                      onClick={() => handleOpenAttachment(viewingBill.id)}
+                      className="btn btn-primary"
+                    >
+                      Open PDF
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           </div>
