@@ -202,42 +202,82 @@ export const setupDashboardHandlers = () => {
     }
   })
 
-  // Get sales chart data (daily buckets for the last `days` days, inclusive of today)
-  ipcMain.handle('dashboard:getSalesChartData', async (_, days: number = 30) => {
+  // Get sales chart data. `days > 0` → daily buckets for that lookback window.
+  // `days === 0` → "all-time": span starts at the earliest invoice; spans longer
+  // than 120 days are bucketed monthly so the chart stays readable.
+  ipcMain.handle('dashboard:getSalesChartData', async (_, days: number = 0) => {
     try {
-      const startDate = new Date()
-      startDate.setHours(0, 0, 0, 0)
-      startDate.setDate(startDate.getDate() - (days - 1))
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+
+      let startDate: Date
+      if (days > 0) {
+        startDate = new Date(today)
+        startDate.setDate(startDate.getDate() - (days - 1))
+      } else {
+        const earliest = await prisma.salesInvoice.findFirst({
+          where: { type: 'INVOICE' },
+          orderBy: { invoiceDate: 'asc' },
+          select: { invoiceDate: true }
+        })
+        if (!earliest) {
+          // No invoices yet — fall back to a 30-day empty chart so the UI isn't blank
+          startDate = new Date(today)
+          startDate.setDate(startDate.getDate() - 29)
+        } else {
+          startDate = new Date(earliest.invoiceDate)
+          startDate.setHours(0, 0, 0, 0)
+        }
+      }
 
       const invoices = await prisma.salesInvoice.findMany({
         where: {
           type: 'INVOICE',
-          invoiceDate: {
-            gte: startDate
-          }
+          invoiceDate: { gte: startDate }
         },
-        select: {
-          invoiceDate: true,
-          totalAmount: true
-        }
+        select: { invoiceDate: true, totalAmount: true }
       })
+
+      const spanDays = Math.floor((today.getTime() - startDate.getTime()) / 86_400_000) + 1
+      const bucketByMonth = spanDays > 120
+
+      if (bucketByMonth) {
+        const monthKey = (d: Date) =>
+          `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+
+        const monthlyData: { [key: string]: number } = {}
+        const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
+        const end = new Date(today.getFullYear(), today.getMonth(), 1)
+        while (cursor <= end) {
+          monthlyData[monthKey(cursor)] = 0
+          cursor.setMonth(cursor.getMonth() + 1)
+        }
+
+        invoices.forEach(invoice => {
+          const key = monthKey(invoice.invoiceDate)
+          if (key in monthlyData) monthlyData[key] += invoice.totalAmount
+        })
+
+        const chartData = Object.entries(monthlyData).map(([key, amount]) => {
+          const [yyyy, mm] = key.split('-')
+          return { date: key, label: `${mm}/${yyyy.slice(2)}`, amount }
+        })
+        return { success: true, data: chartData }
+      }
 
       const dayKey = (d: Date) =>
         `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-      // Pre-fill every day in range with 0 so the chart is contiguous
       const dailyData: { [key: string]: number } = {}
       const cursor = new Date(startDate)
-      for (let i = 0; i < days; i++) {
+      for (let i = 0; i < spanDays; i++) {
         dailyData[dayKey(cursor)] = 0
         cursor.setDate(cursor.getDate() + 1)
       }
 
       invoices.forEach(invoice => {
         const key = dayKey(invoice.invoiceDate)
-        if (key in dailyData) {
-          dailyData[key] += invoice.totalAmount
-        }
+        if (key in dailyData) dailyData[key] += invoice.totalAmount
       })
 
       const chartData = Object.entries(dailyData).map(([date, amount]) => {

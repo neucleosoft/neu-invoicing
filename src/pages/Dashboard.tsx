@@ -20,6 +20,7 @@ import { useStore } from '../store/useStore'
 import MetricCard from '../components/MetricCard'
 
 const chartRangeLabel = (days: number) => {
+  if (days === 0) return 'All Time'
   if (days === 7) return 'Last 7 Days'
   if (days === 30) return 'Last 30 Days'
   if (days === 90) return 'Last 90 Days'
@@ -53,7 +54,7 @@ const Dashboard = () => {
   const [cashBankBalance, setCashBankBalance] = useState(0)
   const [overdueCount, setOverdueCount] = useState(0)
   const [latestTransactions, setLatestTransactions] = useState<LatestTransaction[]>([])
-  const [chartRange, setChartRange] = useState<7 | 30 | 90 | 365>(30)
+  const [chartRange, setChartRange] = useState<0 | 7 | 30 | 90 | 365>(0)
   const [chartLoading, setChartLoading] = useState(false)
 
   useEffect(() => {
@@ -263,7 +264,7 @@ const Dashboard = () => {
               </span>
             </h2>
             <div className="inline-flex rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-              {([7, 30, 90, 365] as const).map((d) => (
+              {([0, 7, 30, 90, 365] as const).map((d) => (
                 <button
                   key={d}
                   onClick={() => setChartRange(d)}
@@ -273,7 +274,7 @@ const Dashboard = () => {
                       : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700'
                   }`}
                 >
-                  {d === 365 ? '1Y' : `${d}D`}
+                  {d === 0 ? 'All' : d === 365 ? '1Y' : `${d}D`}
                 </button>
               ))}
             </div>
@@ -290,7 +291,7 @@ const Dashboard = () => {
               <XAxis
                 dataKey="label"
                 interval="preserveStartEnd"
-                minTickGap={chartRange >= 90 ? 40 : 20}
+                minTickGap={chartRange === 0 || chartRange >= 90 ? 40 : 20}
                 tick={{ fill: darkMode ? '#9ca3af' : '#6b7280', fontSize: 12 }}
               />
               <YAxis tick={{ fill: darkMode ? '#9ca3af' : '#6b7280', fontSize: 12 }} />

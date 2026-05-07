@@ -45,7 +45,7 @@ const createWindow = () => {
       nodeIntegration: false,
       sandbox: false
     },
-    title: 'neuInvoicing',
+    title: 'Neu Invoicing',
     autoHideMenuBar: true
   })
 

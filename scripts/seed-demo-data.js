@@ -1,4 +1,4 @@
-// Demo Data Seed Script for neuInvoicing
+// Demo Data Seed Script for Neu Invoicing
 // Run this with: node seed-demo-data.js
 
 const { PrismaClient } = require('@prisma/client');

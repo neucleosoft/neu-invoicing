@@ -1,4 +1,4 @@
-// Prisma schema for neuInvoicing
+// Prisma schema for Neu Invoicing
 
 generator client {
   provider = "prisma-client-js"

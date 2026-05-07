@@ -1,4 +1,4 @@
-# neuInvoicing
+# Neu Invoicing
 
 A powerful, offline-first desktop invoicing application with seamless Google Drive synchronization. Built for small businesses who value data ownership and privacy.
 
@@ -263,7 +263,7 @@ neu-invoicing/
 ## 📱 Usage Guide
 
 ### First Time Setup
-1. Launch neuInvoicing
+1. Launch Neu Invoicing
 2. Click "Sign in with Google"
 3. Authorize app to access your Google Drive
 4. Complete business onboarding wizard
