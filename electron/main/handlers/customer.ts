@@ -5,10 +5,13 @@ import { triggerSyncAfterChange } from '../sync'
 export const setupCustomerHandlers = () => {
   const prisma = getPrisma()
 
-  // Get all customers
+  // Get all customers. The Customer Prisma model maps to the legacy `Party`
+  // table, which historically also stored suppliers (`type='SUPPLIER'`). Filter
+  // those out so they don't pollute the Customers UI.
   ipcMain.handle('customer:getAll', async () => {
     try {
       const customers = await prisma.customer.findMany({
+        where: { type: 'CUSTOMER' },
         orderBy: { name: 'asc' }
       })
       return { success: true, data: customers }

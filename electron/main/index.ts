@@ -8,7 +8,7 @@ import { setupDatabase } from './database'
 import { setupAuthHandlers } from './auth'
 import { setupSyncHandlers } from './sync'
 import { setupCustomerHandlers } from './handlers/customer'
-import { setupSupplierHandlers } from './handlers/supplier'
+import { setupSupplierHandlers, migrateLegacySuppliersFromParty } from './handlers/supplier'
 import { setupSupplierItemHandlers } from './handlers/supplierItem'
 import { setupItemHandlers } from './handlers/item'
 import { setupSalesHandlers } from './handlers/sales'
@@ -127,6 +127,11 @@ app.whenReady().then(async () => {
   setupCreditNoteHandlers()
   setupCashBankHandlers()
   setupShareHandlers()
+
+  // One-shot data fix: pre-split databases held suppliers in the Customer/Party
+  // table with type='SUPPLIER'. Move them into the dedicated Supplier table.
+  // Idempotent — no-op once everything's been migrated.
+  migrateLegacySuppliersFromParty()
 
   createWindow()
 

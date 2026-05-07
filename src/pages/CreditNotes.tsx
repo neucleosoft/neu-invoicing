@@ -8,6 +8,15 @@ import EmptyState from '../components/EmptyState'
 import { FileText } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
 import { useStore } from '../store/useStore'
+import ShareMenu from '../components/ShareMenu'
+import { sharePdf, ShareTarget } from '../utils/sharePdf'
+import {
+  getCreditNotePDFBytes,
+  buildCreditNoteFilename,
+  CreditNotePDFData,
+} from '../utils/pdfmakeCreditNote'
+import { openPdfInWindow } from '../utils/openPdfInWindow'
+import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 
 interface CreditDebitNote {
   id: string
@@ -178,6 +187,99 @@ const CreditNotes = () => {
     if (result.success && result.data) {
       setViewingNote(result.data)
       setShowViewModal(true)
+    }
+  }
+
+  // Build the PDF input shape from the raw note row and the active company.
+  const loadCreditNotePDFData = async (id: string): Promise<CreditNotePDFData | null> => {
+    const result = await window.electronAPI.creditNote.getById(id)
+    if (!result.success || !result.data) {
+      toast.error(result.error || 'Failed to fetch note')
+      return null
+    }
+    const note: any = result.data
+    const company = await loadCompanyForPDF()
+    const customer = note.customer || {}
+    const items = (note.items || []).map((it: any) => {
+      const quantity = it.quantity || 0
+      const rate = it.rate || 0
+      const discount = it.discount || 0
+      return {
+        item: {
+          name: it.item?.name || 'Item',
+          unit: it.item?.unit || 'pcs',
+          hsnCode: it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+          skuHsn: it.item?.skuHsn,
+        },
+        quantity,
+        rate,
+        taxRate: it.taxRate || 0,
+        discount,
+        total: it.total || 0,
+        hsnCode: it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+        taxableAmount: quantity * rate - discount,
+      }
+    })
+    return {
+      noteNumber: note.noteNumber,
+      noteDate: note.noteDate,
+      type: note.type,
+      reason: note.reason,
+      notes: note.notes,
+      termsConditions: note.termsConditions,
+      totalAmount: note.totalAmount || 0,
+      subtotal: note.subtotal,
+      taxAmount: note.taxAmount,
+      customer: {
+        name: customer.name || '',
+        taxId: customer.taxId,
+        phone: customer.phone,
+        email: customer.email,
+        billingAddress: customer.billingAddress,
+        shippingAddress: customer.shippingAddress,
+      },
+      referenceInvoice: note.referenceInvoice
+        ? {
+            invoiceNumber: note.referenceInvoice.invoiceNumber,
+            invoiceDate: note.referenceInvoice.invoiceDate,
+            totalAmount: note.referenceInvoice.totalAmount,
+          }
+        : undefined,
+      items,
+      company,
+    }
+  }
+
+  // Generate the Neu Invoicing-styled note PDF and open it in a new window.
+  const handleOpenPDF = async (id: string) => {
+    try {
+      const data = await loadCreditNotePDFData(id)
+      if (!data) return
+      const bytes = await getCreditNotePDFBytes(data)
+      openPdfInWindow(bytes, buildCreditNoteFilename(data))
+    } catch (err) {
+      console.error('Error generating credit/debit note PDF:', err)
+      toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleShare = async (id: string, target: ShareTarget) => {
+    try {
+      const data = await loadCreditNotePDFData(id)
+      if (!data) return
+      const bytes = await getCreditNotePDFBytes(data)
+      const filename = buildCreditNoteFilename(data)
+      const docLabel = data.type === 'DEBIT_NOTE' ? 'Debit Note' : 'Credit Note'
+      const subject = `${docLabel} ${data.noteNumber} from ${data.company?.name || ''}`.trim()
+      await sharePdf(bytes, filename, target, toast, {
+        subject,
+        phone: data.customer.phone,
+        email: data.customer.email,
+        partyName: data.customer.name,
+      })
+    } catch (err) {
+      console.error('Error sharing note:', err)
+      toast.error('Failed to share note')
     }
   }
 
@@ -467,6 +569,19 @@ const CreditNotes = () => {
                         >
                           Edit
                         </button>
+                        <button
+                          onClick={() => handleOpenPDF(note.id)}
+                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+                          title="Open PDF"
+                        >
+                          PDF
+                        </button>
+                        <ShareMenu
+                          onShare={(target) => handleShare(note.id, target)}
+                          phone={note.customer?.phone}
+                          email={note.customer?.email}
+                          partyName={note.customer?.name}
+                        />
                         <button
                           onClick={() => handleDelete(note.id)}
                           className="text-red-600 hover:text-red-700"
@@ -871,6 +986,19 @@ const CreditNotes = () => {
                   className="btn btn-secondary"
                 >
                   Close
+                </button>
+                <ShareMenu
+                  variant="button"
+                  onShare={(target) => handleShare(viewingNote.id, target)}
+                  phone={viewingNote.customer?.phone}
+                  email={viewingNote.customer?.email}
+                  partyName={viewingNote.customer?.name}
+                />
+                <button
+                  onClick={() => handleOpenPDF(viewingNote.id)}
+                  className="btn btn-primary"
+                >
+                  Open PDF
                 </button>
               </div>
             </div>
