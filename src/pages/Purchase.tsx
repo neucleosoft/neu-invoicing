@@ -120,6 +120,17 @@ const Purchase = () => {
     notes: ''
   })
 
+  // Bill-level tax breakdown (CGST + SGST for intra-state, IGST for inter-state).
+  // Some invoice photos show tax only as separate CGST/SGST/IGST totals at the bottom
+  // (no per-item tax column). When ANY of these is non-zero, line items keep taxRate=0
+  // and the bill-level total tax = cgst + sgst + igst. When all three are 0, the form
+  // falls back to per-item tax calculation (existing behavior).
+  const [taxBreakdown, setTaxBreakdown] = useState<{
+    cgst: number
+    sgst: number
+    igst: number
+  }>({ cgst: 0, sgst: 0, igst: 0 })
+
   const [billItems, setBillItems] = useState<BillItem[]>([])
 
   // AI extraction state
@@ -388,6 +399,12 @@ const Purchase = () => {
       // a new file is uploaded).
       setAttachmentBytes(null)
       setAttachmentMimeType(null)
+      // Recover the bill-level CGST/SGST/IGST breakdown saved with the bill.
+      setTaxBreakdown({
+        cgst: (fullBill as any).cgstAmount || 0,
+        sgst: (fullBill as any).sgstAmount || 0,
+        igst: (fullBill as any).igstAmount || 0,
+      })
       setShowModal(true)
     }
   }
@@ -510,6 +527,35 @@ const Purchase = () => {
           return catalogItems.find((c) => normalizeItemName(c.name) === target)
         }
 
+        // After extraction we ALWAYS surface tax at the bill level (CGST/SGST/IGST in the
+        // totals box) and zero out each item's per-item rate. This mirrors how the photo
+        // presents tax — a single breakdown at the bottom rather than a column per line.
+        // Source of truth, in order of preference:
+        //   1. extracted.cgst/sgst/igstAmount (when the AI returned the breakdown)
+        //   2. extracted.taxAmount (single bill-level total) → bucket under IGST
+        //   3. fall back to summing what per-item rates the AI fabricated → bucket IGST
+        const extractedCgst = (extracted as any).cgstAmount || 0
+        const extractedSgst = (extracted as any).sgstAmount || 0
+        const extractedIgst = (extracted as any).igstAmount || 0
+        const breakdownSum = extractedCgst + extractedSgst + extractedIgst
+
+        let nextBreakdown = { cgst: 0, sgst: 0, igst: 0 }
+        if (breakdownSum > 0) {
+          nextBreakdown = { cgst: extractedCgst, sgst: extractedSgst, igst: extractedIgst }
+        } else if ((extracted.taxAmount || 0) > 0) {
+          nextBreakdown = { cgst: 0, sgst: 0, igst: extracted.taxAmount! }
+        } else {
+          // Last-resort: derive total tax from per-item rates the AI may have inferred,
+          // so the user sees the right total even on photos where the breakdown isn't
+          // explicit. Lump it into IGST as a single bucket — user can resplit.
+          const inferredTotal = extracted.items.reduce((sum, it) => {
+            const taxable = (it.quantity || 0) * (it.rate || 0)
+            return sum + taxable * ((it.taxRate || 0) / 100)
+          }, 0)
+          if (inferredTotal > 0) nextBreakdown = { cgst: 0, sgst: 0, igst: inferredTotal }
+        }
+        setTaxBreakdown(nextBreakdown)
+
         setBillItems(
           extracted.items.map((item) => {
             const match = findCatalogMatch(item.name || '')
@@ -518,8 +564,8 @@ const Purchase = () => {
               hsnCode: item.hsnCode || match?.hsnCode || '',
               quantity: item.quantity || 0,
               rate: item.rate || 0,
-              // Fall back to the catalog's default tax rate when extraction left it blank.
-              taxRate: item.taxRate || match?.defaultTaxRate || 0,
+              // Always 0 after extraction: tax now lives in the bill-level breakdown.
+              taxRate: 0,
               discount: 0,
               amount: item.total || 0,
               _extractedName: item.name,
@@ -635,7 +681,7 @@ const Purchase = () => {
       return sum + (qty * rate - discount)
     }, 0)
 
-    const taxAmount = billItems.reduce((sum, item) => {
+    const computedTax = billItems.reduce((sum, item) => {
       const qty = item.quantity || 0
       const rate = item.rate || 0
       const discount = item.discount || 0
@@ -643,6 +689,11 @@ const Purchase = () => {
       return sum + ((qty * rate - discount) * taxRate / 100)
     }, 0)
 
+    // If the user (or AI extraction) populated any of CGST/SGST/IGST at the bill level,
+    // those override per-item tax. Otherwise fall back to per-item computation.
+    const breakdownTotal = taxBreakdown.cgst + taxBreakdown.sgst + taxBreakdown.igst
+    const useBreakdown = breakdownTotal > 0
+    const taxAmount = useBreakdown ? breakdownTotal : computedTax
     const total = subtotal + taxAmount
 
     return { subtotal, taxAmount, total }
@@ -682,6 +733,9 @@ const Purchase = () => {
         items: itemsToSave,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
+        cgstAmount: taxBreakdown.cgst,
+        sgstAmount: taxBreakdown.sgst,
+        igstAmount: taxBreakdown.igst,
         totalAmount: total,
         // Only include attachment if a new one was uploaded this session
         ...(attachmentBytes && {
@@ -718,6 +772,9 @@ const Purchase = () => {
         items: itemsToSave,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
+        cgstAmount: taxBreakdown.cgst,
+        sgstAmount: taxBreakdown.sgst,
+        igstAmount: taxBreakdown.igst,
         totalAmount: total,
         balanceDue: total,
         status: 'DRAFT',
@@ -751,6 +808,7 @@ const Purchase = () => {
     setAttachmentBytes(null)
     setAttachmentMimeType(null)
     setUnmatchedSupplier(null)
+    setTaxBreakdown({ cgst: 0, sgst: 0, igst: 0 })
   }
 
   const totals = calculateTotals()
@@ -860,6 +918,15 @@ const Purchase = () => {
                       >
                         PDF
                       </button>
+                      {(bill as any).attachmentMimeType && (
+                        <button
+                          onClick={() => handleOpenOriginal(bill.id)}
+                          className="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
+                          title="Open the supplier's original file"
+                        >
+                          Original
+                        </button>
+                      )}
                       <ShareMenu
                         onShare={(target) => handleShare(bill.id, target)}
                         phone={bill.party?.phone}
@@ -1232,10 +1299,42 @@ const Purchase = () => {
                         <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
                         <span className="font-medium">{formatCurrency(totals.subtotal)}</span>
                       </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-600 dark:text-gray-400">Tax:</span>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600 dark:text-gray-400">CGST:</span>
+                        <NumberInput
+                          className="input w-32 text-right"
+                          value={taxBreakdown.cgst}
+                          onChange={(val) => setTaxBreakdown({ ...taxBreakdown, cgst: val || 0 })}
+                          min={0}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600 dark:text-gray-400">SGST:</span>
+                        <NumberInput
+                          className="input w-32 text-right"
+                          value={taxBreakdown.sgst}
+                          onChange={(val) => setTaxBreakdown({ ...taxBreakdown, sgst: val || 0 })}
+                          min={0}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600 dark:text-gray-400">IGST:</span>
+                        <NumberInput
+                          className="input w-32 text-right"
+                          value={taxBreakdown.igst}
+                          onChange={(val) => setTaxBreakdown({ ...taxBreakdown, igst: val || 0 })}
+                          min={0}
+                        />
+                      </div>
+                      <div className="flex justify-between border-t pt-2">
+                        <span className="text-gray-600 dark:text-gray-400">Tax (total):</span>
                         <span className="font-medium">{formatCurrency(totals.taxAmount)}</span>
                       </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {totals.taxAmount > 0 && (taxBreakdown.cgst + taxBreakdown.sgst + taxBreakdown.igst) > 0
+                          ? 'Using bill-level CGST/SGST/IGST. Per-item tax % is ignored while these are set.'
+                          : 'Tax is computed from per-item Tax %. Fill CGST/SGST/IGST above to override with a bill-level breakdown.'}
+                      </p>
                       <div className="flex justify-between text-lg font-bold border-t pt-2">
                         <span>Total:</span>
                         <span>{formatCurrency(totals.total)}</span>
@@ -1395,6 +1494,14 @@ const Purchase = () => {
                 >
                   Close
                 </button>
+                {(viewingBill as any).attachmentMimeType && (
+                  <button
+                    onClick={() => handleOpenOriginal(viewingBill.id)}
+                    className="btn btn-secondary"
+                  >
+                    Open Original
+                  </button>
+                )}
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingBill.id, target)}
