@@ -214,6 +214,255 @@ async function applyStockUpdates(tx: any, items: Array<{ linkedItemId: string | 
   }
 }
 
+// ─── OCR extraction (shared across providers) ──────────────────────────────────
+
+const OCR_PROMPT = `You are a strict data extractor for Indian GST purchase bills.
+
+Extract the data from this bill image and return ONLY valid JSON in this exact format. No markdown, no code blocks, no explanations — just the JSON object.
+
+{
+  "supplierName": "string or null",
+  "supplierGstin": "string or null (15-character GSTIN)",
+  "billNumber": "string or null (the supplier's invoice number on the bill)",
+  "billDate": "string or null (YYYY-MM-DD format)",
+  "subtotal": 0,
+  "taxAmount": 0,
+  "totalAmount": 0,
+  "cgstAmount": 0,
+  "sgstAmount": 0,
+  "igstAmount": 0,
+  "items": [
+    {
+      "name": "string (item description as printed on the bill)",
+      "hsnCode": "string or null",
+      "quantity": 0,
+      "rate": 0,
+      "taxRate": 0,
+      "total": 0
+    }
+  ]
+}
+
+Rules:
+- If a field is not present in the bill, use null for strings or 0 for numbers
+- Do not invent data — better to leave null than guess
+- Numbers must be numbers (not strings), with no currency symbols or commas
+- Dates must be YYYY-MM-DD format
+- The "items" array can be empty if no line items are visible
+- Return ONLY the JSON object, nothing else.`
+
+type OcrResult =
+  | { success: true; data: any }
+  | { success: false; error: string }
+
+// Strip markdown fences and thinking-style preamble from a model response, then JSON.parse.
+// Models often wrap output in ```json ... ``` or add explanation text before the {...} block —
+// extracting the first '{' to the last '}' is robust against both.
+function parseExtractedJson(text: string): OcrResult {
+  let cleaned = text
+    .replace(/^```json\s*/i, '')
+    .replace(/^```\s*/i, '')
+    .replace(/\s*```\s*$/i, '')
+    .trim()
+  const firstBrace = cleaned.indexOf('{')
+  const lastBrace = cleaned.lastIndexOf('}')
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    cleaned = cleaned.substring(firstBrace, lastBrace + 1)
+  }
+  try {
+    return { success: true, data: JSON.parse(cleaned) }
+  } catch (parseErr) {
+    const tail = cleaned.substring(Math.max(0, cleaned.length - 200))
+    return {
+      success: false,
+      error: `Could not parse response as JSON (likely truncated). Last 200 chars: ${tail}. Total length: ${cleaned.length}. Parse error: ${parseErr instanceof Error ? parseErr.message : 'unknown'}`,
+    }
+  }
+}
+
+// Extract bill data via Google Gemini Files API. Required by gemma-3-27b-it which doesn't
+// accept inline_data + base64. Three round trips: upload init → upload bytes → generateContent.
+async function extractWithGemini(args: { fileBytes: Uint8Array; mimeType: string }): Promise<OcrResult> {
+  const apiKey = process.env.GEMINI_API_KEY
+  if (!apiKey) {
+    return {
+      success: false,
+      error: 'GEMINI_API_KEY not configured. Add it to .env, or switch OCR_PROVIDER to "openrouter".',
+    }
+  }
+
+  const model = process.env.GEMINI_MODEL || 'gemma-3-27b-it'
+  const buffer = Buffer.from(args.fileBytes)
+
+  // Step 1a — initial resumable request
+  const uploadInitResponse = await fetch(
+    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: {
+        'X-Goog-Upload-Protocol': 'resumable',
+        'X-Goog-Upload-Command': 'start',
+        'X-Goog-Upload-Header-Content-Length': String(buffer.length),
+        'X-Goog-Upload-Header-Content-Type': args.mimeType,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ file: { display_name: 'purchase-bill' } }),
+    },
+  )
+  if (!uploadInitResponse.ok) {
+    const errText = await uploadInitResponse.text()
+    return {
+      success: false,
+      error: `Files API init failed (${uploadInitResponse.status}): ${errText.substring(0, 300)}`,
+    }
+  }
+  const uploadUrl = uploadInitResponse.headers.get('x-goog-upload-url')
+  if (!uploadUrl) {
+    return { success: false, error: 'Files API did not return an upload URL' }
+  }
+
+  // Step 1b — upload the actual bytes
+  const uploadResponse = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Length': String(buffer.length),
+      'X-Goog-Upload-Offset': '0',
+      'X-Goog-Upload-Command': 'upload, finalize',
+    },
+    body: buffer,
+  })
+  if (!uploadResponse.ok) {
+    const errText = await uploadResponse.text()
+    return {
+      success: false,
+      error: `Files API upload failed (${uploadResponse.status}): ${errText.substring(0, 300)}`,
+    }
+  }
+  const uploadJson: any = await uploadResponse.json()
+  const fileUri: string | undefined = uploadJson?.file?.uri
+  if (!fileUri) {
+    return { success: false, error: 'Files API did not return a file URI' }
+  }
+
+  const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
+
+  // Per Google's docs: place the IMAGE part first, TEXT prompt second — reversed order can
+  // cause smaller models to ignore the image entirely.
+  const requestBody = {
+    contents: [
+      {
+        parts: [
+          { file_data: { mime_type: args.mimeType, file_uri: fileUri } },
+          { text: OCR_PROMPT },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 8192,
+    },
+  }
+
+  const response = await fetch(apiUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(requestBody),
+  })
+
+  if (!response.ok) {
+    const errText = await response.text()
+    return {
+      success: false,
+      error: `Gemini API error (${response.status}): ${errText.substring(0, 300)}`,
+    }
+  }
+
+  const json: any = await response.json()
+  const text: string | undefined = json?.candidates?.[0]?.content?.parts?.[0]?.text
+
+  if (!text) {
+    const finishReason = json?.candidates?.[0]?.finishReason
+    const blockReason = json?.promptFeedback?.blockReason
+    const safetyRatings = json?.candidates?.[0]?.safetyRatings
+    const snippet = JSON.stringify(json).substring(0, 600)
+    return {
+      success: false,
+      error: `No text in Gemini response. finishReason=${finishReason ?? 'n/a'}, blockReason=${blockReason ?? 'n/a'}, safetyRatings=${safetyRatings ? 'present' : 'none'}. Raw: ${snippet}`,
+    }
+  }
+
+  return parseExtractedJson(text)
+}
+
+// Extract bill data via OpenRouter (OpenAI-compatible chat completions). Default model is
+// baidu/qianfan-ocr-fast:free — an OCR-specialized vision model with $0 token cost.
+// Image is inlined as a base64 data URL: one HTTP round trip vs Gemini's three.
+async function extractWithOpenRouter(args: { fileBytes: Uint8Array; mimeType: string }): Promise<OcrResult> {
+  const apiKey = process.env.OPENROUTER_API_KEY
+  if (!apiKey) {
+    return {
+      success: false,
+      error: 'OPENROUTER_API_KEY not configured. Sign up at openrouter.ai, get a key, and add OPENROUTER_API_KEY=... to your .env file.',
+    }
+  }
+
+  // Qianfan-OCR-Fast (and most multimodal models on OpenRouter) only accept image inputs,
+  // not PDFs. If the user uploaded a PDF, surface a clear hint instead of a cryptic 400.
+  if (!args.mimeType.startsWith('image/')) {
+    return {
+      success: false,
+      error: `OpenRouter OCR providers only accept image files (PNG, JPEG, WebP). Got "${args.mimeType}". Convert PDF pages to images first, or switch back to OCR_PROVIDER=gemini for PDF support.`,
+    }
+  }
+
+  const model = process.env.OPENROUTER_MODEL || 'baidu/qianfan-ocr-fast:free'
+  const dataUrl = `data:${args.mimeType};base64,${Buffer.from(args.fileBytes).toString('base64')}`
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            // Image part FIRST — Baidu Qianfan (and Gemini) reject the multi-part message
+            // when text comes before the image.
+            { type: 'image_url', image_url: { url: dataUrl } },
+            { type: 'text', text: OCR_PROMPT },
+          ],
+        },
+      ],
+      max_tokens: 8192,
+    }),
+  })
+
+  if (!response.ok) {
+    const errText = await response.text()
+    return {
+      success: false,
+      error: `OpenRouter API error (${response.status}): ${errText.substring(0, 500)}`,
+    }
+  }
+
+  const json: any = await response.json()
+  const text: string | undefined = json?.choices?.[0]?.message?.content
+
+  if (!text) {
+    const snippet = JSON.stringify(json).substring(0, 600)
+    return {
+      success: false,
+      error: `No text in OpenRouter response. Raw: ${snippet}`,
+    }
+  }
+
+  return parseExtractedJson(text)
+}
+
 export const setupPurchaseHandlers = () => {
   const prisma = getPrisma()
 
@@ -521,211 +770,24 @@ export const setupPurchaseHandlers = () => {
     }
   })
 
-  // Extract bill data from an uploaded image/PDF using Gemini API
+  // Extract bill data from an uploaded image/PDF. Provider is selected via OCR_PROVIDER env var:
+  //   OCR_PROVIDER=gemini      → Google Gemini Files API (default, requires GEMINI_API_KEY)
+  //   OCR_PROVIDER=openrouter  → OpenRouter chat completions (requires OPENROUTER_API_KEY,
+  //                              defaults to baidu/qianfan-ocr-fast:free — OCR-specialized,
+  //                              free, single round trip vs Gemini's three).
   ipcMain.handle(
     'purchase:extractFromImage',
     async (_, args: { fileBytes: Uint8Array; mimeType: string }) => {
       try {
-        const apiKey = process.env.GEMINI_API_KEY
-        if (!apiKey) {
-          return {
-            success: false,
-            error:
-              'API key not configured. Add GEMINI_API_KEY to your .env file.',
-          }
+        const provider = (process.env.OCR_PROVIDER || 'gemini').toLowerCase()
+        if (provider === 'openrouter') {
+          return await extractWithOpenRouter(args)
         }
-
-        const model = process.env.GEMINI_MODEL || 'gemma-3-27b-it'
-
-        const buffer = Buffer.from(args.fileBytes)
-
-        // Gemma 4 vision requires the Files API (not inline_data + base64).
-        // The protocol is: (1) initial resumable POST for metadata → returns an upload URL.
-        //                  (2) POST the actual bytes to that URL → returns a file_uri.
-        //                  (3) Reference the file_uri in generateContent via file_data.
-
-        // Step 1a — initial resumable request
-        const uploadInitResponse = await fetch(
-          `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${apiKey}`,
-          {
-            method: 'POST',
-            headers: {
-              'X-Goog-Upload-Protocol': 'resumable',
-              'X-Goog-Upload-Command': 'start',
-              'X-Goog-Upload-Header-Content-Length': String(buffer.length),
-              'X-Goog-Upload-Header-Content-Type': args.mimeType,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ file: { display_name: 'purchase-bill' } }),
-          },
-        )
-        if (!uploadInitResponse.ok) {
-          const errText = await uploadInitResponse.text()
-          return {
-            success: false,
-            error: `Files API init failed (${uploadInitResponse.status}): ${errText.substring(0, 300)}`,
-          }
-        }
-        const uploadUrl = uploadInitResponse.headers.get('x-goog-upload-url')
-        if (!uploadUrl) {
-          return { success: false, error: 'Files API did not return an upload URL' }
-        }
-
-        // Step 1b — upload the actual bytes
-        const uploadResponse = await fetch(uploadUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Length': String(buffer.length),
-            'X-Goog-Upload-Offset': '0',
-            'X-Goog-Upload-Command': 'upload, finalize',
-          },
-          body: buffer,
-        })
-        if (!uploadResponse.ok) {
-          const errText = await uploadResponse.text()
-          return {
-            success: false,
-            error: `Files API upload failed (${uploadResponse.status}): ${errText.substring(0, 300)}`,
-          }
-        }
-        const uploadJson: any = await uploadResponse.json()
-        const fileUri: string | undefined = uploadJson?.file?.uri
-        if (!fileUri) {
-          return { success: false, error: 'Files API did not return a file URI' }
-        }
-
-        const prompt = `You are a strict data extractor for Indian GST purchase bills.
-
-Extract the data from this bill image and return ONLY valid JSON in this exact format. No markdown, no code blocks, no explanations — just the JSON object.
-
-{
-  "supplierName": "string or null",
-  "supplierGstin": "string or null (15-character GSTIN)",
-  "billNumber": "string or null (the supplier's invoice number on the bill)",
-  "billDate": "string or null (YYYY-MM-DD format)",
-  "subtotal": 0,
-  "taxAmount": 0,
-  "totalAmount": 0,
-  "cgstAmount": 0,
-  "sgstAmount": 0,
-  "igstAmount": 0,
-  "items": [
-    {
-      "name": "string (item description as printed on the bill)",
-      "hsnCode": "string or null",
-      "quantity": 0,
-      "rate": 0,
-      "taxRate": 0,
-      "total": 0
-    }
-  ]
-}
-
-Rules:
-- If a field is not present in the bill, use null for strings or 0 for numbers
-- Do not invent data — better to leave null than guess
-- Numbers must be numbers (not strings), with no currency symbols or commas
-- Dates must be YYYY-MM-DD format
-- The "items" array can be empty if no line items are visible
-- Return ONLY the JSON object, nothing else.`
-
-        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
-
-        // Per Google's docs: place the IMAGE part first, TEXT prompt second.
-        // Reversed order can cause smaller models to ignore the image entirely.
-        // file_data references the upload from step 1; this is what Gemma 4 needs.
-        const requestBody = {
-          contents: [
-            {
-              parts: [
-                {
-                  file_data: {
-                    mime_type: args.mimeType,
-                    file_uri: fileUri,
-                  },
-                },
-                { text: prompt },
-              ],
-            },
-          ],
-          generationConfig: {
-            temperature: 0.1,
-            // Bills can have many line items; default ~1024 tokens isn't enough.
-            // 8192 covers a bill with ~30+ items + Gemma's thinking preamble safely.
-            maxOutputTokens: 8192,
-            // No thinkingConfig — Gemma 4 26B-A4B-IT rejects any thinkingConfig param
-            // (translates everything to "thinking budget" internally and 400s).
-            // The model WILL produce thinking-style preamble; we extract the {...} block
-            // from the response below regardless.
-          },
-        }
-
-        const response = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(requestBody),
-        })
-
-        if (!response.ok) {
-          const errText = await response.text()
-          return {
-            success: false,
-            error: `Gemini API error (${response.status}): ${errText.substring(0, 300)}`,
-          }
-        }
-
-        const json: any = await response.json()
-
-        // Defensive: response shape can vary slightly across Gemma/Gemini variants
-        const text: string | undefined =
-          json?.candidates?.[0]?.content?.parts?.[0]?.text
-
-        if (!text) {
-          // Surface what actually came back so we can diagnose
-          const finishReason = json?.candidates?.[0]?.finishReason
-          const blockReason = json?.promptFeedback?.blockReason
-          const safetyRatings = json?.candidates?.[0]?.safetyRatings
-          const snippet = JSON.stringify(json).substring(0, 600)
-          return {
-            success: false,
-            error: `No text in response. finishReason=${finishReason ?? 'n/a'}, blockReason=${blockReason ?? 'n/a'}, safetyRatings=${safetyRatings ? 'present' : 'none'}. Raw: ${snippet}`,
-          }
-        }
-
-        // Strip markdown code fences if the model wrapped JSON in them
-        let cleaned = text
-          .replace(/^```json\s*/i, '')
-          .replace(/^```\s*/i, '')
-          .replace(/\s*```\s*$/i, '')
-          .trim()
-
-        // If the model added explanation around the JSON, extract just the {...} block.
-        // Find the first '{' and the matching last '}' — robust against thinking/preamble text.
-        const firstBrace = cleaned.indexOf('{')
-        const lastBrace = cleaned.lastIndexOf('}')
-        if (firstBrace !== -1 && lastBrace > firstBrace) {
-          cleaned = cleaned.substring(firstBrace, lastBrace + 1)
-        }
-
-        let extracted: any
-        try {
-          extracted = JSON.parse(cleaned)
-        } catch (parseErr) {
-          // Common cause: response was truncated by token limit, leaving JSON unclosed.
-          // Show enough context (1500 chars) to diagnose.
-          const tail = cleaned.substring(Math.max(0, cleaned.length - 200))
-          return {
-            success: false,
-            error: `Could not parse response as JSON (likely truncated). Last 200 chars: ${tail}. Total length: ${cleaned.length}. Parse error: ${parseErr instanceof Error ? parseErr.message : 'unknown'}`,
-          }
-        }
-
-        return { success: true, data: extracted }
+        return await extractWithGemini(args)
       } catch (error) {
         return {
           success: false,
-          error:
-            error instanceof Error ? error.message : 'Failed to extract bill data',
+          error: error instanceof Error ? error.message : 'Failed to extract bill data',
         }
       }
     },
