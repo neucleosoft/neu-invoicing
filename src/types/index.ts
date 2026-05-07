@@ -342,6 +342,11 @@ export interface ExtractedBillItem {
 export interface ExtractedBillData {
   supplierName: string | null
   supplierGstin: string | null
+  supplierAddress: string | null
+  supplierCity: string | null
+  supplierPincode: string | null
+  supplierPhone: string | null
+  supplierEmail: string | null
   billNumber: string | null
   billDate: string | null
   subtotal: number

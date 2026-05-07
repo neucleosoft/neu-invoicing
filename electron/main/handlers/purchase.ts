@@ -223,6 +223,11 @@ Extract the data from this bill image and return ONLY valid JSON in this exact f
 {
   "supplierName": "string or null",
   "supplierGstin": "string or null (15-character GSTIN)",
+  "supplierAddress": "string or null (full address as printed on the bill, may span multiple lines)",
+  "supplierCity": "string or null",
+  "supplierPincode": "string or null (6-digit Indian PIN code)",
+  "supplierPhone": "string or null",
+  "supplierEmail": "string or null",
   "billNumber": "string or null (the supplier's invoice number on the bill)",
   "billDate": "string or null (YYYY-MM-DD format)",
   "subtotal": 0,
