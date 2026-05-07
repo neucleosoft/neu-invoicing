@@ -3,7 +3,7 @@ import { jsPDF } from 'jspdf'
 // ─── Data interfaces ──────────────────────────────────────────────────────────
 
 export interface PDFDocumentData {
-  party: {
+  customer: {
     name: string
     email?: string
     phone?: string
@@ -363,7 +363,7 @@ export function drawCompanySection(
 /** Draw Bill To / Ship To section */
 export function drawBillToShipTo(
   doc: jsPDF,
-  party: PDFDocumentData['party'],
+  customer: PDFDocumentData['customer'],
   placeOfSupplyName: string | undefined,
   COMPANY_BOTTOM: number, BILLSHIP_BOTTOM: number,
   ML: number, RE: number
@@ -382,27 +382,27 @@ export function drawBillToShipTo(
   doc.text('BILL TO', ML + 3, by)
   by += 5
   doc.setFontSize(10)
-  doc.text(doc.splitTextToSize(party.name, billMaxW)[0], ML + 3, by)
+  doc.text(doc.splitTextToSize(customer.name, billMaxW)[0], ML + 3, by)
   by += 5.5
 
   doc.setFontSize(7.5)
   doc.setFont('helvetica', 'normal')
-  if (party.billingAddress) {
+  if (customer.billingAddress) {
     const lbl = 'Address: '
     doc.text(lbl, ML + 3, by)
     const lblW = doc.getTextWidth(lbl)
-    const lines = doc.splitTextToSize(party.billingAddress, billMaxW - lblW)
+    const lines = doc.splitTextToSize(customer.billingAddress, billMaxW - lblW)
     lines.forEach((line: string, i: number) => {
       doc.text(line, ML + 3 + lblW, by + i * 3.5)
     })
     by += lines.length * 3.5 + 1.5
   }
-  if (party.taxId) {
+  if (customer.taxId) {
     doc.setFont('helvetica', 'bold')
-    doc.text('GSTIN: ' + party.taxId, ML + 3, by)
+    doc.text('GSTIN: ' + customer.taxId, ML + 3, by)
     doc.setFont('helvetica', 'normal')
     if (placeOfSupplyName) {
-      const gW = doc.getTextWidth('GSTIN: ' + party.taxId) + 5
+      const gW = doc.getTextWidth('GSTIN: ' + customer.taxId) + 5
       if (gW + doc.getTextWidth('Place of Supply:  ' + placeOfSupplyName) < billMaxW) {
         doc.text('Place of Supply:  ' + placeOfSupplyName, ML + 3 + gW, by)
       } else {
@@ -412,14 +412,14 @@ export function drawBillToShipTo(
     }
     by += 4
   }
-  if (party.phone) {
+  if (customer.phone) {
     doc.setFont('helvetica', 'bold')
     doc.text('Mobile: ', ML + 3, by)
     doc.setFont('helvetica', 'normal')
-    doc.text(party.phone, ML + 3 + doc.getTextWidth('Mobile: '), by)
+    doc.text(customer.phone, ML + 3 + doc.getTextWidth('Mobile: '), by)
     by += 4
   }
-  const pan = extractPAN(party.taxId)
+  const pan = extractPAN(customer.taxId)
   if (pan) {
     doc.setFont('helvetica', 'bold')
     doc.text('PAN Number: ' + pan, ML + 3, by)
@@ -434,12 +434,12 @@ export function drawBillToShipTo(
   doc.text('SHIP TO', MID + 3, sy)
   sy += 5
   doc.setFontSize(10)
-  doc.text(doc.splitTextToSize(party.name, shipMaxW)[0], MID + 3, sy)
+  doc.text(doc.splitTextToSize(customer.name, shipMaxW)[0], MID + 3, sy)
   sy += 5.5
 
   doc.setFontSize(7.5)
   doc.setFont('helvetica', 'normal')
-  const shipAddr = party.shippingAddress || party.billingAddress
+  const shipAddr = customer.shippingAddress || customer.billingAddress
   if (shipAddr) {
     const lbl = 'Address: '
     doc.text(lbl, MID + 3, sy)

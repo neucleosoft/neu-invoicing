@@ -146,9 +146,6 @@ const Sales = () => {
     const company = await loadCompanyForPDF()
     return {
       ...result.data,
-      // PDF utilities expect a `.party` field on their input — alias `.customer` to `.party`
-      // here at the boundary so the rest of the renderer can use `.customer` everywhere.
-      party: result.data.customer,
       items: result.data.items || [],
       company,
     }
@@ -215,9 +212,9 @@ const Sales = () => {
       const subject = `Invoice ${pdfData.invoiceNumber} from ${pdfData.company?.name || ''}`.trim()
       await sharePdf(bytes, filename, target, toast, {
         subject,
-        phone: pdfData.party?.phone,
-        email: pdfData.party?.email,
-        partyName: pdfData.party?.name,
+        phone: pdfData.customer?.phone,
+        email: pdfData.customer?.email,
+        partyName: pdfData.customer?.name,
       })
     } catch (error) {
       console.error('Error sharing invoice:', error)

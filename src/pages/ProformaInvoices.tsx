@@ -130,8 +130,6 @@ const ProformaInvoices = () => {
     return {
       ...result.data,
       type: 'PROFORMA_INVOICE',
-      // PDF utilities expect a `.party` field on input — alias `.customer` here at the boundary.
-      party: result.data.customer,
       items: result.data.items || [],
       company,
       amountPaid: 0,
@@ -201,9 +199,9 @@ const ProformaInvoices = () => {
         `Proforma Invoice ${pdfData.invoiceNumber} from ${pdfData.company?.name || ''}`.trim()
       await sharePdf(bytes, filename, target, toast, {
         subject,
-        phone: pdfData.party?.phone,
-        email: pdfData.party?.email,
-        partyName: pdfData.party?.name,
+        phone: pdfData.customer?.phone,
+        email: pdfData.customer?.email,
+        partyName: pdfData.customer?.name,
       })
     } catch (error) {
       console.error('Error sharing proforma invoice:', error)
