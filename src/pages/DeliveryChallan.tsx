@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
-import { downloadChallanPDF, getChallanPDFBytes, buildChallanFilename } from '../utils/pdfmakeChallan'
+import { getChallanPDFBytes, buildChallanFilename } from '../utils/pdfmakeChallan'
+import { openPdfInWindow } from '../utils/openPdfInWindow'
 import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
@@ -187,7 +188,8 @@ const DeliveryChallan = () => {
         toast.error('Failed to load challan details')
         return
       }
-      downloadChallanPDF(challanData)
+      const bytes = await getChallanPDFBytes(challanData)
+      openPdfInWindow(bytes, buildChallanFilename(challanData))
     } catch (error) {
       console.error('Error generating challan PDF:', error)
       toast.error('Failed to generate PDF')

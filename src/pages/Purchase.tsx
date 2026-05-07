@@ -14,6 +14,12 @@ import SearchableSelect from '../components/SearchableSelect'
 import ShareMenu from '../components/ShareMenu'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
 import { validateGSTIN } from '../utils/gstValidation'
+import {
+  getPurchaseBillPDFBytes,
+  buildPurchaseBillFilename,
+  PurchaseBillPDFData,
+} from '../utils/pdfmakePurchaseBill'
+import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 
 interface Item {
   id: string
@@ -172,63 +178,98 @@ const Purchase = () => {
     }
   }
 
-  // Fetch the saved supplier attachment (BLOB) for a bill. Centralized so both
-  // open-in-window and share-via-X paths use the same fetch + Buffer→Uint8Array conversion.
-  const loadAttachment = async (id: string) => {
+  // Build the PDF input shape from the raw bill row and the active company.
+  // Falls back to billing supplier->party fields and computes taxableAmount per line.
+  const loadPurchaseBillPDFData = async (id: string): Promise<PurchaseBillPDFData | null> => {
     const result = await window.electronAPI.purchase.getById(id)
     if (!result.success || !result.data) {
       toast.error(result.error || 'Failed to fetch bill')
       return null
     }
-    const bill = result.data as any
-    if (!bill.attachmentData || !bill.attachmentMimeType) {
-      toast.info('No attachment saved on this bill')
-      return null
+    const bill: any = result.data
+    const company = await loadCompanyForPDF()
+    const supplier = bill.supplier || bill.party || {}
+    const items = (bill.items || []).map((it: any) => {
+      const quantity = it.quantity || 0
+      const rate = it.rate || 0
+      const discount = it.discount || 0
+      const linked = it.supplierItem?.linkedItem
+      return {
+        item: {
+          name: it.supplierItem?.name || linked?.name || it.item?.name || 'Item',
+          unit: it.supplierItem?.unit || linked?.unit || 'pcs',
+          hsnCode: it.hsnCode || it.supplierItem?.hsnCode || linked?.hsnCode || linked?.skuHsn || '',
+          skuHsn: linked?.skuHsn,
+        },
+        quantity,
+        rate,
+        taxRate: it.taxRate || 0,
+        discount,
+        total: it.total || 0,
+        hsnCode: it.hsnCode || it.supplierItem?.hsnCode || linked?.hsnCode || linked?.skuHsn || '',
+        taxableAmount: quantity * rate - discount,
+      }
+    })
+    return {
+      billNumber: bill.billNumber,
+      billDate: bill.billDate,
+      supplierInvoiceNumber: bill.supplierInvoiceNumber,
+      supplierInvoiceDate: bill.supplierInvoiceDate,
+      notes: bill.notes,
+      totalAmount: bill.totalAmount || 0,
+      subtotal: bill.subtotalAmount ?? bill.subtotal,
+      taxAmount: bill.taxAmount,
+      supplier: {
+        name: supplier.name || '',
+        taxId: supplier.taxId,
+        phone: supplier.phone,
+        email: supplier.email,
+        billingAddress: supplier.billingAddress,
+      },
+      items,
+      company,
     }
-    const bytes =
-      bill.attachmentData instanceof Uint8Array
-        ? bill.attachmentData
-        : new Uint8Array(bill.attachmentData)
-    return { bill, bytes, mimeType: bill.attachmentMimeType as string }
   }
 
-  // Open the original supplier bill (image/PDF the user uploaded) in a new window.
-  const handleOpenAttachment = async (id: string) => {
-    const att = await loadAttachment(id)
-    if (!att) return
-    const blob = new Blob([att.bytes], { type: att.mimeType })
-    const url = URL.createObjectURL(blob)
-    const opened = window.open(url, '_blank')
-    // Revoke after a delay so the new window has time to load. If blocked, fall back to download.
-    if (!opened) {
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${att.bill.billNumber || 'bill'}${att.mimeType === 'application/pdf' ? '.pdf' : ''}`
-      a.click()
+  // Generate the Neu Invoicing-styled bill PDF and open it in a new window.
+  // The browser's PDF viewer gives the user save/print controls — same UX as
+  // the previous "open original attachment" path.
+  const handleOpenPDF = async (id: string) => {
+    try {
+      const data = await loadPurchaseBillPDFData(id)
+      if (!data) return
+      const bytes = await getPurchaseBillPDFBytes(data)
+      const blob = new Blob([bytes], { type: 'application/pdf' })
+      const url = URL.createObjectURL(blob)
+      const opened = window.open(url, '_blank')
+      if (!opened) {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = buildPurchaseBillFilename(data)
+        a.click()
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (err) {
+      console.error('Error generating purchase bill PDF:', err)
+      toast.error('Failed to generate PDF')
     }
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
   }
 
   const handleShare = async (id: string, target: ShareTarget) => {
     try {
-      const att = await loadAttachment(id)
-      if (!att) return
-      const ext = att.mimeType === 'application/pdf'
-        ? '.pdf'
-        : att.mimeType.startsWith('image/')
-        ? `.${att.mimeType.split('/')[1]}`
-        : ''
-      const safeParty = (att.bill.supplier?.name || 'supplier').replace(/[^a-z0-9]/gi, '_')
-      const filename = `${att.bill.billNumber || 'bill'}_${safeParty}${ext}`
-      const subject = `Bill ${att.bill.billNumber || ''} from ${att.bill.supplier?.name || ''}`.trim()
-      await sharePdf(att.bytes, filename, target, toast, {
+      const data = await loadPurchaseBillPDFData(id)
+      if (!data) return
+      const bytes = await getPurchaseBillPDFBytes(data)
+      const filename = buildPurchaseBillFilename(data)
+      const subject = `Bill ${data.billNumber} from ${data.company?.name || ''}`.trim()
+      await sharePdf(bytes, filename, target, toast, {
         subject,
-        phone: att.bill.supplier?.phone,
-        email: att.bill.supplier?.email,
-        partyName: att.bill.supplier?.name,
+        phone: data.supplier.phone,
+        email: data.supplier.email,
+        partyName: data.supplier.name,
       })
-    } catch (error) {
-      console.error('Error sharing bill:', error)
+    } catch (err) {
+      console.error('Error sharing bill:', err)
       toast.error('Failed to share bill')
     }
   }
@@ -692,23 +733,19 @@ const Purchase = () => {
                       >
                         Edit
                       </button>
-                      {(bill as any).attachmentMimeType && (
-                        <>
-                          <button
-                            onClick={() => handleOpenAttachment(bill.id)}
-                            className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                            title="Open original supplier bill"
-                          >
-                            PDF
-                          </button>
-                          <ShareMenu
-                            onShare={(target) => handleShare(bill.id, target)}
-                            phone={bill.supplier?.phone}
-                            email={bill.supplier?.email}
-                            partyName={bill.supplier?.name}
-                          />
-                        </>
-                      )}
+                      <button
+                        onClick={() => handleOpenPDF(bill.id)}
+                        className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+                        title="Open PDF"
+                      >
+                        PDF
+                      </button>
+                      <ShareMenu
+                        onShare={(target) => handleShare(bill.id, target)}
+                        phone={bill.party?.phone}
+                        email={bill.party?.email}
+                        partyName={bill.party?.name}
+                      />
                       <button onClick={() => handleDelete(bill.id)} className="text-red-600 hover:text-red-700">Delete</button>
                     </div>
                   </td>
@@ -1167,23 +1204,19 @@ const Purchase = () => {
                 >
                   Close
                 </button>
-                {(viewingBill as any).attachmentMimeType && (
-                  <>
-                    <ShareMenu
-                      variant="button"
-                      onShare={(target) => handleShare(viewingBill.id, target)}
-                      phone={viewingBill.supplier?.phone}
-                      email={viewingBill.supplier?.email}
-                      partyName={viewingBill.supplier?.name}
-                    />
-                    <button
-                      onClick={() => handleOpenAttachment(viewingBill.id)}
-                      className="btn btn-primary"
-                    >
-                      Open PDF
-                    </button>
-                  </>
-                )}
+                <ShareMenu
+                  variant="button"
+                  onShare={(target) => handleShare(viewingBill.id, target)}
+                  phone={viewingBill.party?.phone}
+                  email={viewingBill.party?.email}
+                  partyName={viewingBill.party?.name}
+                />
+                <button
+                  onClick={() => handleOpenPDF(viewingBill.id)}
+                  className="btn btn-primary"
+                >
+                  Open PDF
+                </button>
               </div>
             </div>
           </div>
