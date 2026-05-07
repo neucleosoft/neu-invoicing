@@ -129,7 +129,15 @@ const Purchase = () => {
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Set when AI extraction returns a supplier name we couldn't match — drives the inline "+ Create supplier" panel.
-  const [unmatchedSupplier, setUnmatchedSupplier] = useState<{ name: string; gstin?: string } | null>(null)
+  const [unmatchedSupplier, setUnmatchedSupplier] = useState<{
+    name: string
+    gstin?: string
+    address?: string
+    city?: string
+    pincode?: string
+    phone?: string
+    email?: string
+  } | null>(null)
   const [creatingSupplier, setCreatingSupplier] = useState(false)
 
   const location = useLocation()
@@ -293,6 +301,43 @@ const Purchase = () => {
     }
   }
 
+  // Fetch the saved supplier attachment (BLOB) for a bill. Centralized so both
+  // open-in-window and share-via-X paths use the same fetch + Buffer→Uint8Array conversion.
+  const loadAttachment = async (id: string) => {
+    const result = await window.electronAPI.purchase.getById(id)
+    if (!result.success || !result.data) {
+      toast.error(result.error || 'Failed to fetch bill')
+      return null
+    }
+    const bill = result.data as any
+    if (!bill.attachmentData || !bill.attachmentMimeType) {
+      toast.info('No attachment saved on this bill')
+      return null
+    }
+    const bytes =
+      bill.attachmentData instanceof Uint8Array
+        ? bill.attachmentData
+        : new Uint8Array(bill.attachmentData)
+    return { bill, bytes, mimeType: bill.attachmentMimeType as string }
+  }
+
+  // Open the original supplier bill (image/PDF the user uploaded) in a new window.
+  const handleOpenAttachment = async (id: string) => {
+    const att = await loadAttachment(id)
+    if (!att) return
+    const blob = new Blob([att.bytes], { type: att.mimeType })
+    const url = URL.createObjectURL(blob)
+    const opened = window.open(url, '_blank')
+    // Revoke after a delay so the new window has time to load. If blocked, fall back to download.
+    if (!opened) {
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${att.bill.billNumber || 'bill'}${att.mimeType === 'application/pdf' ? '.pdf' : ''}`
+      a.click()
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  }
+
   const handleShare = async (id: string, target: ShareTarget) => {
     try {
       const data = await loadPurchaseBillPDFData(id)
@@ -437,6 +482,11 @@ const Purchase = () => {
         setUnmatchedSupplier({
           name: extracted.supplierName,
           gstin: extracted.supplierGstin || undefined,
+          address: extracted.supplierAddress || undefined,
+          city: extracted.supplierCity || undefined,
+          pincode: extracted.supplierPincode || undefined,
+          phone: extracted.supplierPhone || undefined,
+          email: extracted.supplierEmail || undefined,
         })
       } else {
         setUnmatchedSupplier(null)
@@ -506,6 +556,11 @@ const Purchase = () => {
       const result = await window.electronAPI.supplier.create({
         name: unmatchedSupplier.name,
         taxId: unmatchedSupplier.gstin,
+        billingAddress: unmatchedSupplier.address || undefined,
+        city: unmatchedSupplier.city || undefined,
+        pincode: unmatchedSupplier.pincode || undefined,
+        phone: unmatchedSupplier.phone || undefined,
+        email: unmatchedSupplier.email || undefined,
         stateCode: gstinValidation?.valid ? gstinValidation.stateCode : undefined,
         stateName: gstinValidation?.valid ? gstinValidation.stateName : undefined,
       })
@@ -789,6 +844,15 @@ const Purchase = () => {
                       >
                         Edit
                       </button>
+                      {(bill as any).attachmentMimeType && (
+                        <button
+                          onClick={() => handleOpenAttachment(bill.id)}
+                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+                          title="Open original supplier bill"
+                        >
+                          Original
+                        </button>
+                      )}
                       <button
                         onClick={() => handleOpenPDF(bill.id)}
                         className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
@@ -890,19 +954,83 @@ const Purchase = () => {
                     />
                     {unmatchedSupplier && !formData.supplierId && (
                       <div className="mt-2 p-3 rounded-lg border bg-amber-50 dark:bg-amber-900/20 border-amber-200 dark:border-amber-800">
-                        <p className="text-sm text-amber-900 dark:text-amber-100">
-                          <strong>"{unmatchedSupplier.name}"</strong> isn't in your suppliers yet.
+                        <p className="text-xs text-amber-800 dark:text-amber-200 mb-2">
+                          Not in your suppliers yet — review and edit before creating:
                         </p>
-                        {unmatchedSupplier.gstin && (
-                          <p className="text-xs text-amber-700 dark:text-amber-300 mt-1">
-                            GSTIN: {unmatchedSupplier.gstin}
-                          </p>
-                        )}
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            className="input text-sm"
+                            value={unmatchedSupplier.name}
+                            onChange={(e) =>
+                              setUnmatchedSupplier({ ...unmatchedSupplier, name: e.target.value })
+                            }
+                            placeholder="Supplier name"
+                          />
+                          <input
+                            type="text"
+                            className="input text-sm"
+                            value={unmatchedSupplier.gstin || ''}
+                            onChange={(e) =>
+                              setUnmatchedSupplier({ ...unmatchedSupplier, gstin: e.target.value })
+                            }
+                            placeholder="GSTIN (optional)"
+                          />
+                          <textarea
+                            className="input text-sm"
+                            rows={2}
+                            value={unmatchedSupplier.address || ''}
+                            onChange={(e) =>
+                              setUnmatchedSupplier({ ...unmatchedSupplier, address: e.target.value })
+                            }
+                            placeholder="Address (optional)"
+                          />
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              className="input text-sm"
+                              value={unmatchedSupplier.city || ''}
+                              onChange={(e) =>
+                                setUnmatchedSupplier({ ...unmatchedSupplier, city: e.target.value })
+                              }
+                              placeholder="City"
+                            />
+                            <input
+                              type="text"
+                              className="input text-sm"
+                              value={unmatchedSupplier.pincode || ''}
+                              onChange={(e) =>
+                                setUnmatchedSupplier({ ...unmatchedSupplier, pincode: e.target.value })
+                              }
+                              placeholder="Pincode"
+                            />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="tel"
+                              className="input text-sm"
+                              value={unmatchedSupplier.phone || ''}
+                              onChange={(e) =>
+                                setUnmatchedSupplier({ ...unmatchedSupplier, phone: e.target.value })
+                              }
+                              placeholder="Phone"
+                            />
+                            <input
+                              type="email"
+                              className="input text-sm"
+                              value={unmatchedSupplier.email || ''}
+                              onChange={(e) =>
+                                setUnmatchedSupplier({ ...unmatchedSupplier, email: e.target.value })
+                              }
+                              placeholder="Email"
+                            />
+                          </div>
+                        </div>
                         <div className="flex gap-2 mt-2">
                           <button
                             type="button"
                             onClick={handleCreateUnmatchedSupplier}
-                            disabled={creatingSupplier}
+                            disabled={creatingSupplier || !unmatchedSupplier.name.trim()}
                             className="btn btn-primary text-sm"
                           >
                             {creatingSupplier ? 'Creating…' : '+ Create supplier'}
@@ -999,17 +1127,24 @@ const Purchase = () => {
                               ))}
                             </select>
                             {item._extractedName && (
-                              <p className="text-xs mt-1 truncate" title={item._extractedName}>
-                                {item.itemId ? (
-                                  <span className="text-blue-600 dark:text-blue-400">
-                                    From bill: <span className="font-medium">{item._extractedName}</span>
-                                  </span>
-                                ) : (
-                                  <span className="text-emerald-700 dark:text-emerald-400">
-                                    ✨ Will save as new item: <span className="font-medium">"{item._extractedName}"</span>
-                                  </span>
-                                )}
-                              </p>
+                              item.itemId ? (
+                                <p className="text-xs mt-1 truncate text-blue-600 dark:text-blue-400" title={item._extractedName}>
+                                  From bill: <span className="font-medium">{item._extractedName}</span>
+                                </p>
+                              ) : (
+                                <div className="mt-1">
+                                  <input
+                                    type="text"
+                                    className="input text-xs py-1"
+                                    value={item._extractedName}
+                                    onChange={(e) => updateBillItem(index, '_extractedName', e.target.value)}
+                                    placeholder="New item name"
+                                  />
+                                  <p className="text-xs mt-0.5 text-emerald-700 dark:text-emerald-400">
+                                    ✨ Will save as a new item under this supplier
+                                  </p>
+                                </div>
+                              )
                             )}
                           </div>
 
@@ -1267,6 +1402,14 @@ const Purchase = () => {
                   email={viewingBill.party?.email}
                   partyName={viewingBill.party?.name}
                 />
+                {(viewingBill as any).attachmentMimeType && (
+                  <button
+                    onClick={() => handleOpenAttachment(viewingBill.id)}
+                    className="btn btn-secondary"
+                  >
+                    Open Original
+                  </button>
+                )}
                 <button
                   onClick={() => handleOpenPDF(viewingBill.id)}
                   className="btn btn-primary"
