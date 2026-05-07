@@ -918,15 +918,6 @@ const Purchase = () => {
                       >
                         PDF
                       </button>
-                      {(bill as any).attachmentMimeType && (
-                        <button
-                          onClick={() => handleOpenOriginal(bill.id)}
-                          className="text-indigo-600 hover:text-indigo-700 dark:text-indigo-400 dark:hover:text-indigo-300"
-                          title="Open the supplier's original file"
-                        >
-                          Original
-                        </button>
-                      )}
                       <ShareMenu
                         onShare={(target) => handleShare(bill.id, target)}
                         phone={bill.party?.phone}
@@ -1494,14 +1485,6 @@ const Purchase = () => {
                 >
                   Close
                 </button>
-                {(viewingBill as any).attachmentMimeType && (
-                  <button
-                    onClick={() => handleOpenOriginal(viewingBill.id)}
-                    className="btn btn-secondary"
-                  >
-                    Open Original
-                  </button>
-                )}
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingBill.id, target)}
