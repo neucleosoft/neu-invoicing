@@ -6,10 +6,12 @@ import { useToast } from '../components/ToastContext'
 import { formatCurrency } from '../utils/currency'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import {
-  downloadStatementPDF,
+  getStatementPDFBytes,
+  buildStatementFilename,
   StatementData,
   StatementLine,
 } from '../utils/pdfmakeStatement'
+import { openPdfInWindow } from '../utils/openPdfInWindow'
 
 interface CustomerOption {
   id: string
@@ -109,7 +111,9 @@ const CustomerStatement = () => {
     if (!statement) return
     try {
       const company = await loadCompanyForPDF()
-      downloadStatementPDF({ ...statement, company })
+      const data = { ...statement, company }
+      const bytes = await getStatementPDFBytes(data)
+      openPdfInWindow(bytes, buildStatementFilename(data))
     } catch (err) {
       console.error(err)
       toast.error('Failed to generate PDF.')

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { SalesInvoice } from '../types'
-import { downloadInvoicePDF, getInvoicePDFBytes, InvoiceTemplate } from '../utils/generateInvoicePDF'
+import { getInvoicePDFBytes, InvoiceTemplate } from '../utils/generateInvoicePDF'
+import { openPdfInWindow } from '../utils/openPdfInWindow'
 import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { formatInvoiceStatus, getDueCountdown, dueCountdownColorClass } from '../utils/invoiceStatus'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
@@ -158,7 +159,8 @@ const Sales = () => {
         toast.error('Failed to load invoice details')
         return
       }
-      downloadInvoicePDF(pdfData, selectedTemplate)
+      const { bytes, filename } = await getInvoicePDFBytes(pdfData, selectedTemplate)
+      openPdfInWindow(bytes, filename)
     } catch (error) {
       console.error('Error generating PDF:', error)
       toast.error('Failed to generate PDF')

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Quotation, QuotationStatus } from '../types'
-import { downloadInvoicePDF, getInvoicePDFBytes } from '../utils/generateInvoicePDF'
+import { getInvoicePDFBytes } from '../utils/generateInvoicePDF'
+import { openPdfInWindow } from '../utils/openPdfInWindow'
 import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
@@ -140,7 +141,8 @@ const Quotations = () => {
         toast.error('Failed to load quotation details')
         return
       }
-      downloadInvoicePDF(pdfData)
+      const { bytes, filename } = await getInvoicePDFBytes(pdfData)
+      openPdfInWindow(bytes, filename)
     } catch (error) {
       console.error('Error generating quotation PDF:', error)
       toast.error('Failed to generate PDF')

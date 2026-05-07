@@ -3,8 +3,8 @@ import { FileText, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
 
 import { ProformaInvoice, ProformaInvoiceStatus } from '../types'
-import { downloadProformaInvoicePDF } from '../utils/pdfmakeProformaInvoice'
 import { getInvoicePDFBytes } from '../utils/generateInvoicePDF'
+import { openPdfInWindow } from '../utils/openPdfInWindow'
 import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
@@ -144,7 +144,8 @@ const ProformaInvoices = () => {
         toast.error('Failed to load proforma invoice details')
         return
       }
-      downloadProformaInvoicePDF(pdfData)
+      const { bytes, filename } = await getInvoicePDFBytes(pdfData)
+      openPdfInWindow(bytes, filename)
     } catch (error) {
       console.error('Error generating proforma invoice PDF:', error)
       toast.error('Failed to generate PDF')
