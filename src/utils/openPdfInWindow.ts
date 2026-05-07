@@ -3,7 +3,9 @@
 // given filename. Object URL is revoked after a delay to give the new
 // window time to fetch.
 export const openPdfInWindow = (bytes: Uint8Array, filename: string): void => {
-  const blob = new Blob([bytes], { type: 'application/pdf' })
+  // Cast to BlobPart — TS 5.7 narrowed Uint8Array generics, but Blob accepts any ArrayBufferView
+  // at runtime. Without this cast the SharedArrayBuffer-vs-ArrayBuffer distinction trips type-check.
+  const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' })
   const url = URL.createObjectURL(blob)
   const opened = window.open(url, '_blank')
   if (!opened) {

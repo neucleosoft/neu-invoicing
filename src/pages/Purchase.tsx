@@ -42,6 +42,40 @@ interface BillItem {
   _extractedName?: string
 }
 
+// Render the first page of a PDF to a PNG byte array using pdfjs-dist + Chromium's native canvas.
+// Lives in the renderer (not the backend) because: (a) Chromium has canvas built-in — no native
+// node dep; (b) most OpenRouter OCR providers reject PDFs and only accept image MIME types.
+// Lazy-loaded so the pdfjs bundle isn't pulled in unless the user actually uploads a PDF.
+async function pdfFirstPageToPng(pdfBytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
+  const pdfjsLib = await import('pdfjs-dist')
+  // `new URL(..., import.meta.url)` is the Vite-recommended way to reference a worker file.
+  // Avoids the `?url` import-suffix syntax which needs a separate type declaration.
+  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+    'pdfjs-dist/build/pdf.worker.min.mjs',
+    import.meta.url,
+  ).toString()
+
+  const doc = await pdfjsLib.getDocument({ data: pdfBytes }).promise
+  const page = await doc.getPage(1)
+  // Scale 2× for better OCR fidelity — small text on bills is hard to read at native scale.
+  const viewport = page.getViewport({ scale: 2 })
+
+  const canvas = document.createElement('canvas')
+  canvas.width = viewport.width
+  canvas.height = viewport.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not get 2D canvas context')
+
+  await page.render({ canvasContext: ctx, viewport, canvas }).promise
+
+  const blob: Blob | null = await new Promise((resolve) =>
+    canvas.toBlob(resolve, 'image/png')
+  )
+  if (!blob) throw new Error('canvas.toBlob returned null')
+  const arrayBuffer = await blob.arrayBuffer()
+  return new Uint8Array(arrayBuffer)
+}
+
 const normalizeBill = (bill: any): PurchaseBill => ({
   ...bill,
   // Items still need real normalization — backend returns SupplierItem rows we want to read
@@ -239,7 +273,8 @@ const Purchase = () => {
       const data = await loadPurchaseBillPDFData(id)
       if (!data) return
       const bytes = await getPurchaseBillPDFBytes(data)
-      const blob = new Blob([bytes], { type: 'application/pdf' })
+      // Cast to BlobPart — TS 5.7 narrowed Uint8Array generics; Blob accepts the runtime shape.
+      const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
       const opened = window.open(url, '_blank')
       if (!opened) {
@@ -337,13 +372,30 @@ const Purchase = () => {
 
     setExtracting(true)
     try {
-      // Read the file bytes once. Same bytes go to (a) the API and (b) DB on save.
+      // Read the original file bytes once — these go to the DB as the bill's attachment
+      // (preserved as PDF if the user uploaded a PDF, so the audit trail is intact).
       const arrayBuffer = await file.arrayBuffer()
-      const bytes = new Uint8Array(arrayBuffer)
+      const originalBytes = new Uint8Array(arrayBuffer)
+
+      // OCR providers like Qianfan-OCR-Fast only accept image MIME types. If the user
+      // uploaded a PDF, render its first page to PNG here in the renderer so the backend
+      // always sends an image to the OCR API. The original PDF still gets stored as the
+      // attachment below.
+      let extractBytes = originalBytes
+      let extractMimeType = file.type
+      if (file.type === 'application/pdf') {
+        try {
+          extractBytes = await pdfFirstPageToPng(originalBytes)
+          extractMimeType = 'image/png'
+        } catch (err) {
+          toast.error(`Failed to read PDF: ${err instanceof Error ? err.message : 'unknown'}`)
+          return
+        }
+      }
 
       const result = await window.electronAPI.purchase.extractFromImage({
-        fileBytes: bytes,
-        mimeType: file.type
+        fileBytes: extractBytes,
+        mimeType: extractMimeType
       })
 
       if (!result.success || !result.data) {
@@ -423,8 +475,9 @@ const Purchase = () => {
         )
       }
 
-      // Keep the bytes for save. They go into the BLOB column.
-      setAttachmentBytes(bytes)
+      // Save the ORIGINAL bytes (not the converted PNG) as the bill's attachment, so the
+      // user's audit trail keeps the source document in its original format.
+      setAttachmentBytes(originalBytes)
       setAttachmentMimeType(file.type)
 
       toast.success('Bill data extracted! Review fields and confirm the supplier and items.')
