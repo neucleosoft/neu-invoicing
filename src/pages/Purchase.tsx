@@ -13,16 +13,13 @@ import { Camera, ShoppingCart, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
 import ShareMenu from '../components/ShareMenu'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
-<<<<<<< Updated upstream
 import { validateGSTIN } from '../utils/gstValidation'
-=======
 import {
   getPurchaseBillPDFBytes,
   buildPurchaseBillFilename,
   PurchaseBillPDFData,
 } from '../utils/pdfmakePurchaseBill'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
->>>>>>> Stashed changes
 
 interface Item {
   id: string
@@ -260,23 +257,6 @@ const Purchase = () => {
 
   const handleShare = async (id: string, target: ShareTarget) => {
     try {
-<<<<<<< Updated upstream
-      const att = await loadAttachment(id)
-      if (!att) return
-      const ext = att.mimeType === 'application/pdf'
-        ? '.pdf'
-        : att.mimeType.startsWith('image/')
-        ? `.${att.mimeType.split('/')[1]}`
-        : ''
-      const safeParty = (att.bill.supplier?.name || 'supplier').replace(/[^a-z0-9]/gi, '_')
-      const filename = `${att.bill.billNumber || 'bill'}_${safeParty}${ext}`
-      const subject = `Bill ${att.bill.billNumber || ''} from ${att.bill.supplier?.name || ''}`.trim()
-      await sharePdf(att.bytes, filename, target, toast, {
-        subject,
-        phone: att.bill.supplier?.phone,
-        email: att.bill.supplier?.email,
-        partyName: att.bill.supplier?.name,
-=======
       const data = await loadPurchaseBillPDFData(id)
       if (!data) return
       const bytes = await getPurchaseBillPDFBytes(data)
@@ -287,7 +267,6 @@ const Purchase = () => {
         phone: data.supplier.phone,
         email: data.supplier.email,
         partyName: data.supplier.name,
->>>>>>> Stashed changes
       })
     } catch (err) {
       console.error('Error sharing bill:', err)
@@ -754,25 +733,6 @@ const Purchase = () => {
                       >
                         Edit
                       </button>
-<<<<<<< Updated upstream
-                      {(bill as any).attachmentMimeType && (
-                        <>
-                          <button
-                            onClick={() => handleOpenAttachment(bill.id)}
-                            className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                            title="Open original supplier bill"
-                          >
-                            PDF
-                          </button>
-                          <ShareMenu
-                            onShare={(target) => handleShare(bill.id, target)}
-                            phone={bill.supplier?.phone}
-                            email={bill.supplier?.email}
-                            partyName={bill.supplier?.name}
-                          />
-                        </>
-                      )}
-=======
                       <button
                         onClick={() => handleOpenPDF(bill.id)}
                         className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
@@ -786,7 +746,6 @@ const Purchase = () => {
                         email={bill.party?.email}
                         partyName={bill.party?.name}
                       />
->>>>>>> Stashed changes
                       <button onClick={() => handleDelete(bill.id)} className="text-red-600 hover:text-red-700">Delete</button>
                     </div>
                   </td>
@@ -1245,25 +1204,6 @@ const Purchase = () => {
                 >
                   Close
                 </button>
-<<<<<<< Updated upstream
-                {(viewingBill as any).attachmentMimeType && (
-                  <>
-                    <ShareMenu
-                      variant="button"
-                      onShare={(target) => handleShare(viewingBill.id, target)}
-                      phone={viewingBill.supplier?.phone}
-                      email={viewingBill.supplier?.email}
-                      partyName={viewingBill.supplier?.name}
-                    />
-                    <button
-                      onClick={() => handleOpenAttachment(viewingBill.id)}
-                      className="btn btn-primary"
-                    >
-                      Open PDF
-                    </button>
-                  </>
-                )}
-=======
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingBill.id, target)}
@@ -1277,7 +1217,6 @@ const Purchase = () => {
                 >
                   Open PDF
                 </button>
->>>>>>> Stashed changes
               </div>
             </div>
           </div>
