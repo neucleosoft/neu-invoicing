@@ -55,7 +55,10 @@ async function pdfFirstPageToPng(pdfBytes: Uint8Array): Promise<Uint8Array<Array
     import.meta.url,
   ).toString()
 
-  const doc = await pdfjsLib.getDocument({ data: pdfBytes }).promise
+  // pdfjs transfers the input buffer to its worker (the buffer becomes detached on the main
+  // thread). Pass a fresh copy so the caller's `pdfBytes` survives and stays usable for things
+  // like saving the original PDF as the bill's attachment.
+  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) }).promise
   const page = await doc.getPage(1)
   // Scale 2× for better OCR fidelity — small text on bills is hard to read at native scale.
   const viewport = page.getViewport({ scale: 2 })
