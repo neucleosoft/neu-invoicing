@@ -176,7 +176,7 @@ const CustomerStatement = () => {
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
             <div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">
-                {statement.party.name}
+                {statement.customer.name}
               </h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 {formatDate(statement.fromDate)} — {formatDate(statement.toDate)}

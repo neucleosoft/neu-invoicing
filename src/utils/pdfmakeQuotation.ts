@@ -20,7 +20,7 @@ function normalizeQuotation(invoice: InvoiceData): InvoiceData {
 
 export function buildQuotationFilename(invoice: InvoiceData) {
   const q = normalizeQuotation(invoice)
-  return `${sanitizeFilePart(q.invoiceNumber)}_quotation_${sanitizeFilePart(q.party.name)}.pdf`
+  return `${sanitizeFilePart(q.invoiceNumber)}_quotation_${sanitizeFilePart(q.customer.name)}.pdf`
 }
 
 export function downloadQuotationPDF(invoice: InvoiceData) {

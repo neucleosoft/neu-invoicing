@@ -177,8 +177,7 @@ const DeliveryChallan = () => {
     const result = await window.electronAPI.challan.getById(challanId)
     if (!result.success || !result.data) return null
     const company = await loadCompanyForPDF()
-    // PDF utilities expect a `.party` field on input — alias `.customer` here at the boundary.
-    return { ...result.data, party: result.data.customer, company }
+    return { ...result.data, company }
   }
 
   const handleDownloadPDF = async (challanId: string) => {
@@ -243,9 +242,9 @@ const DeliveryChallan = () => {
         `Delivery Challan ${challanData.challanNumber} from ${challanData.company?.name || ''}`.trim()
       await sharePdf(bytes, filename, target, toast, {
         subject,
-        phone: challanData.party?.phone,
-        email: challanData.party?.email,
-        partyName: challanData.party?.name,
+        phone: challanData.customer?.phone,
+        email: challanData.customer?.email,
+        partyName: challanData.customer?.name,
       })
     } catch (error) {
       console.error('Error sharing challan:', error)

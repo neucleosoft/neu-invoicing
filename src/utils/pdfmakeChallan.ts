@@ -24,7 +24,7 @@ const GREEN = '#C6E0B4'
 // ─── Main export ─────────────────────────────────────────────────────────────
 
 export function buildChallanFilename(challan: ChallanData) {
-  return `${challan.challanNumber.replace(/\//g, '_')}_delivery_challan_${challan.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
+  return `${challan.challanNumber.replace(/\//g, '_')}_delivery_challan_${challan.customer.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
 }
 
 export function downloadChallanPDF(challan: ChallanData) {
@@ -172,30 +172,30 @@ function buildCompanySection(ch: ChallanData, logo: string): Content {
 // ─── Bill To / Ship To ───────────────────────────────────────────────────────
 
 function buildBillShipSection(ch: ChallanData): Content {
-  const party = ch.party
-  const pan = extractPAN(party.taxId)
-  const shipAddr = party.shippingAddress || party.billingAddress
+  const customer = ch.customer
+  const pan = extractPAN(customer.taxId)
+  const shipAddr = customer.shippingAddress || customer.billingAddress
 
   // Bill To stack
   const billStack: Content[] = [
     { text: 'BILL TO', bold: true, fontSize: 10, margin: [0, 0, 0, 2] },
-    { text: party.name, bold: true, fontSize: 11, margin: [0, 0, 0, 2] },
+    { text: customer.name, bold: true, fontSize: 11, margin: [0, 0, 0, 2] },
   ]
-  if (party.billingAddress) {
+  if (customer.billingAddress) {
     billStack.push({ columns: [
       { text: 'Address: ', width: 'auto', fontSize: 10, margin: [0, 0, 5, 0] as [number, number, number, number] },
-      { text: party.billingAddress, width: '*', fontSize: 10 },
+      { text: customer.billingAddress, width: '*', fontSize: 10 },
     ], margin: [0, 0, 0, 2] })
   }
-  if (party.taxId) {
-    const gstParts: any[] = [{ text: 'GSTIN: ' + party.taxId, bold: true }]
+  if (customer.taxId) {
+    const gstParts: any[] = [{ text: 'GSTIN: ' + customer.taxId, bold: true }]
     if (ch.placeOfSupplyName) {
       gstParts.push({ text: '   Place of Supply: ' + ch.placeOfSupplyName, bold: false })
     }
     billStack.push({ text: gstParts, fontSize: 10, margin: [0, 0, 0, 1] })
   }
-  if (party.phone) {
-    billStack.push({ text: [{ text: 'Mobile: ', bold: true }, party.phone], fontSize: 10, margin: [0, 0, 0, 1] })
+  if (customer.phone) {
+    billStack.push({ text: [{ text: 'Mobile: ', bold: true }, customer.phone], fontSize: 10, margin: [0, 0, 0, 1] })
   }
   if (pan) {
     billStack.push({ text: [{ text: 'PAN Number: ', bold: true }, pan], fontSize: 10 })
@@ -204,7 +204,7 @@ function buildBillShipSection(ch: ChallanData): Content {
   // Ship To stack
   const shipStack: Content[] = [
     { text: 'SHIP TO', bold: true, fontSize: 10, margin: [0, 0, 0, 2] },
-    { text: party.name, bold: true, fontSize: 11, margin: [0, 0, 0, 2] },
+    { text: customer.name, bold: true, fontSize: 11, margin: [0, 0, 0, 2] },
   ]
   if (shipAddr) {
     shipStack.push({ columns: [

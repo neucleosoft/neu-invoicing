@@ -13,6 +13,7 @@ import { Camera, ShoppingCart, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
 import ShareMenu from '../components/ShareMenu'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
+import { validateGSTIN } from '../utils/gstValidation'
 
 interface Item {
   id: string
@@ -37,12 +38,13 @@ interface BillItem {
 
 const normalizeBill = (bill: any): PurchaseBill => ({
   ...bill,
-  partyId: bill.partyId || bill.supplierId || '',
-  party: bill.party || bill.supplier,
+  // Items still need real normalization — backend returns SupplierItem rows we want to read
+  // as if they were the bill line's `.item`, with linkedItem filling in stock-tracked fields
+  // when present.
   items: (bill.items || []).map((item: any) => ({
     ...item,
-    itemId: item.itemId || item.supplierItemId || item.supplierItem?.id || '',
-    item: item.item || item.supplierItem?.linkedItem || {
+    itemId: item.supplierItemId || item.supplierItem?.id || '',
+    item: item.supplierItem?.linkedItem || {
       id: item.supplierItem?.id,
       name: item.supplierItem?.name,
       purchasePrice: item.supplierItem?.lastPurchasePrice || item.rate || 0,
@@ -216,14 +218,14 @@ const Purchase = () => {
         : att.mimeType.startsWith('image/')
         ? `.${att.mimeType.split('/')[1]}`
         : ''
-      const safeParty = (att.bill.supplier?.name || att.bill.party?.name || 'supplier').replace(/[^a-z0-9]/gi, '_')
+      const safeParty = (att.bill.supplier?.name || 'supplier').replace(/[^a-z0-9]/gi, '_')
       const filename = `${att.bill.billNumber || 'bill'}_${safeParty}${ext}`
-      const subject = `Bill ${att.bill.billNumber || ''} from ${att.bill.supplier?.name || att.bill.party?.name || ''}`.trim()
+      const subject = `Bill ${att.bill.billNumber || ''} from ${att.bill.supplier?.name || ''}`.trim()
       await sharePdf(att.bytes, filename, target, toast, {
         subject,
-        phone: att.bill.supplier?.phone || att.bill.party?.phone,
-        email: att.bill.supplier?.email || att.bill.party?.email,
-        partyName: att.bill.supplier?.name || att.bill.party?.name,
+        phone: att.bill.supplier?.phone,
+        email: att.bill.supplier?.email,
+        partyName: att.bill.supplier?.name,
       })
     } catch (error) {
       console.error('Error sharing bill:', error)
@@ -237,7 +239,7 @@ const Purchase = () => {
       const fullBill = normalizeBill(result.data)
       setEditingBill(fullBill)
       setFormData({
-        supplierId: fullBill.supplier?.id || fullBill.supplierId || fullBill.party?.id || fullBill.partyId || '',
+        supplierId: fullBill.supplierId || fullBill.supplier?.id || '',
         billNumber: fullBill.billNumber || '',
         supplierInvoiceNumber: fullBill.supplierInvoiceNumber || '',
         // IPC structured-clone preserves Date objects, so billDate may be a Date instance
@@ -398,9 +400,17 @@ const Purchase = () => {
     if (!unmatchedSupplier) return
     setCreatingSupplier(true)
     try {
+      // Derive stateCode/stateName from the GSTIN's first 2 digits so the supplier's first
+      // bill correctly identifies as inter- or intra-state (without this, isInterState
+      // defaults to false and CGST/SGST splits go wrong on the first save).
+      const gstinValidation = unmatchedSupplier.gstin
+        ? validateGSTIN(unmatchedSupplier.gstin)
+        : null
       const result = await window.electronAPI.supplier.create({
         name: unmatchedSupplier.name,
         taxId: unmatchedSupplier.gstin,
+        stateCode: gstinValidation?.valid ? gstinValidation.stateCode : undefined,
+        stateName: gstinValidation?.valid ? gstinValidation.stateName : undefined,
       })
       if (result.success && result.data) {
         const created = result.data
@@ -598,7 +608,7 @@ const Purchase = () => {
     if (!searchQuery.trim()) return true
     const query = searchQuery.toLowerCase()
     const matchesNumber = bill.billNumber?.toLowerCase().includes(query)
-    const matchesParty = bill.party?.name?.toLowerCase().includes(query)
+    const matchesParty = bill.supplier?.name?.toLowerCase().includes(query)
     return matchesNumber || matchesParty
   })
 
@@ -657,7 +667,7 @@ const Purchase = () => {
                 <tr key={bill.id} className="border-t">
                   <td className="table-cell font-medium">{bill.billNumber}</td>
                   <td className="table-cell">{new Date(bill.billDate).toLocaleDateString('en-GB')}</td>
-                  <td className="table-cell">{bill.party?.name}</td>
+                  <td className="table-cell">{bill.supplier?.name}</td>
                   <td className="table-cell">{formatCurrency(bill.totalAmount)}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-1 rounded-full text-xs ${
@@ -693,9 +703,9 @@ const Purchase = () => {
                           </button>
                           <ShareMenu
                             onShare={(target) => handleShare(bill.id, target)}
-                            phone={bill.party?.phone}
-                            email={bill.party?.email}
-                            partyName={bill.party?.name}
+                            phone={bill.supplier?.phone}
+                            email={bill.supplier?.email}
+                            partyName={bill.supplier?.name}
                           />
                         </>
                       )}
@@ -1077,9 +1087,9 @@ const Purchase = () => {
               {/* Supplier Info */}
               <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
                 <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Supplier</p>
-                <p className="font-semibold">{viewingBill.party?.name}</p>
-                {viewingBill.party?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingBill.party.phone}</p>}
-                {viewingBill.party?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingBill.party.email}</p>}
+                <p className="font-semibold">{viewingBill.supplier?.name}</p>
+                {viewingBill.supplier?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingBill.supplier.phone}</p>}
+                {viewingBill.supplier?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingBill.supplier.email}</p>}
               </div>
 
               {/* Items */}
@@ -1162,9 +1172,9 @@ const Purchase = () => {
                     <ShareMenu
                       variant="button"
                       onShare={(target) => handleShare(viewingBill.id, target)}
-                      phone={viewingBill.party?.phone}
-                      email={viewingBill.party?.email}
-                      partyName={viewingBill.party?.name}
+                      phone={viewingBill.supplier?.phone}
+                      email={viewingBill.supplier?.email}
+                      partyName={viewingBill.supplier?.name}
                     />
                     <button
                       onClick={() => handleOpenAttachment(viewingBill.id)}

@@ -20,7 +20,7 @@ function normalizeProformaInvoice(invoice: InvoiceData): InvoiceData {
 
 export function buildProformaInvoiceFilename(invoice: InvoiceData) {
   const pi = normalizeProformaInvoice(invoice)
-  return `${sanitizeFilePart(pi.invoiceNumber)}_proforma_invoice_${sanitizeFilePart(pi.party.name)}.pdf`
+  return `${sanitizeFilePart(pi.invoiceNumber)}_proforma_invoice_${sanitizeFilePart(pi.customer.name)}.pdf`
 }
 
 export function downloadProformaInvoicePDF(invoice: InvoiceData) {

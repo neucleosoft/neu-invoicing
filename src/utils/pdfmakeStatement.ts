@@ -20,7 +20,7 @@ export interface StatementLine {
 }
 
 export interface StatementData {
-  party: {
+  customer: {
     name: string
     email?: string
     phone?: string
@@ -47,7 +47,7 @@ export interface StatementData {
 const sanitizeFilePart = (s: string) => s.replace(/[^a-z0-9]/gi, '_')
 
 export function buildStatementFilename(data: StatementData) {
-  const partyPart = sanitizeFilePart(data.party.name)
+  const partyPart = sanitizeFilePart(data.customer.name)
   const fromPart = data.fromDate.slice(0, 10).replace(/-/g, '')
   const toPart = data.toDate.slice(0, 10).replace(/-/g, '')
   return `statement_${partyPart}_${fromPart}_${toPart}.pdf`
@@ -130,19 +130,19 @@ function buildHeader(data: StatementData, logo: string): Content {
 function buildPartyAndPeriod(data: StatementData): Content {
   const partyStack: Content[] = [
     { text: 'STATEMENT TO', bold: true, fontSize: 9, margin: [0, 0, 0, 2] },
-    { text: data.party.name, bold: true, fontSize: 11, margin: [0, 0, 0, 2] },
+    { text: data.customer.name, bold: true, fontSize: 11, margin: [0, 0, 0, 2] },
   ]
-  if (data.party.billingAddress)
-    partyStack.push({ text: data.party.billingAddress, fontSize: 9, margin: [0, 0, 0, 1] })
-  if (data.party.taxId)
+  if (data.customer.billingAddress)
+    partyStack.push({ text: data.customer.billingAddress, fontSize: 9, margin: [0, 0, 0, 1] })
+  if (data.customer.taxId)
     partyStack.push({
-      text: [{ text: 'GSTIN: ', bold: true }, data.party.taxId],
+      text: [{ text: 'GSTIN: ', bold: true }, data.customer.taxId],
       fontSize: 9,
       margin: [0, 0, 0, 1],
     })
-  if (data.party.phone)
+  if (data.customer.phone)
     partyStack.push({
-      text: [{ text: 'Mobile: ', bold: true }, data.party.phone],
+      text: [{ text: 'Mobile: ', bold: true }, data.customer.phone],
       fontSize: 9,
     })
 

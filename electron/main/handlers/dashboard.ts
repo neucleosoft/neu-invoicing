@@ -140,12 +140,7 @@ export const setupDashboardHandlers = () => {
         prisma.paymentTransaction.findMany({
           include: {
             customer: true,
-            supplier: true,
-            purchaseBill: {
-              include: {
-                supplier: true
-              }
-            }
+            supplier: true
           },
           orderBy: { paymentDate: 'desc' },
           take: limit
@@ -175,7 +170,7 @@ export const setupDashboardHandlers = () => {
           type: p.type === 'PAYMENT_IN' ? 'Payment In' : 'Payment Out',
           number: p.id.slice(-8).toUpperCase(),
           party: p.type === 'PAYMENT_OUT'
-            ? p.supplier?.name || p.purchaseBill?.supplier?.name || ''
+            ? p.supplier?.name || ''
             : p.customer?.name || '',
           amount: p.amount
         })

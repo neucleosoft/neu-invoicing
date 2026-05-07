@@ -126,7 +126,7 @@ function generateClassicTemplate(doc: jsPDF, invoice: InvoiceData) {
   // BILL TO / SHIP TO (COMPANY_BOTTOM → BILLSHIP_BOTTOM)
   // ══════════════════════════════════════════════════════════════════════════════
   drawBillToShipTo(
-    doc, invoice.party, invoice.placeOfSupplyName,
+    doc, invoice.customer, invoice.placeOfSupplyName,
     COMPANY_BOTTOM, BILLSHIP_BOTTOM,
     ML, RE
   )
@@ -426,12 +426,12 @@ function generateModernTemplate(doc: jsPDF, invoice: InvoiceData) {
   doc.setFontSize(9)
   doc.setFont('helvetica', 'bold')
   doc.setTextColor(...dark)
-  doc.text(doc.splitTextToSize(invoice.party.name, halfW - 12)[0], rx + 6, yPos + 16)
+  doc.text(doc.splitTextToSize(invoice.customer.name, halfW - 12)[0], rx + 6, yPos + 16)
   doc.setFont('helvetica', 'normal')
   doc.setFontSize(8)
   let ccy = yPos + 22
-  if (invoice.party.phone) { doc.text(invoice.party.phone, rx + 6, ccy); ccy += 4 }
-  if (invoice.party.email) doc.text(invoice.party.email, rx + 6, ccy)
+  if (invoice.customer.phone) { doc.text(invoice.customer.phone, rx + 6, ccy); ccy += 4 }
+  if (invoice.customer.email) doc.text(invoice.customer.email, rx + 6, ccy)
 
   yPos += 48
   const cur = invoice.company?.currency
@@ -482,15 +482,15 @@ function generateMinimalTemplate(doc: jsPDF, invoice: InvoiceData) {
   doc.text('FROM', ML, y); doc.text('TO', 115, y); y += 6
   doc.setTextColor(...black); doc.setFontSize(10); doc.setFont('helvetica', 'bold')
   doc.text(doc.splitTextToSize(invoice.company?.name || 'Company', 85)[0], ML, y)
-  doc.text(doc.splitTextToSize(invoice.party.name, 75)[0], 115, y); y += 5
+  doc.text(doc.splitTextToSize(invoice.customer.name, 75)[0], 115, y); y += 5
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
   let fy = y, ty2 = y
   if (invoice.company?.address) { doc.text(doc.splitTextToSize(invoice.company.address, 85)[0], ML, fy); fy += 4 }
   if (invoice.company?.phone) { doc.text(invoice.company.phone, ML, fy); fy += 4 }
   if (invoice.company?.email) { doc.text(invoice.company.email, ML, fy); fy += 4 }
-  if (invoice.party.billingAddress) { doc.text(doc.splitTextToSize(invoice.party.billingAddress, 75)[0], 115, ty2); ty2 += 4 }
-  if (invoice.party.phone) { doc.text(invoice.party.phone, 115, ty2); ty2 += 4 }
-  if (invoice.party.email) doc.text(invoice.party.email, 115, ty2)
+  if (invoice.customer.billingAddress) { doc.text(doc.splitTextToSize(invoice.customer.billingAddress, 75)[0], 115, ty2); ty2 += 4 }
+  if (invoice.customer.phone) { doc.text(invoice.customer.phone, 115, ty2); ty2 += 4 }
+  if (invoice.customer.email) doc.text(invoice.customer.email, 115, ty2)
   y = Math.max(fy, ty2) + 12
 
   const cur = invoice.company?.currency
@@ -539,9 +539,9 @@ function generateElegantTemplate(doc: jsPDF, invoice: InvoiceData) {
   doc.setFont('helvetica', 'bold'); doc.text('Invoice No:', ML, y); doc.setFont('helvetica', 'normal'); doc.text(invoice.invoiceNumber, ML + 25, y)
   doc.setFont('helvetica', 'bold'); doc.text('Date:', ML, y + 7); doc.setFont('helvetica', 'normal'); doc.text(formatDate(invoice.invoiceDate), ML + 25, y + 7)
   doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.text('BILL TO', 120, y - 3)
-  doc.setFontSize(10); doc.text(doc.splitTextToSize(invoice.party.name, 70)[0], 120, y + 4)
+  doc.setFontSize(10); doc.text(doc.splitTextToSize(invoice.customer.name, 70)[0], 120, y + 4)
   doc.setFont('helvetica', 'normal'); doc.setFontSize(8)
-  if (invoice.party.phone) doc.text(invoice.party.phone, 120, y + 10)
+  if (invoice.customer.phone) doc.text(invoice.customer.phone, 120, y + 10)
   y += 28
 
   const tData = invoice.items.map((it, i) => [(i + 1).toString(), it.item.name, it.quantity.toString(), fmtAmt(it.rate, cur), fmtAmt(it.total, cur)])
@@ -594,9 +594,9 @@ function generateBoldTemplate(doc: jsPDF, invoice: InvoiceData) {
   const cur = invoice.company?.currency
   doc.setFillColor(...offW); doc.rect(ML, y, 180, 28, 'F')
   doc.setFontSize(7); doc.setTextColor(...accent); doc.setFont('helvetica', 'bold'); doc.text('BILL TO', ML + 6, y + 7)
-  doc.setTextColor(...black); doc.setFontSize(11); doc.text(doc.splitTextToSize(invoice.party.name, 80)[0], ML + 6, y + 15)
+  doc.setTextColor(...black); doc.setFontSize(11); doc.text(doc.splitTextToSize(invoice.customer.name, 80)[0], ML + 6, y + 15)
   doc.setFontSize(8); doc.setFont('helvetica', 'normal')
-  if (invoice.party.phone) doc.text(invoice.party.phone, ML + 6, y + 22)
+  if (invoice.customer.phone) doc.text(invoice.customer.phone, ML + 6, y + 22)
   y += 38
 
   const tData = invoice.items.map((it, i) => [(i + 1).toString(), it.item.name, it.quantity.toString(), fmtAmt(it.rate, cur), fmtAmt(it.total, cur)])
@@ -658,7 +658,7 @@ export function downloadInvoicePDF(invoice: InvoiceData, template: InvoiceTempla
     return
   }
   const doc = generateInvoicePDF(invoice, template)
-  const filename = `${invoice.invoiceNumber}_${invoice.party.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
+  const filename = `${invoice.invoiceNumber}_${invoice.customer.name.replace(/[^a-z0-9]/gi, '_')}.pdf`
   doc.save(filename)
 }
 
@@ -686,7 +686,7 @@ export async function getInvoicePDFBytes(
 
   const doc = generateInvoicePDF(invoice, template)
   const arrayBuffer = doc.output('arraybuffer') as ArrayBuffer
-  const safeParty = invoice.party.name.replace(/[^a-z0-9]/gi, '_')
+  const safeParty = invoice.customer.name.replace(/[^a-z0-9]/gi, '_')
   const filename = `${invoice.invoiceNumber.replace(/\//g, '_')}_${safeParty}.pdf`
   return { bytes: new Uint8Array(arrayBuffer), filename }
 }

@@ -128,8 +128,6 @@ const Quotations = () => {
     return {
       ...result.data,
       type: 'QUOTATION',
-      // PDF utilities expect a `.party` field on input — alias `.customer` here at the boundary.
-      party: result.data.customer,
       items: result.data.items || [],
       company,
     }
@@ -196,9 +194,9 @@ const Quotations = () => {
       const subject = `Quotation ${pdfData.invoiceNumber} from ${pdfData.company?.name || ''}`.trim()
       await sharePdf(bytes, filename, target, toast, {
         subject,
-        phone: pdfData.party?.phone,
-        email: pdfData.party?.email,
-        partyName: pdfData.party?.name,
+        phone: pdfData.customer?.phone,
+        email: pdfData.customer?.email,
+        partyName: pdfData.customer?.name,
       })
     } catch (error) {
       console.error('Error sharing quotation:', error)

@@ -20,9 +20,11 @@ const Payments = () => {
   const [paymentType, setPaymentType] = useState<'PAYMENT_IN' | 'PAYMENT_OUT'>('PAYMENT_IN')
   const [parties, setParties] = useState<Party[]>([])
 
-  // Form state
+  // Form state. `counterPartyId` holds the customer ID for PAYMENT_IN and the supplier ID
+  // for PAYMENT_OUT — same field, polymorphic by `paymentType`. Routed to either
+  // `customerId` or `supplierId` on submit.
   const [formData, setFormData] = useState({
-    partyId: '',
+    counterPartyId: '',
     amount: 0,
     paymentMode: 'CASH',
     paymentDate: new Date().toISOString().split('T')[0],
@@ -39,19 +41,11 @@ const Payments = () => {
     loadParties()
   }, [paymentType])
 
+  // Compute a polymorphic `party` for the table render — customer for PAYMENT_IN, supplier
+  // for PAYMENT_OUT. The underlying relation is direct on PaymentTransaction post-split.
   const normalizePayment = (payment: any): PaymentTransaction => ({
     ...payment,
-    partyId:
-      payment.partyId ||
-      payment.customerId ||
-      payment.supplierId ||
-      payment.purchaseBill?.supplierId ||
-      '',
-    party:
-      payment.party ||
-      payment.customer ||
-      payment.supplier ||
-      payment.purchaseBill?.supplier,
+    party: payment.customer || payment.supplier,
   })
 
   const loadPayments = async () => {
@@ -78,7 +72,7 @@ const Payments = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!formData.partyId) {
+    if (!formData.counterPartyId) {
       toast.info(`Please select a ${paymentType === 'PAYMENT_IN' ? 'customer' : 'supplier'}`)
       return
     }
@@ -91,14 +85,14 @@ const Payments = () => {
     const amount = parseFloat(formData.amount.toString())
     const paymentData = paymentType === 'PAYMENT_IN'
       ? {
-          customerId: formData.partyId,
+          customerId: formData.counterPartyId,
           amount,
           paymentMode: formData.paymentMode,
           paymentDate: formData.paymentDate,
           notes: formData.notes
         }
       : {
-          supplierId: formData.partyId,
+          supplierId: formData.counterPartyId,
           amount,
           paymentMode: formData.paymentMode,
           paymentDate: formData.paymentDate,
@@ -124,7 +118,7 @@ const Payments = () => {
 
   const resetForm = () => {
     setFormData({
-      partyId: '',
+      counterPartyId: '',
       amount: 0,
       paymentMode: 'CASH',
       paymentDate: new Date().toISOString().split('T')[0],
@@ -213,8 +207,8 @@ const Payments = () => {
                     {paymentType === 'PAYMENT_IN' ? 'Customer' : 'Supplier'} *
                   </label>
                   <SearchableSelect
-                    value={formData.partyId}
-                    onChange={(id) => setFormData({...formData, partyId: id})}
+                    value={formData.counterPartyId}
+                    onChange={(id) => setFormData({...formData, counterPartyId: id})}
                     options={parties.map(p => ({
                       id: p.id,
                       name: p.name,
