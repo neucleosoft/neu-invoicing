@@ -90,6 +90,10 @@ const Parties = ({ mode = 'ALL' }: PartiesProps) => {
     }
   }, [formData.taxId])
 
+  // The Supplier model has no `type` column (suppliers are always SUPPLIER); tag
+  // rows on load so the Type column and conditional UI bits render correctly.
+  const tagSupplier = (s: any) => ({ ...s, type: 'SUPPLIER' })
+
   const loadParties = async () => {
     setLoading(true)
     try {
@@ -101,7 +105,7 @@ const Parties = ({ mode = 'ALL' }: PartiesProps) => {
       } else if (filter === 'SUPPLIER') {
         const result = await window.electronAPI.supplier.getAll()
         if (result.success && result.data) {
-          setParties(result.data)
+          setParties(result.data.map(tagSupplier))
         }
       } else {
         const [customersResult, suppliersResult] = await Promise.all([
@@ -111,7 +115,7 @@ const Parties = ({ mode = 'ALL' }: PartiesProps) => {
 
         setParties([
           ...(customersResult.success && customersResult.data ? customersResult.data : []),
-          ...(suppliersResult.success && suppliersResult.data ? suppliersResult.data : []),
+          ...(suppliersResult.success && suppliersResult.data ? suppliersResult.data.map(tagSupplier) : []),
         ])
       }
     } finally {

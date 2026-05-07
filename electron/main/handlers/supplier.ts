@@ -2,6 +2,99 @@ import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 import { triggerSyncAfterChange } from '../sync'
 
+// Idempotent migration: copy legacy `Party` rows with type='SUPPLIER' into the
+// Supplier table, then delete the originals when safe. Skips any Party row
+// whose name or GSTIN already matches an existing Supplier. Refuses to delete
+// a Party row with sales-side relations (would break FKs) — copies and leaves.
+// Called once on app start; subsequent runs are no-ops because nothing matches.
+export async function migrateLegacySuppliersFromParty(): Promise<void> {
+  const prisma = getPrisma()
+  try {
+    const legacyRows = await prisma.customer.findMany({
+      where: { type: 'SUPPLIER' },
+      include: {
+        salesInvoices: { select: { id: true }, take: 1 },
+        quotations: { select: { id: true }, take: 1 },
+        proformaInvoices: { select: { id: true }, take: 1 },
+        payments: { select: { id: true }, take: 1 },
+        deliveryChallans: { select: { id: true }, take: 1 },
+        creditDebitNotes: { select: { id: true }, take: 1 },
+      },
+    })
+    if (legacyRows.length === 0) return
+
+    let created = 0, skipped = 0, kept = 0, deleted = 0
+    for (const row of legacyRows) {
+      try {
+        const dupes = await prisma.supplier.findMany({
+          where: {
+            OR: [
+              { name: { equals: row.name } },
+              ...(row.taxId ? [{ taxId: row.taxId }] : []),
+            ],
+          },
+          take: 1,
+        })
+
+        if (dupes.length === 0) {
+          await prisma.supplier.create({
+            data: {
+              name: row.name,
+              phone: row.phone,
+              email: row.email,
+              billingAddress: row.billingAddress,
+              shippingAddress: row.shippingAddress,
+              taxId: row.taxId,
+              openingBalance: row.openingBalance,
+              currentBalance: row.currentBalance,
+              stateCode: row.stateCode,
+              stateName: row.stateName,
+              gstType: row.gstType,
+              legalName: row.legalName,
+              tradeName: row.tradeName,
+              gstStatus: row.gstStatus,
+              city: row.city,
+              district: row.district,
+              pincode: row.pincode,
+              fetchedFromGst: row.fetchedFromGst,
+              lastGstFetch: row.lastGstFetch,
+            },
+          })
+          created++
+        } else {
+          skipped++
+        }
+
+        const hasRelations =
+          row.salesInvoices.length +
+            row.quotations.length +
+            row.proformaInvoices.length +
+            row.payments.length +
+            row.deliveryChallans.length +
+            row.creditDebitNotes.length >
+          0
+        if (hasRelations) {
+          kept++
+        } else {
+          await prisma.customer.delete({ where: { id: row.id } })
+          deleted++
+        }
+      } catch (err) {
+        console.error(`Legacy supplier migration: failed on "${row.name}"`, err)
+      }
+    }
+
+    if (created > 0 || deleted > 0) {
+      console.log(
+        `[migrate-suppliers] scanned=${legacyRows.length} created=${created} skippedDup=${skipped} kept=${kept} deleted=${deleted}`,
+      )
+      await triggerSyncAfterChange()
+    }
+  } catch (err) {
+    console.error('Legacy supplier migration failed:', err)
+  }
+}
+
 export const setupSupplierHandlers = () => {
   const prisma = getPrisma()
 
