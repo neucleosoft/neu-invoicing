@@ -6,6 +6,7 @@ import {
   Package,
   Wallet,
   ShoppingCart,
+  ClipboardList,
   Truck,
   FileText,
   CreditCard,
@@ -55,6 +56,7 @@ const navigationGroups: { label?: string; items: { name: string; path: string; i
   {
     label: 'Purchase & Payments',
     items: [
+      { name: 'Purchase Orders', path: '/purchase-orders', icon: ClipboardList },
       { name: 'Purchase', path: '/purchase', icon: ShoppingCart },
       { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText },
       { name: 'Payments', path: '/payments', icon: CreditCard },

@@ -1,0 +1,920 @@
+import { useEffect, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
+import { PurchaseOrder, Supplier } from '../types'
+import { formatCurrency } from '../utils/currency'
+import NumberInput from '../components/NumberInput'
+import DateInput from '../components/DateInput'
+import { useToast } from '../components/ToastContext'
+import { useConfirm } from '../components/ConfirmDialogContext'
+import EmptyState from '../components/EmptyState'
+import { TableSkeleton } from '../components/Skeleton'
+import { ShoppingCart, Search as SearchIcon } from 'lucide-react'
+import SearchableSelect from '../components/SearchableSelect'
+import ShareMenu from '../components/ShareMenu'
+import { sharePdf, ShareTarget } from '../utils/sharePdf'
+import {
+  getPurchaseOrderPDFBytes,
+  buildPurchaseOrderFilename,
+  PurchaseOrderPDFData,
+} from '../utils/pdfmakePurchaseOrder'
+import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
+
+interface CatalogItem {
+  id: string
+  name: string
+  purchasePrice: number
+  taxRate: number
+  hsnCode?: string
+  skuHsn?: string
+}
+
+interface OrderLine {
+  itemId: string
+  hsnCode: string
+  quantity: number
+  rate: number
+  taxRate: number
+  discount: number
+  amount: number
+}
+
+const STATUS_BADGE: Record<string, string> = {
+  DRAFT: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
+  SENT: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  RECEIVED: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+  CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+}
+
+// Mirrors normalizeBill in Purchase.tsx — backend returns SupplierItem rows on each line.
+const normalizeOrder = (order: any): PurchaseOrder => ({
+  ...order,
+  items: (order.items || []).map((item: any) => ({
+    ...item,
+    itemId: item.supplierItemId || item.supplierItem?.id || '',
+    item: item.supplierItem?.linkedItem || {
+      id: item.supplierItem?.id,
+      name: item.supplierItem?.name,
+      purchasePrice: item.supplierItem?.lastPurchasePrice || item.rate || 0,
+      taxRate: item.supplierItem?.defaultTaxRate || item.taxRate || 0,
+      hsnCode: item.supplierItem?.hsnCode || item.hsnCode || '',
+      skuHsn: item.supplierItem?.linkedItem?.skuHsn,
+    },
+  })),
+})
+
+const PurchaseOrders = () => {
+  const [orders, setOrders] = useState<PurchaseOrder[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showModal, setShowModal] = useState(false)
+  const [showViewModal, setShowViewModal] = useState(false)
+  const [viewingOrder, setViewingOrder] = useState<PurchaseOrder | null>(null)
+  const [editingOrder, setEditingOrder] = useState<PurchaseOrder | null>(null)
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [catalog, setCatalog] = useState<CatalogItem[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
+  const [converting, setConverting] = useState<string | null>(null)
+
+  const [formData, setFormData] = useState({
+    supplierId: '',
+    orderNumber: '',
+    orderDate: new Date().toISOString().split('T')[0],
+    expectedDate: '',
+    notes: '',
+    termsConditions: '',
+    status: 'DRAFT' as PurchaseOrder['status'],
+  })
+
+  const [taxBreakdown, setTaxBreakdown] = useState<{
+    cgst: number
+    sgst: number
+    igst: number
+  }>({ cgst: 0, sgst: 0, igst: 0 })
+
+  const [orderLines, setOrderLines] = useState<OrderLine[]>([])
+
+  const location = useLocation()
+  const navigate = useNavigate()
+  const toast = useToast()
+  const confirm = useConfirm()
+
+  useEffect(() => {
+    loadOrders()
+    loadSuppliers()
+  }, [])
+
+  useEffect(() => {
+    if (formData.supplierId) {
+      loadCatalog(formData.supplierId)
+    } else {
+      setCatalog([])
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.supplierId])
+
+  // Auto-open the create modal when navigated here with state.openNew
+  useEffect(() => {
+    if ((location.state as { openNew?: boolean } | null)?.openNew) {
+      setShowModal(true)
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
+
+  const loadOrders = async () => {
+    setLoading(true)
+    try {
+      const result = await window.electronAPI.purchaseOrder.getAll()
+      if (result.success && result.data) {
+        setOrders(result.data.map(normalizeOrder))
+      }
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadSuppliers = async () => {
+    const result = await window.electronAPI.supplier.getAll()
+    if (result.success && result.data) {
+      setSuppliers(result.data)
+    }
+  }
+
+  const loadCatalog = async (supplierId: string) => {
+    const result = await window.electronAPI.supplierItem.getAll(supplierId)
+    if (result.success && result.data) {
+      setCatalog(result.data.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        purchasePrice: item.lastPurchasePrice || 0,
+        taxRate: item.defaultTaxRate || 0,
+        hsnCode: item.hsnCode || item.linkedItem?.hsnCode || '',
+        skuHsn: item.linkedItem?.skuHsn,
+      })))
+    }
+  }
+
+  const handleDelete = async (id: string) => {
+    const ok = await confirm({ message: 'Delete this purchase order?', danger: true })
+    if (!ok) return
+    const result = await window.electronAPI.purchaseOrder.delete(id)
+    if (result.success) {
+      loadOrders()
+    } else {
+      toast.error('Failed to delete: ' + (result.error || 'Unknown error'))
+    }
+  }
+
+  const handleView = async (id: string) => {
+    const result = await window.electronAPI.purchaseOrder.getById(id)
+    if (result.success && result.data) {
+      setViewingOrder(normalizeOrder(result.data))
+      setShowViewModal(true)
+    }
+  }
+
+  const loadPOPDFData = async (id: string): Promise<PurchaseOrderPDFData | null> => {
+    const result = await window.electronAPI.purchaseOrder.getById(id)
+    if (!result.success || !result.data) {
+      toast.error(result.error || 'Failed to fetch order')
+      return null
+    }
+    const order: any = result.data
+    const company = await loadCompanyForPDF()
+    const supplier = order.supplier || {}
+    const items = (order.items || []).map((it: any) => {
+      const quantity = it.quantity || 0
+      const rate = it.rate || 0
+      const discount = it.discount || 0
+      const linked = it.supplierItem?.linkedItem
+      return {
+        item: {
+          name: it.supplierItem?.name || linked?.name || 'Item',
+          unit: it.supplierItem?.unit || linked?.unit || 'pcs',
+          hsnCode: it.hsnCode || it.supplierItem?.hsnCode || linked?.hsnCode || linked?.skuHsn || '',
+          skuHsn: linked?.skuHsn,
+        },
+        quantity,
+        rate,
+        taxRate: it.taxRate || 0,
+        discount,
+        total: it.total || 0,
+        hsnCode: it.hsnCode || it.supplierItem?.hsnCode || linked?.hsnCode || linked?.skuHsn || '',
+        taxableAmount: quantity * rate - discount,
+      }
+    })
+    return {
+      orderNumber: order.orderNumber,
+      orderDate: order.orderDate,
+      expectedDate: order.expectedDate,
+      notes: order.notes,
+      termsConditions: order.termsConditions,
+      totalAmount: order.totalAmount || 0,
+      subtotal: order.subtotal,
+      taxAmount: order.taxAmount,
+      supplier: {
+        name: supplier.name || '',
+        taxId: supplier.taxId,
+        phone: supplier.phone,
+        email: supplier.email,
+        billingAddress: supplier.billingAddress,
+      },
+      items,
+      company,
+    }
+  }
+
+  const handleOpenPDF = async (id: string) => {
+    try {
+      const data = await loadPOPDFData(id)
+      if (!data) return
+      const bytes = await getPurchaseOrderPDFBytes(data)
+      const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' })
+      const url = URL.createObjectURL(blob)
+      const opened = window.open(url, '_blank')
+      if (!opened) {
+        const a = document.createElement('a')
+        a.href = url
+        a.download = buildPurchaseOrderFilename(data)
+        a.click()
+      }
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (err) {
+      console.error('Error generating PO PDF:', err)
+      toast.error('Failed to generate PDF')
+    }
+  }
+
+  const handleShare = async (id: string, target: ShareTarget) => {
+    try {
+      const data = await loadPOPDFData(id)
+      if (!data) return
+      const bytes = await getPurchaseOrderPDFBytes(data)
+      const filename = buildPurchaseOrderFilename(data)
+      const subject = `Purchase Order ${data.orderNumber} from ${data.company?.name || ''}`.trim()
+      await sharePdf(bytes, filename, target, toast, {
+        subject,
+        phone: data.supplier.phone,
+        email: data.supplier.email,
+        partyName: data.supplier.name,
+      })
+    } catch (err) {
+      console.error('Error sharing PO:', err)
+      toast.error('Failed to share PO')
+    }
+  }
+
+  const handleConvertToBill = async (order: PurchaseOrder) => {
+    if (order.convertedBillId) {
+      toast.info('This PO has already been converted to a bill')
+      return
+    }
+    const ok = await confirm({
+      message: `Convert PO ${order.orderNumber} into a Purchase Bill? The PO will be marked RECEIVED.`,
+    })
+    if (!ok) return
+    setConverting(order.id)
+    try {
+      const result = await window.electronAPI.purchaseOrder.convertToBill(order.id)
+      if (result.success) {
+        toast.success('Purchase Bill created — open Purchase to attach the supplier invoice.')
+        loadOrders()
+        navigate('/purchase')
+      } else {
+        toast.error(result.error || 'Failed to convert PO')
+      }
+    } finally {
+      setConverting(null)
+    }
+  }
+
+  const handleEdit = async (order: PurchaseOrder) => {
+    if (order.convertedBillId) {
+      toast.info('This PO has been converted to a bill — edit the bill instead.')
+      return
+    }
+    const result = await window.electronAPI.purchaseOrder.getById(order.id)
+    if (!result.success || !result.data) {
+      toast.error('Failed to load order')
+      return
+    }
+    const full = normalizeOrder(result.data)
+    setEditingOrder(full)
+    setFormData({
+      supplierId: full.supplierId || full.supplier?.id || '',
+      orderNumber: full.orderNumber || '',
+      orderDate: new Date(full.orderDate).toISOString().split('T')[0],
+      expectedDate: full.expectedDate ? new Date(full.expectedDate).toISOString().split('T')[0] : '',
+      notes: full.notes || '',
+      termsConditions: full.termsConditions || '',
+      status: full.status,
+    })
+    setOrderLines((full.items || []).map((it: any) => ({
+      itemId: it.itemId,
+      hsnCode: it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+      quantity: it.quantity,
+      rate: it.rate,
+      taxRate: it.taxRate,
+      discount: it.discount || 0,
+      amount: it.total,
+    })))
+    setTaxBreakdown({
+      cgst: full.cgstAmount || 0,
+      sgst: full.sgstAmount || 0,
+      igst: full.igstAmount || 0,
+    })
+    setShowModal(true)
+  }
+
+  const addLine = () => {
+    const last = orderLines[orderLines.length - 1]
+    if (last && !last.itemId) {
+      toast.info('Please complete the current item first')
+      return
+    }
+    setOrderLines([...orderLines, { itemId: '', hsnCode: '', quantity: 1, rate: 0, taxRate: 0, discount: 0, amount: 0 }])
+  }
+
+  const updateLine = (index: number, field: keyof OrderLine, value: any) => {
+    const next = [...orderLines]
+    next[index] = { ...next[index], [field]: value }
+    if (field === 'itemId') {
+      const picked = catalog.find((c) => c.id === value)
+      if (picked) {
+        next[index].rate = picked.purchasePrice
+        next[index].taxRate = picked.taxRate
+        next[index].hsnCode = picked.hsnCode || picked.skuHsn || ''
+      }
+    }
+    const qty = next[index].quantity || 0
+    const rate = next[index].rate || 0
+    const disc = next[index].discount || 0
+    const tax = next[index].taxRate || 0
+    next[index].amount = (qty * rate - disc) * (1 + tax / 100)
+    setOrderLines(next)
+  }
+
+  const removeLine = (index: number) => {
+    setOrderLines(orderLines.filter((_, i) => i !== index))
+  }
+
+  const calculateTotals = () => {
+    const subtotal = orderLines.reduce((sum, l) => sum + ((l.quantity || 0) * (l.rate || 0) - (l.discount || 0)), 0)
+    const computedTax = orderLines.reduce((sum, l) => {
+      const taxable = (l.quantity || 0) * (l.rate || 0) - (l.discount || 0)
+      return sum + (taxable * (l.taxRate || 0)) / 100
+    }, 0)
+    const breakdownTotal = taxBreakdown.cgst + taxBreakdown.sgst + taxBreakdown.igst
+    const taxAmount = breakdownTotal > 0 ? breakdownTotal : computedTax
+    return { subtotal, taxAmount, total: subtotal + taxAmount }
+  }
+
+  const resetForm = () => {
+    setFormData({
+      supplierId: '',
+      orderNumber: '',
+      orderDate: new Date().toISOString().split('T')[0],
+      expectedDate: '',
+      notes: '',
+      termsConditions: '',
+      status: 'DRAFT',
+    })
+    setOrderLines([])
+    setEditingOrder(null)
+    setTaxBreakdown({ cgst: 0, sgst: 0, igst: 0 })
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!formData.supplierId) {
+      toast.info('Please select a supplier')
+      return
+    }
+    if (orderLines.length === 0) {
+      toast.info('Please add at least one item')
+      return
+    }
+    const blank = orderLines.find((l) => !l.itemId)
+    if (blank) {
+      toast.info('Each line must have an item picked from the supplier catalog')
+      return
+    }
+    const { subtotal, taxAmount, total } = calculateTotals()
+
+    if (editingOrder) {
+      const payload = {
+        ...formData,
+        items: orderLines,
+        subtotal,
+        taxAmount,
+        cgstAmount: taxBreakdown.cgst,
+        sgstAmount: taxBreakdown.sgst,
+        igstAmount: taxBreakdown.igst,
+        totalAmount: total,
+      }
+      const result = await window.electronAPI.purchaseOrder.update(editingOrder.id, payload)
+      if (result.success) {
+        toast.success('Purchase order updated')
+        setShowModal(false)
+        resetForm()
+        loadOrders()
+      } else {
+        toast.error('Failed to update: ' + (result.error || 'Unknown error'))
+      }
+    } else {
+      let orderNumber = formData.orderNumber.trim()
+      if (!orderNumber) {
+        const numRes = await window.electronAPI.purchaseOrder.generateOrderNumber()
+        if (!numRes.success) {
+          toast.error('Failed to generate order number')
+          return
+        }
+        orderNumber = numRes.data || ''
+      }
+      const payload = {
+        ...formData,
+        orderNumber,
+        items: orderLines,
+        subtotal,
+        taxAmount,
+        cgstAmount: taxBreakdown.cgst,
+        sgstAmount: taxBreakdown.sgst,
+        igstAmount: taxBreakdown.igst,
+        totalAmount: total,
+      }
+      const result = await window.electronAPI.purchaseOrder.create(payload)
+      if (result.success) {
+        toast.success('Purchase order created')
+        setShowModal(false)
+        resetForm()
+        loadOrders()
+      } else {
+        toast.error('Failed to create: ' + (result.error || 'Unknown error'))
+      }
+    }
+  }
+
+  const totals = calculateTotals()
+
+  const filteredOrders = orders.filter((o) => {
+    if (!searchQuery.trim()) return true
+    const q = searchQuery.toLowerCase()
+    return (
+      o.orderNumber?.toLowerCase().includes(q) ||
+      o.supplier?.name?.toLowerCase().includes(q) ||
+      false
+    )
+  })
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-3xl font-bold">Purchase Orders</h1>
+        <button onClick={() => setShowModal(true)} className="btn btn-primary">+ New Purchase Order</button>
+      </div>
+
+      <div>
+        <input
+          type="text"
+          className="input max-w-md"
+          placeholder="Search by order number or supplier name..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+        />
+      </div>
+
+      <div className="card">
+        {loading ? (
+          <TableSkeleton rows={6} columns={6} />
+        ) : filteredOrders.length === 0 ? (
+          searchQuery.trim() ? (
+            <EmptyState
+              icon={SearchIcon}
+              title="No purchase orders match your search"
+              description={`Nothing matched "${searchQuery}".`}
+            />
+          ) : (
+            <EmptyState
+              icon={ShoppingCart}
+              title="No purchase orders yet"
+              description="Send purchase orders to suppliers before goods arrive — convert each PO to a bill once received."
+              action={{ label: '+ Create your first purchase order', onClick: () => setShowModal(true) }}
+            />
+          )
+        ) : (
+          <div className="overflow-auto max-h-[calc(100vh-280px)]">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th className="table-header sticky top-0 z-10">Order #</th>
+                  <th className="table-header sticky top-0 z-10">Order Date</th>
+                  <th className="table-header sticky top-0 z-10">Expected</th>
+                  <th className="table-header sticky top-0 z-10">Supplier</th>
+                  <th className="table-header sticky top-0 z-10">Amount</th>
+                  <th className="table-header sticky top-0 z-10">Status</th>
+                  <th className="table-header sticky top-0 z-10">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredOrders.map((order) => (
+                  <tr key={order.id} className="border-t">
+                    <td className="table-cell font-medium">{order.orderNumber}</td>
+                    <td className="table-cell">{new Date(order.orderDate).toLocaleDateString('en-GB')}</td>
+                    <td className="table-cell">
+                      {order.expectedDate ? new Date(order.expectedDate).toLocaleDateString('en-GB') : '-'}
+                    </td>
+                    <td className="table-cell">{order.supplier?.name}</td>
+                    <td className="table-cell">{formatCurrency(order.totalAmount)}</td>
+                    <td className="table-cell">
+                      <span className={`px-2 py-1 rounded-full text-xs ${STATUS_BADGE[order.status] || STATUS_BADGE.DRAFT}`}>
+                        {order.status}
+                      </span>
+                    </td>
+                    <td className="table-cell">
+                      <div className="flex items-center space-x-2">
+                        <button onClick={() => handleView(order.id)} className="text-primary-600 hover:text-primary-700">View</button>
+                        <button
+                          onClick={() => handleEdit(order)}
+                          className="text-green-600 hover:text-green-700 disabled:opacity-50"
+                          disabled={!!order.convertedBillId}
+                          title={order.convertedBillId ? 'Already converted to a bill' : 'Edit'}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleOpenPDF(order.id)}
+                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
+                          title="Open PDF"
+                        >
+                          PDF
+                        </button>
+                        <ShareMenu
+                          onShare={(target) => handleShare(order.id, target)}
+                          phone={order.supplier?.phone}
+                          email={order.supplier?.email}
+                          partyName={order.supplier?.name}
+                        />
+                        <button
+                          onClick={() => handleConvertToBill(order)}
+                          className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 font-medium disabled:opacity-50"
+                          disabled={!!order.convertedBillId || converting === order.id}
+                          title={order.convertedBillId ? 'Already converted' : 'Convert to Bill'}
+                        >
+                          {converting === order.id ? 'Converting…' : 'Convert'}
+                        </button>
+                        <button onClick={() => handleDelete(order.id)} className="text-red-600 hover:text-red-700">Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Create/Edit Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold">{editingOrder ? 'Edit Purchase Order' : 'Create New Purchase Order'}</h2>
+                <button onClick={() => { setShowModal(false); resetForm() }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">×</button>
+              </div>
+
+              <form onSubmit={handleSubmit} className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Supplier *</label>
+                    <SearchableSelect
+                      value={formData.supplierId}
+                      onChange={(id) => {
+                        if (id !== formData.supplierId) {
+                          setOrderLines((prev) => prev.map((l) => ({ ...l, itemId: '' })))
+                        }
+                        setFormData({ ...formData, supplierId: id })
+                      }}
+                      options={suppliers.map((s) => ({ id: s.id, name: s.name }))}
+                      placeholder="Select Supplier"
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Status</label>
+                    <select
+                      className="input"
+                      value={formData.status}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value as PurchaseOrder['status'] })}
+                    >
+                      <option value="DRAFT">Draft</option>
+                      <option value="SENT">Sent</option>
+                      <option value="RECEIVED">Received</option>
+                      <option value="CANCELLED">Cancelled</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="label">Order Date *</label>
+                    <DateInput
+                      className="input"
+                      value={formData.orderDate}
+                      onChange={(e) => setFormData({ ...formData, orderDate: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Expected Delivery Date</label>
+                    <DateInput
+                      className="input"
+                      value={formData.expectedDate}
+                      onChange={(e) => setFormData({ ...formData, expectedDate: e.target.value })}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Order Number</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={formData.orderNumber}
+                      onChange={(e) => setFormData({ ...formData, orderNumber: e.target.value })}
+                      placeholder="Auto-generated if left blank"
+                      readOnly={!!editingOrder}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold">Order Items</h3>
+                    <button type="button" onClick={addLine} className="btn btn-secondary text-sm">+ Add Item</button>
+                  </div>
+
+                  {orderLines.length === 0 ? (
+                    <div className="text-center py-8 bg-gray-50 dark:bg-gray-900/40 rounded-lg border-2 border-dashed">
+                      <p className="text-gray-500 dark:text-gray-400 mb-2">No items added yet</p>
+                      <button type="button" onClick={addLine} className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300">
+                        Click "+ Add Item" to add your first item
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {orderLines.map((line, index) => (
+                        <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
+                          <div className="flex-1">
+                            <label className="label text-xs">Item</label>
+                            <select
+                              className="input"
+                              value={line.itemId}
+                              onChange={(e) => updateLine(index, 'itemId', e.target.value)}
+                              required
+                              disabled={!formData.supplierId}
+                            >
+                              <option value="">{formData.supplierId ? 'Select Item' : 'Pick a supplier first'}</option>
+                              {catalog.map((c) => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="w-32">
+                            <label className="label text-xs">HSN/SKU</label>
+                            <input
+                              type="text"
+                              className="input"
+                              value={line.hsnCode}
+                              onChange={(e) => updateLine(index, 'hsnCode', e.target.value)}
+                              placeholder="HSN/SKU"
+                            />
+                          </div>
+
+                          <div className="w-24">
+                            <label className="label text-xs">Qty</label>
+                            <NumberInput className="input" value={line.quantity} onChange={(v) => updateLine(index, 'quantity', v)} min={1} required />
+                          </div>
+
+                          <div className="w-32">
+                            <label className="label text-xs">Rate</label>
+                            <NumberInput className="input" value={line.rate} onChange={(v) => updateLine(index, 'rate', v)} min={0} required />
+                          </div>
+
+                          <div className="w-24">
+                            <label className="label text-xs">Disc</label>
+                            <NumberInput className="input" value={line.discount} onChange={(v) => updateLine(index, 'discount', v)} min={0} />
+                          </div>
+
+                          <div className="w-24">
+                            <label className="label text-xs">Tax %</label>
+                            <NumberInput className="input" value={line.taxRate} onChange={(v) => updateLine(index, 'taxRate', v)} min={0} />
+                          </div>
+
+                          <div className="w-32">
+                            <label className="label text-xs">Amount</label>
+                            <input type="text" className="input bg-gray-100 dark:bg-gray-700" value={formatCurrency(line.amount)} readOnly />
+                          </div>
+
+                          <button type="button" onClick={() => removeLine(index)} className="btn btn-danger h-10 px-3">×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {orderLines.length > 0 && (
+                  <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
+                    <div className="space-y-2 max-w-sm ml-auto">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
+                        <span className="font-medium">{formatCurrency(totals.subtotal)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600 dark:text-gray-400">CGST:</span>
+                        <NumberInput className="input w-32 text-right" value={taxBreakdown.cgst} onChange={(v) => setTaxBreakdown({ ...taxBreakdown, cgst: v || 0 })} min={0} />
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600 dark:text-gray-400">SGST:</span>
+                        <NumberInput className="input w-32 text-right" value={taxBreakdown.sgst} onChange={(v) => setTaxBreakdown({ ...taxBreakdown, sgst: v || 0 })} min={0} />
+                      </div>
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-gray-600 dark:text-gray-400">IGST:</span>
+                        <NumberInput className="input w-32 text-right" value={taxBreakdown.igst} onChange={(v) => setTaxBreakdown({ ...taxBreakdown, igst: v || 0 })} min={0} />
+                      </div>
+                      <div className="flex justify-between border-t pt-2">
+                        <span className="text-gray-600 dark:text-gray-400">Tax (total):</span>
+                        <span className="font-medium">{formatCurrency(totals.taxAmount)}</span>
+                      </div>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {(taxBreakdown.cgst + taxBreakdown.sgst + taxBreakdown.igst) > 0
+                          ? 'Using bill-level CGST/SGST/IGST. Per-item tax % is ignored while these are set.'
+                          : 'Tax is computed from per-item Tax %. Fill CGST/SGST/IGST above to override.'}
+                      </p>
+                      <div className="flex justify-between text-lg font-bold border-t pt-2">
+                        <span>Total:</span>
+                        <span>{formatCurrency(totals.total)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Notes</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.notes}
+                      onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                      placeholder="Internal notes shown on the PO PDF..."
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Terms &amp; Conditions</label>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.termsConditions}
+                      onChange={(e) => setFormData({ ...formData, termsConditions: e.target.value })}
+                      placeholder="Overrides company default terms (optional)"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <button type="button" onClick={() => { setShowModal(false); resetForm() }} className="btn btn-secondary">Cancel</button>
+                  <button type="submit" className="btn btn-primary">{editingOrder ? 'Update Purchase Order' : 'Create Purchase Order'}</button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* View Modal */}
+      {showViewModal && viewingOrder && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold">Purchase Order Details</h2>
+                <button onClick={() => { setShowViewModal(false); setViewingOrder(null) }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">×</button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-6 mb-6">
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Order Number</p>
+                  <p className="font-semibold text-lg">{viewingOrder.orderNumber}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
+                  <span className={`px-2 py-1 rounded-full text-xs ${STATUS_BADGE[viewingOrder.status] || STATUS_BADGE.DRAFT}`}>
+                    {viewingOrder.status}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Order Date</p>
+                  <p className="font-medium">{new Date(viewingOrder.orderDate).toLocaleDateString('en-GB')}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Expected Date</p>
+                  <p className="font-medium">{viewingOrder.expectedDate ? new Date(viewingOrder.expectedDate).toLocaleDateString('en-GB') : '-'}</p>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
+                <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Supplier</p>
+                <p className="font-semibold">{viewingOrder.supplier?.name}</p>
+                {viewingOrder.supplier?.phone && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingOrder.supplier.phone}</p>}
+                {viewingOrder.supplier?.email && <p className="text-sm text-gray-600 dark:text-gray-400">{viewingOrder.supplier.email}</p>}
+              </div>
+
+              <div className="mb-6">
+                <h3 className="font-semibold mb-3">Items</h3>
+                <table className="table w-full">
+                  <thead>
+                    <tr>
+                      <th className="table-header sticky top-0 z-10">Item</th>
+                      <th className="table-header sticky top-0 z-10">HSN/SKU</th>
+                      <th className="table-header sticky top-0 z-10">Qty</th>
+                      <th className="table-header sticky top-0 z-10">Rate</th>
+                      <th className="table-header sticky top-0 z-10">Tax %</th>
+                      <th className="table-header sticky top-0 z-10">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {viewingOrder.items?.map((item: any, index: number) => (
+                      <tr key={index} className="border-t">
+                        <td className="table-cell">{item.item?.name}</td>
+                        <td className="table-cell text-gray-500">{item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '-'}</td>
+                        <td className="table-cell">{item.quantity}</td>
+                        <td className="table-cell">{formatCurrency(item.rate)}</td>
+                        <td className="table-cell">{item.taxRate}%</td>
+                        <td className="table-cell">{formatCurrency(item.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-6">
+                <div className="space-y-2 max-w-sm ml-auto">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
+                    <span className="font-medium">{formatCurrency(viewingOrder.subtotal || 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600 dark:text-gray-400">Tax:</span>
+                    <span className="font-medium">{formatCurrency(viewingOrder.taxAmount || 0)}</span>
+                  </div>
+                  <div className="flex justify-between text-lg font-bold border-t pt-2">
+                    <span>Total:</span>
+                    <span>{formatCurrency(viewingOrder.totalAmount)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {viewingOrder.notes && (
+                <div className="mb-4">
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Notes</p>
+                  <p className="text-gray-700 dark:text-gray-300">{viewingOrder.notes}</p>
+                </div>
+              )}
+
+              {viewingOrder.convertedBillId && (
+                <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                  <p className="text-sm text-amber-800 dark:text-amber-200">
+                    This PO has been converted to a purchase bill. Edit and payments now happen on the bill.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <button onClick={() => { setShowViewModal(false); setViewingOrder(null) }} className="btn btn-secondary">Close</button>
+                <ShareMenu
+                  variant="button"
+                  onShare={(target) => handleShare(viewingOrder.id, target)}
+                  phone={viewingOrder.supplier?.phone}
+                  email={viewingOrder.supplier?.email}
+                  partyName={viewingOrder.supplier?.name}
+                />
+                {!viewingOrder.convertedBillId && (
+                  <button
+                    onClick={() => handleConvertToBill(viewingOrder)}
+                    className="btn btn-secondary"
+                    disabled={converting === viewingOrder.id}
+                  >
+                    {converting === viewingOrder.id ? 'Converting…' : 'Convert to Bill'}
+                  </button>
+                )}
+                <button onClick={() => handleOpenPDF(viewingOrder.id)} className="btn btn-primary">Open PDF</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default PurchaseOrders

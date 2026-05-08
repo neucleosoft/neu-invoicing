@@ -15,6 +15,7 @@ import Sales from './pages/Sales'
 import Quotations from './pages/Quotations'
 import ProformaInvoices from './pages/ProformaInvoices'
 import Purchase from './pages/Purchase'
+import PurchaseOrders from './pages/PurchaseOrders'
 import Payments from './pages/Payments'
 import Reports from './pages/Reports'
 import GSTReports from './pages/GSTReports'
@@ -174,6 +175,7 @@ function App() {
             <Route path="quotations" element={<Quotations />} />
             <Route path="proforma-invoices" element={<ProformaInvoices />} />
             <Route path="purchase" element={<Purchase />} />
+            <Route path="purchase-orders" element={<PurchaseOrders />} />
             <Route path="payments" element={<Payments />} />
             <Route path="delivery-challan" element={<DeliveryChallan />} />
             <Route path="credit-notes" element={<CreditNotes />} />
