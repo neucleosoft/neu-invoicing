@@ -42,7 +42,10 @@ export default defineConfig({
             'process.env.GOOGLE_CLIENT_SECRET': JSON.stringify(envVars.GOOGLE_CLIENT_SECRET || ''),
             'process.env.REDIRECT_URI': JSON.stringify(envVars.REDIRECT_URI || 'http://localhost'),
             'process.env.GEMINI_API_KEY': JSON.stringify(envVars.GEMINI_API_KEY || ''),
-            'process.env.GEMINI_MODEL': JSON.stringify(envVars.GEMINI_MODEL || '')
+            'process.env.GEMINI_MODEL': JSON.stringify(envVars.GEMINI_MODEL || ''),
+            'process.env.OCR_PROVIDER': JSON.stringify(envVars.OCR_PROVIDER || ''),
+            'process.env.OPENROUTER_API_KEY': JSON.stringify(envVars.OPENROUTER_API_KEY || ''),
+            'process.env.OPENROUTER_MODEL': JSON.stringify(envVars.OPENROUTER_MODEL || '')
           }
         }
       },
