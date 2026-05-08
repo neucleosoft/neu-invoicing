@@ -15,6 +15,7 @@ import { setupSalesHandlers } from './handlers/sales'
 import { setupQuotationHandlers } from './handlers/quotation'
 import { setupProformaInvoiceHandlers } from './handlers/proformaInvoice'
 import { setupPurchaseHandlers } from './handlers/purchase'
+import { setupPurchaseOrderHandlers } from './handlers/purchaseOrder'
 import { setupPaymentHandlers } from './handlers/payment'
 import { setupDashboardHandlers } from './handlers/dashboard'
 import { setupReportHandlers } from './handlers/report'
@@ -117,6 +118,7 @@ app.whenReady().then(async () => {
   setupQuotationHandlers()
   setupProformaInvoiceHandlers()
   setupPurchaseHandlers()
+  setupPurchaseOrderHandlers()
   setupPaymentHandlers()
   setupDashboardHandlers()
   setupReportHandlers()

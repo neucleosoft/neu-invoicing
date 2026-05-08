@@ -358,6 +358,49 @@ export interface ExtractedBillData {
   items: ExtractedBillItem[]
 }
 
+export interface PurchaseOrder {
+  id: string
+  orderNumber: string
+  orderDate: string
+  expectedDate?: string | null
+  supplierId: string
+  supplier?: Supplier
+  subtotal: number
+  discount: number
+  taxAmount: number
+  totalAmount: number
+  status: 'DRAFT' | 'SENT' | 'RECEIVED' | 'CANCELLED'
+  notes?: string
+  termsConditions?: string
+  placeOfSupply?: string
+  placeOfSupplyName?: string
+  isInterState?: boolean
+  cgstAmount?: number
+  sgstAmount?: number
+  igstAmount?: number
+  cessAmount?: number
+  convertedBillId?: string | null
+  items: PurchaseOrderItem[]
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PurchaseOrderItem {
+  id: string
+  purchaseOrderId: string
+  supplierItemId: string
+  supplierItem?: SupplierItem
+  item?: Item
+  quantity: number
+  rate: number
+  discount: number
+  taxRate: number
+  total: number
+  hsnCode?: string
+  taxableAmount?: number
+  createdAt: string
+}
+
 export interface PurchaseBillItem {
   id: string
   purchaseBillId: string
@@ -604,6 +647,15 @@ declare global {
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
         generateBillNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
         extractFromImage: (args: { fileBytes: Uint8Array; mimeType: string }) => Promise<{ success: boolean; data?: ExtractedBillData; error?: string }>
+      }
+      purchaseOrder: {
+        getAll: () => Promise<{ success: boolean; data?: PurchaseOrder[]; error?: string }>
+        getById: (id: string) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
+        create: (data: any) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
+        update: (id: string, data: any) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        generateOrderNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
+        convertToBill: (id: string) => Promise<{ success: boolean; data?: PurchaseBill; error?: string }>
       }
       payment: {
         recordPaymentIn: (data: any) => Promise<{ success: boolean; data?: PaymentTransaction; error?: string }>
