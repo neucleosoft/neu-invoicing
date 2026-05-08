@@ -160,10 +160,14 @@ const Layout = () => {
   }
 
   return (
-    <div className="flex h-screen bg-gray-100 dark:bg-gray-900">
+    <div className="flex h-screen">
       {/* Sidebar */}
       <aside
-        className={`${collapsed ? 'w-16' : 'w-64'} bg-white shadow-lg dark:bg-gray-800 flex flex-col h-screen transition-[width] duration-200 ease-out`}
+        className={`${collapsed ? 'w-16' : 'w-64'} flex flex-col h-screen
+          bg-white dark:bg-slate-900
+          ring-1 ring-slate-200 dark:ring-slate-800
+          shadow-sm
+          transition-[width] duration-200 ease-out z-10`}
       >
         <div className={`border-b dark:border-gray-700 shrink-0 ${collapsed ? 'p-3' : 'p-6'}`}>
           <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
@@ -214,16 +218,16 @@ const Layout = () => {
                       key={item.path}
                       to={item.path}
                       title={collapsed ? item.name : undefined}
-                      className={`relative flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg transition-colors ${
+                      className={`relative flex items-center ${collapsed ? 'justify-center' : 'gap-3'} px-3 py-2 rounded-lg transition-colors duration-150 ${
                         active
-                          ? 'bg-primary-50 text-primary-700 font-semibold dark:bg-primary-900/30 dark:text-primary-300'
-                          : 'text-gray-700 hover:bg-gray-50 dark:text-gray-300 dark:hover:bg-gray-700/60'
+                          ? 'bg-primary-50 text-primary-700 font-semibold dark:bg-primary-500/15 dark:text-primary-200'
+                          : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100'
                       }`}
                     >
                       {active && !collapsed && (
                         <span className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r bg-primary-600 dark:bg-primary-400" />
                       )}
-                      <Icon className={`w-5 h-5 shrink-0 ${active ? 'text-primary-600 dark:text-primary-400' : ''}`} strokeWidth={active ? 2.25 : 1.75} />
+                      <Icon className={`w-5 h-5 shrink-0 transition-transform duration-150 ${active ? 'text-primary-600 dark:text-primary-300' : ''}`} strokeWidth={active ? 2.25 : 1.75} />
                       {!collapsed && <span className="truncate text-sm">{item.name}</span>}
                     </Link>
                   )
@@ -349,7 +353,7 @@ const Layout = () => {
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto">
+      <main className="flex-1 overflow-auto bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900">
         <div className="p-8">
           <Outlet />
         </div>

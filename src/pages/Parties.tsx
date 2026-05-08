@@ -11,6 +11,7 @@ import SortHeader from '../components/SortHeader'
 import SupplierItemsModal from '../components/SupplierItemsModal'
 import { useSortable } from '../hooks/useSortable'
 import { Users, Search as SearchIcon, Loader2 } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 export type PartyDirectoryMode = 'ALL' | 'CUSTOMER' | 'SUPPLIER'
 
@@ -79,6 +80,24 @@ const Parties = ({ mode = 'ALL' }: PartiesProps) => {
   useEffect(() => {
     loadParties()
   }, [filter])
+
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  // Auto-open the create modal when navigated here from Dashboard's Quick Actions
+  // tile ("Add Customer" / "Add Supplier"). Pre-select the right type based on the
+  // page's fixed mode so the type field doesn't need a separate click.
+  useEffect(() => {
+    if ((location.state as { openNew?: boolean } | null)?.openNew) {
+      if (mode === 'SUPPLIER') {
+        handleAddSupplier()
+      } else {
+        handleAddCustomer()
+      }
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   // Validate GSTIN as user types
   useEffect(() => {
