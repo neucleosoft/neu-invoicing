@@ -7,6 +7,7 @@ import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
 import { Package, Search as SearchIcon, Loader2 } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router-dom'
 
 const Items = () => {
   const [items, setItems] = useState<Item[]>([])
@@ -33,6 +34,19 @@ const Items = () => {
   useEffect(() => {
     loadItems()
   }, [])
+
+  const location = useLocation()
+  const navigate = useNavigate()
+
+  // Auto-open the create modal when navigated here from Dashboard's "Add Item"
+  // Quick Action. Clear the location state so a refresh doesn't reopen it.
+  useEffect(() => {
+    if ((location.state as { openNew?: boolean } | null)?.openNew) {
+      setShowModal(true)
+      navigate(location.pathname, { replace: true, state: null })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   const loadItems = async () => {
     setLoading(true)
