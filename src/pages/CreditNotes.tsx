@@ -15,8 +15,9 @@ import {
   buildCreditNoteFilename,
   CreditNotePDFData,
 } from '../utils/pdfmakeCreditNote'
-import { openPdfInWindow } from '../utils/openPdfInWindow'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
+import DownloadMenu from '../components/DownloadMenu'
+import { DispatchOpts, TableData } from '../utils/downloadHelpers'
 
 interface CreditDebitNote {
   id: string
@@ -250,16 +251,46 @@ const CreditNotes = () => {
     }
   }
 
-  // Generate the Neu Invoicing-styled note PDF and open it in a new window.
-  const handleOpenPDF = async (id: string) => {
-    try {
-      const data = await loadCreditNotePDFData(id)
-      if (!data) return
-      const bytes = await getCreditNotePDFBytes(data)
-      openPdfInWindow(bytes, buildCreditNoteFilename(data))
-    } catch (err) {
-      console.error('Error generating credit/debit note PDF:', err)
-      toast.error('Failed to generate PDF')
+  const buildNoteTableData = (data: CreditNotePDFData): TableData => {
+    const customer = (data as any).customer || {}
+    const meta: Array<[string, string | number]> = [
+      ['Note', (data as any).noteNumber || ''],
+      ['Type', (data as any).type === 'DEBIT_NOTE' ? 'Debit Note' : 'Credit Note'],
+      ['Date', (data as any).noteDate ? new Date((data as any).noteDate).toLocaleDateString('en-GB') : ''],
+      ['Customer', customer.name || ''],
+      ['GSTIN', customer.taxId || ''],
+    ]
+    const metaSuffix: Array<[string, string | number]> = [
+      ['Subtotal', (data as any).subtotal || 0],
+      ['Tax', (data as any).taxAmount || 0],
+      ['Total', (data as any).totalAmount || 0],
+    ]
+    const headers = ['Item', 'HSN', 'Qty', 'Rate', 'Tax %', 'Amount']
+    const rows: (string | number)[][] = ((data as any).items || []).map((it: any) => [
+      it.item?.name || '',
+      it.hsnCode || it.item?.hsnCode || '',
+      it.quantity || 0,
+      it.rate || 0,
+      it.taxRate || 0,
+      it.total || 0,
+    ])
+    return { baseName: buildCreditNoteFilename(data).replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+  }
+
+  const buildDownloadOpts = async (id: string): Promise<DispatchOpts> => {
+    const data = await loadCreditNotePDFData(id)
+    if (!data) throw new Error('Failed to load note details')
+    let cached: { bytes: Uint8Array; filename: string } | null = null
+    const getPdf = async () => {
+      if (!cached) {
+        const bytes = await getCreditNotePDFBytes(data)
+        cached = { bytes, filename: buildCreditNoteFilename(data) }
+      }
+      return cached
+    }
+    return {
+      getPdf,
+      getTable: async () => buildNoteTableData(data),
     }
   }
 
@@ -569,13 +600,7 @@ const CreditNotes = () => {
                         >
                           Edit
                         </button>
-                        <button
-                          onClick={() => handleOpenPDF(note.id)}
-                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                          title="Open PDF"
-                        >
-                          PDF
-                        </button>
+                        <DownloadMenu getOpts={() => buildDownloadOpts(note.id)} />
                         <ShareMenu
                           onShare={(target) => handleShare(note.id, target)}
                           phone={note.customer?.phone}
@@ -994,12 +1019,10 @@ const CreditNotes = () => {
                   email={viewingNote.customer?.email}
                   partyName={viewingNote.customer?.name}
                 />
-                <button
-                  onClick={() => handleOpenPDF(viewingNote.id)}
-                  className="btn btn-primary"
-                >
-                  Open PDF
-                </button>
+                <DownloadMenu
+                  variant="button"
+                  getOpts={() => buildDownloadOpts(viewingNote.id)}
+                />
               </div>
             </div>
           </div>

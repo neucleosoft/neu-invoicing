@@ -1,4 +1,5 @@
 import JSZip from 'jszip'
+import { downloadBytes, TableData } from './downloadHelpers'
 
 export interface BulkPdfItem {
   id: string
@@ -51,6 +52,69 @@ export async function bulkDownloadPdfs(args: {
   URL.revokeObjectURL(url)
 
   return { added, failed }
+}
+
+// Bulk Excel export: one sheet per "section" (typically a single Summary sheet).
+// Each row maps the same headers shape used by the per-document Excel export.
+export interface BulkExcelSheet {
+  // Sheet name (clamped to 30 chars by ExcelJS — we trim ourselves so it's predictable).
+  name: string
+  // Optional meta fields merged into the header row (mirror of TableData.meta).
+  meta?: Array<[string, string | number]>
+  headers: string[]
+  rows: (string | number)[][]
+}
+
+export async function bulkDownloadExcel(args: {
+  filename: string
+  sheets: BulkExcelSheet[]
+}): Promise<void> {
+  const ExcelJS = (await import('exceljs')).default
+  const wb = new ExcelJS.Workbook()
+
+  for (const sheet of args.sheets) {
+    const ws = wb.addWorksheet((sheet.name || 'Sheet').slice(0, 30))
+
+    const hasMeta = !!(sheet.meta && sheet.meta.length > 0)
+    const metaKeys = hasMeta ? sheet.meta!.map(([k]) => k) : []
+    const metaVals = hasMeta ? sheet.meta!.map(([, v]) => v) : []
+
+    const headerRow = ws.addRow([...metaKeys, ...sheet.headers])
+    headerRow.font = { bold: true }
+    headerRow.eachCell((cell) => {
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE0E7FF' } }
+    })
+
+    for (const row of sheet.rows) {
+      if (row.length === 0) continue
+      ws.addRow([...metaVals, ...row])
+    }
+
+    ws.columns.forEach((col) => {
+      let max = 10
+      col.eachCell?.({ includeEmpty: false }, (cell) => {
+        const len = String(cell.value ?? '').length
+        if (len > max) max = len
+      })
+      col.width = Math.min(max + 2, 40)
+    })
+  }
+
+  const buffer = await wb.xlsx.writeBuffer()
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer as ArrayBuffer)
+  downloadBytes(
+    bytes,
+    args.filename,
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  )
+}
+
+// Convenience: pack a single TableData into one sheet and trigger the download.
+export async function bulkDownloadSingleSheetExcel(filename: string, data: TableData): Promise<void> {
+  await bulkDownloadExcel({
+    filename,
+    sheets: [{ name: data.baseName, meta: data.meta, headers: data.headers, rows: data.rows }],
+  })
 }
 
 export function buildZipFilename(prefix: string, partyName: string, from?: string, to?: string): string {

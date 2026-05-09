@@ -20,6 +20,8 @@ import {
   PurchaseBillPDFData,
 } from '../utils/pdfmakePurchaseBill'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
+import DownloadMenu from '../components/DownloadMenu'
+import { DispatchOpts, TableData } from '../utils/downloadHelpers'
 
 interface Item {
   id: string
@@ -287,28 +289,46 @@ const Purchase = () => {
     }
   }
 
-  // Generate the Neu Invoicing-styled bill PDF and open it in a new window.
-  // The browser's PDF viewer gives the user save/print controls — same UX as
-  // the previous "open original attachment" path.
-  const handleOpenPDF = async (id: string) => {
-    try {
-      const data = await loadPurchaseBillPDFData(id)
-      if (!data) return
-      const bytes = await getPurchaseBillPDFBytes(data)
-      // Cast to BlobPart — TS 5.7 narrowed Uint8Array generics; Blob accepts the runtime shape.
-      const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' })
-      const url = URL.createObjectURL(blob)
-      const opened = window.open(url, '_blank')
-      if (!opened) {
-        const a = document.createElement('a')
-        a.href = url
-        a.download = buildPurchaseBillFilename(data)
-        a.click()
+  const buildBillTableData = (data: PurchaseBillPDFData): TableData => {
+    const meta: Array<[string, string | number]> = [
+      ['Bill', data.billNumber || ''],
+      ['Date', data.billDate ? new Date(data.billDate).toLocaleDateString('en-GB') : ''],
+      ['Supplier', data.supplier?.name || ''],
+      ['GSTIN', data.supplier?.taxId || ''],
+    ]
+    if (data.supplierInvoiceNumber) meta.push(['Supplier Inv. #', data.supplierInvoiceNumber])
+    const metaSuffix: Array<[string, string | number]> = [
+      ['Subtotal', data.subtotal || 0],
+      ['Tax', data.taxAmount || 0],
+      ['Total', data.totalAmount || 0],
+    ]
+    const headers = ['Item', 'HSN', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount']
+    const rows: (string | number)[][] = (data.items || []).map((it) => [
+      it.item?.name || '',
+      it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+      it.quantity || 0,
+      it.rate || 0,
+      it.discount || 0,
+      it.taxRate || 0,
+      it.total || 0,
+    ])
+    return { baseName: buildPurchaseBillFilename(data).replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+  }
+
+  const buildDownloadOpts = async (id: string): Promise<DispatchOpts> => {
+    const data = await loadPurchaseBillPDFData(id)
+    if (!data) throw new Error('Failed to load bill details')
+    let cached: { bytes: Uint8Array; filename: string } | null = null
+    const getPdf = async () => {
+      if (!cached) {
+        const bytes = await getPurchaseBillPDFBytes(data)
+        cached = { bytes, filename: buildPurchaseBillFilename(data) }
       }
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (err) {
-      console.error('Error generating purchase bill PDF:', err)
-      toast.error('Failed to generate PDF')
+      return cached
+    }
+    return {
+      getPdf,
+      getTable: async () => buildBillTableData(data),
     }
   }
 
@@ -911,13 +931,7 @@ const Purchase = () => {
                           Original
                         </button>
                       )}
-                      <button
-                        onClick={() => handleOpenPDF(bill.id)}
-                        className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                        title="Open PDF"
-                      >
-                        PDF
-                      </button>
+                      <DownloadMenu getOpts={() => buildDownloadOpts(bill.id)} />
                       <ShareMenu
                         onShare={(target) => handleShare(bill.id, target)}
                         phone={bill.party?.phone}
@@ -1500,12 +1514,10 @@ const Purchase = () => {
                     Open Original
                   </button>
                 )}
-                <button
-                  onClick={() => handleOpenPDF(viewingBill.id)}
-                  className="btn btn-primary"
-                >
-                  Open PDF
-                </button>
+                <DownloadMenu
+                  variant="button"
+                  getOpts={() => buildDownloadOpts(viewingBill.id)}
+                />
               </div>
             </div>
           </div>
