@@ -550,7 +550,7 @@ model DeliveryChallan {
   vehicleNumber        String?
   notes                String?
   termsConditions      String?
-  status               String                @default("PENDING") // PENDING, DELIVERED, CONVERTED
+  status               String                @default("NON_RETURNABLE") // RETURNABLE, NON_RETURNABLE, CONVERTED
   convertedToInvoiceId String?
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
