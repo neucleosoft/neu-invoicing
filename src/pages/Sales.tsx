@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { SalesInvoice } from '../types'
 import { getInvoicePDFBytes, InvoiceTemplate } from '../utils/generateInvoicePDF'
-import { openPdfInWindow } from '../utils/openPdfInWindow'
-import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
+import DownloadMenu from '../components/DownloadMenu'
+import BulkDownloadMenu from '../components/BulkDownloadMenu'
+import { DispatchOpts, TableData } from '../utils/downloadHelpers'
+import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { formatInvoiceStatus, getDueCountdown, dueCountdownColorClass } from '../utils/invoiceStatus'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
@@ -152,18 +154,48 @@ const Sales = () => {
     }
   }
 
-  const handleDownloadPDF = async (invoiceId: string) => {
-    try {
-      const pdfData = await loadInvoicePDFData(invoiceId)
-      if (!pdfData) {
-        toast.error('Failed to load invoice details')
-        return
-      }
-      const { bytes, filename } = await getInvoicePDFBytes(pdfData, selectedTemplate)
-      openPdfInWindow(bytes, filename)
-    } catch (error) {
-      console.error('Error generating PDF:', error)
-      toast.error('Failed to generate PDF')
+  const buildInvoiceTableData = (pdfData: any, filename: string): TableData => {
+    const customer = pdfData.customer || pdfData.party || {}
+    // Header order: Invoice, Date, Customer, GSTIN, <line cols>, Status, Subtotal, Tax, Total
+    const meta: Array<[string, string | number]> = [
+      ['Invoice', pdfData.invoiceNumber || ''],
+      ['Date', pdfData.invoiceDate ? new Date(pdfData.invoiceDate).toLocaleDateString('en-GB') : ''],
+      ['Customer', customer.name || ''],
+      ['GSTIN', customer.taxId || ''],
+    ]
+    const metaSuffix: Array<[string, string | number]> = [
+      ['Subtotal', pdfData.subtotal || 0],
+      ['Tax', pdfData.taxAmount || 0],
+      ['Total', pdfData.totalAmount || 0],
+      ['Status', pdfData.status || ''],
+    ]
+    const headers = ['Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount']
+    const rows: (string | number)[][] = (pdfData.items || []).map((it: any) => [
+      it.item?.name || '',
+      it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+      it.quantity || 0,
+      it.rate || 0,
+      it.discount || 0,
+      it.taxRate || 0,
+      it.total || 0,
+    ])
+    return { baseName: filename.replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+  }
+
+  const buildDownloadOpts = async (invoiceId: string): Promise<DispatchOpts> => {
+    const pdfData = await loadInvoicePDFData(invoiceId)
+    if (!pdfData) throw new Error('Failed to load invoice details')
+    let cached: { bytes: Uint8Array; filename: string } | null = null
+    const getPdf = async () => {
+      if (!cached) cached = await getInvoicePDFBytes(pdfData, selectedTemplate)
+      return cached
+    }
+    return {
+      getPdf,
+      getTable: async () => {
+        const { filename } = await getPdf()
+        return buildInvoiceTableData(pdfData, filename)
+      },
     }
   }
 
@@ -198,6 +230,91 @@ const Sales = () => {
     } catch (error) {
       console.error('Bulk PDF download error:', error)
       toast.error('Failed to bulk-download PDFs')
+    } finally {
+      setBulkDownloading(false)
+    }
+  }
+
+  // Bulk Excel: single flat sheet — one row per line item with the parent
+  // invoice's identity + totals repeated. Line items come from a per-invoice
+  // fetch since the list endpoint doesn't always include them.
+  const handleBulkDownloadExcel = async (matching: SalesInvoice[]) => {
+    if (matching.length === 0) {
+      toast.info('No invoices to download')
+      return
+    }
+    const partyName = matching[0]?.customer?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const headers = [
+        'Invoice #', 'Date', 'Customer', 'GSTIN',
+        'Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount',
+        'Subtotal', 'Tax', 'Total', 'Paid', 'Balance', 'Status',
+      ]
+      const rows: (string | number)[][] = []
+      for (const inv of matching) {
+        let items: any[] = (inv as any).items || []
+        if (!items.length) {
+          const res = await window.electronAPI.sales.getById(inv.id)
+          if (res.success && res.data) items = (res.data as any).items || []
+        }
+        const dateStr = inv.invoiceDate ? new Date(inv.invoiceDate).toLocaleDateString('en-GB') : ''
+        const invoiceTrailer: (string | number)[] = [
+          inv.subtotal || 0,
+          inv.taxAmount || 0,
+          inv.totalAmount || 0,
+          inv.amountPaid || 0,
+          inv.balanceDue || 0,
+          inv.status || '',
+        ]
+        if (items.length === 0) {
+          // Invoice with no line items — still emit one row so it's not lost.
+          rows.push([
+            inv.invoiceNumber || '',
+            dateStr,
+            inv.customer?.name || '',
+            inv.customer?.taxId || '',
+            '', '', 0, 0, 0, 0, 0,
+            ...invoiceTrailer,
+          ])
+          continue
+        }
+        for (const it of items) {
+          rows.push([
+            inv.invoiceNumber || '',
+            dateStr,
+            inv.customer?.name || '',
+            inv.customer?.taxId || '',
+            it.item?.name || '',
+            it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+            it.quantity || 0,
+            it.rate || 0,
+            it.discount || 0,
+            it.taxRate || 0,
+            it.total || 0,
+            ...invoiceTrailer,
+          ])
+        }
+      }
+
+      const today = new Date().toISOString().slice(0, 10)
+      const filename = `Invoices_${(partyName || 'all').replace(/[^a-z0-9]+/gi, '_')}_${today}.xlsx`
+      await bulkDownloadExcel({
+        filename,
+        sheets: [
+          {
+            name: 'Invoices',
+            meta: [['Generated', new Date().toLocaleString()]],
+            headers,
+            rows,
+          },
+        ],
+      })
+      toast.success(`Exported ${matching.length} invoice${matching.length === 1 ? '' : 's'} to Excel`)
+    } catch (error) {
+      console.error('Bulk Excel error:', error)
+      toast.error('Failed to bulk-download Excel')
     } finally {
       setBulkDownloading(false)
     }
@@ -588,14 +705,12 @@ const Sales = () => {
                   <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
-              <button
-                type="button"
-                onClick={() => handleBulkDownloadPdfs(bulkFiltered)}
-                disabled={bulkDownloading || bulkFiltered.length === 0}
-                className="btn btn-primary text-sm"
-              >
-                {bulkDownloading ? 'Downloading…' : `Download All (${bulkFiltered.length})`}
-              </button>
+              <BulkDownloadMenu
+                count={bulkFiltered.length}
+                busy={bulkDownloading}
+                onPdfs={() => handleBulkDownloadPdfs(bulkFiltered)}
+                onExcel={() => handleBulkDownloadExcel(bulkFiltered)}
+              />
             </>
           )
         })()}
@@ -680,13 +795,7 @@ const Sales = () => {
                         >
                           Edit
                         </button>
-                        <button
-                          onClick={() => handleDownloadPDF(invoice.id)}
-                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                          title="Download PDF"
-                        >
-                          PDF
-                        </button>
+                        <DownloadMenu getOpts={() => buildDownloadOpts(invoice.id)} />
                         <ShareMenu
                           onShare={(target) => handleShare(invoice.id, target)}
                           phone={invoice.customer?.phone}
@@ -1190,12 +1299,10 @@ const Sales = () => {
                   email={viewingInvoice.customer?.email}
                   partyName={viewingInvoice.customer?.name}
                 />
-                <button
-                  onClick={() => handleDownloadPDF(viewingInvoice.id)}
-                  className="btn btn-primary"
-                >
-                  Download PDF
-                </button>
+                <DownloadMenu
+                  variant="button"
+                  getOpts={() => buildDownloadOpts(viewingInvoice.id)}
+                />
               </div>
             </div>
           </div>

@@ -4,7 +4,8 @@ import SearchableSelect from '../components/SearchableSelect'
 
 import { ProformaInvoice, ProformaInvoiceStatus } from '../types'
 import { getInvoicePDFBytes } from '../utils/generateInvoicePDF'
-import { openPdfInWindow } from '../utils/openPdfInWindow'
+import DownloadMenu from '../components/DownloadMenu'
+import { DispatchOpts, TableData } from '../utils/downloadHelpers'
 import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
@@ -137,18 +138,47 @@ const ProformaInvoices = () => {
     }
   }
 
-  const handleDownloadPDF = async (proformaInvoiceId: string) => {
-    try {
-      const pdfData = await loadProformaInvoicePDFData(proformaInvoiceId)
-      if (!pdfData) {
-        toast.error('Failed to load proforma invoice details')
-        return
-      }
-      const { bytes, filename } = await getInvoicePDFBytes(pdfData)
-      openPdfInWindow(bytes, filename)
-    } catch (error) {
-      console.error('Error generating proforma invoice PDF:', error)
-      toast.error('Failed to generate PDF')
+  const buildProformaTableData = (pdfData: any, filename: string): TableData => {
+    const customer = pdfData.customer || pdfData.party || {}
+    const meta: Array<[string, string | number]> = [
+      ['Proforma', pdfData.invoiceNumber || ''],
+      ['Date', pdfData.invoiceDate ? new Date(pdfData.invoiceDate).toLocaleDateString('en-GB') : ''],
+      ['Customer', customer.name || ''],
+      ['GSTIN', customer.taxId || ''],
+    ]
+    const metaSuffix: Array<[string, string | number]> = [
+      ['Status', pdfData.status || ''],
+      ['Subtotal', pdfData.subtotal || 0],
+      ['Tax', pdfData.taxAmount || 0],
+      ['Total', pdfData.totalAmount || 0],
+    ]
+    const headers = ['Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount']
+    const rows: (string | number)[][] = (pdfData.items || []).map((it: any) => [
+      it.item?.name || '',
+      it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+      it.quantity || 0,
+      it.rate || 0,
+      it.discount || 0,
+      it.taxRate || 0,
+      it.total || 0,
+    ])
+    return { baseName: filename.replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+  }
+
+  const buildDownloadOpts = async (id: string): Promise<DispatchOpts> => {
+    const pdfData = await loadProformaInvoicePDFData(id)
+    if (!pdfData) throw new Error('Failed to load proforma invoice details')
+    let cached: { bytes: Uint8Array; filename: string } | null = null
+    const getPdf = async () => {
+      if (!cached) cached = await getInvoicePDFBytes(pdfData)
+      return cached
+    }
+    return {
+      getPdf,
+      getTable: async () => {
+        const { filename } = await getPdf()
+        return buildProformaTableData(pdfData, filename)
+      },
     }
   }
 
@@ -540,13 +570,7 @@ const ProformaInvoices = () => {
                         >
                           Edit
                         </button>
-                        <button
-                          onClick={() => handleDownloadPDF(proformaInvoice.id)}
-                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                          title="Download PDF"
-                        >
-                          PDF
-                        </button>
+                        <DownloadMenu getOpts={() => buildDownloadOpts(proformaInvoice.id)} />
                         <ShareMenu
                           onShare={(target) => handleShare(proformaInvoice.id, target)}
                           phone={proformaInvoice.customer?.phone}
@@ -935,12 +959,10 @@ const ProformaInvoices = () => {
                 >
                   Close
                 </button>
-                <button
-                  onClick={() => handleDownloadPDF(viewingProformaInvoice.id)}
-                  className="btn btn-secondary"
-                >
-                  Download PDF
-                </button>
+                <DownloadMenu
+                  variant="button"
+                  getOpts={() => buildDownloadOpts(viewingProformaInvoice.id)}
+                />
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingProformaInvoice.id, target)}

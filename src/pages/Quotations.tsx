@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Quotation, QuotationStatus } from '../types'
 import { getInvoicePDFBytes } from '../utils/generateInvoicePDF'
-import { openPdfInWindow } from '../utils/openPdfInWindow'
+import DownloadMenu from '../components/DownloadMenu'
+import { DispatchOpts, TableData } from '../utils/downloadHelpers'
 import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
@@ -134,18 +135,47 @@ const Quotations = () => {
     }
   }
 
-  const handleDownloadPDF = async (quotationId: string) => {
-    try {
-      const pdfData = await loadQuotationPDFData(quotationId)
-      if (!pdfData) {
-        toast.error('Failed to load quotation details')
-        return
-      }
-      const { bytes, filename } = await getInvoicePDFBytes(pdfData)
-      openPdfInWindow(bytes, filename)
-    } catch (error) {
-      console.error('Error generating quotation PDF:', error)
-      toast.error('Failed to generate PDF')
+  const buildQuotationTableData = (pdfData: any, filename: string): TableData => {
+    const customer = pdfData.customer || pdfData.party || {}
+    const meta: Array<[string, string | number]> = [
+      ['Quotation', pdfData.invoiceNumber || ''],
+      ['Date', pdfData.invoiceDate ? new Date(pdfData.invoiceDate).toLocaleDateString('en-GB') : ''],
+      ['Customer', customer.name || ''],
+      ['GSTIN', customer.taxId || ''],
+    ]
+    const metaSuffix: Array<[string, string | number]> = [
+      ['Status', pdfData.status || ''],
+      ['Subtotal', pdfData.subtotal || 0],
+      ['Tax', pdfData.taxAmount || 0],
+      ['Total', pdfData.totalAmount || 0],
+    ]
+    const headers = ['Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount']
+    const rows: (string | number)[][] = (pdfData.items || []).map((it: any) => [
+      it.item?.name || '',
+      it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+      it.quantity || 0,
+      it.rate || 0,
+      it.discount || 0,
+      it.taxRate || 0,
+      it.total || 0,
+    ])
+    return { baseName: filename.replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+  }
+
+  const buildDownloadOpts = async (quotationId: string): Promise<DispatchOpts> => {
+    const pdfData = await loadQuotationPDFData(quotationId)
+    if (!pdfData) throw new Error('Failed to load quotation details')
+    let cached: { bytes: Uint8Array; filename: string } | null = null
+    const getPdf = async () => {
+      if (!cached) cached = await getInvoicePDFBytes(pdfData)
+      return cached
+    }
+    return {
+      getPdf,
+      getTable: async () => {
+        const { filename } = await getPdf()
+        return buildQuotationTableData(pdfData, filename)
+      },
     }
   }
 
@@ -536,13 +566,7 @@ const Quotations = () => {
                         >
                           Edit
                         </button>
-                        <button
-                          onClick={() => handleDownloadPDF(quotation.id)}
-                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                          title="Download PDF"
-                        >
-                          PDF
-                        </button>
+                        <DownloadMenu getOpts={() => buildDownloadOpts(quotation.id)} />
                         <ShareMenu
                           onShare={(target) => handleShare(quotation.id, target)}
                           phone={quotation.customer?.phone}
@@ -931,12 +955,10 @@ const Quotations = () => {
                 >
                   Close
                 </button>
-                <button
-                  onClick={() => handleDownloadPDF(viewingQuotation.id)}
-                  className="btn btn-secondary"
-                >
-                  Download PDF
-                </button>
+                <DownloadMenu
+                  variant="button"
+                  getOpts={() => buildDownloadOpts(viewingQuotation.id)}
+                />
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingQuotation.id, target)}

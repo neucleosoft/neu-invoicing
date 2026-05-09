@@ -18,6 +18,8 @@ import {
   PurchaseOrderPDFData,
 } from '../utils/pdfmakePurchaseOrder'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
+import DownloadMenu from '../components/DownloadMenu'
+import { DispatchOpts, TableData } from '../utils/downloadHelpers'
 
 interface CatalogItem {
   id: string
@@ -223,24 +225,48 @@ const PurchaseOrders = () => {
     }
   }
 
-  const handleOpenPDF = async (id: string) => {
-    try {
-      const data = await loadPOPDFData(id)
-      if (!data) return
-      const bytes = await getPurchaseOrderPDFBytes(data)
-      const blob = new Blob([bytes as BlobPart], { type: 'application/pdf' })
-      const url = URL.createObjectURL(blob)
-      const opened = window.open(url, '_blank')
-      if (!opened) {
-        const a = document.createElement('a')
-        a.href = url
-        a.download = buildPurchaseOrderFilename(data)
-        a.click()
+  const buildOrderTableData = (data: PurchaseOrderPDFData): TableData => {
+    const meta: Array<[string, string | number]> = [
+      ['Order', data.orderNumber || ''],
+      ['Date', data.orderDate ? new Date(data.orderDate).toLocaleDateString('en-GB') : ''],
+      ['Supplier', data.supplier?.name || ''],
+      ['GSTIN', data.supplier?.taxId || ''],
+    ]
+    if (data.expectedDate) {
+      meta.push(['Expected Date', new Date(data.expectedDate as any).toLocaleDateString('en-GB')])
+    }
+    const metaSuffix: Array<[string, string | number]> = [
+      ['Subtotal', data.subtotal || 0],
+      ['Tax', data.taxAmount || 0],
+      ['Total', data.totalAmount || 0],
+    ]
+    const headers = ['Item', 'HSN', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount']
+    const rows: (string | number)[][] = (data.items || []).map((it) => [
+      it.item?.name || '',
+      it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+      it.quantity || 0,
+      it.rate || 0,
+      it.discount || 0,
+      it.taxRate || 0,
+      it.total || 0,
+    ])
+    return { baseName: buildPurchaseOrderFilename(data).replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+  }
+
+  const buildDownloadOpts = async (id: string): Promise<DispatchOpts> => {
+    const data = await loadPOPDFData(id)
+    if (!data) throw new Error('Failed to load order details')
+    let cached: { bytes: Uint8Array; filename: string } | null = null
+    const getPdf = async () => {
+      if (!cached) {
+        const bytes = await getPurchaseOrderPDFBytes(data)
+        cached = { bytes, filename: buildPurchaseOrderFilename(data) }
       }
-      setTimeout(() => URL.revokeObjectURL(url), 60_000)
-    } catch (err) {
-      console.error('Error generating PO PDF:', err)
-      toast.error('Failed to generate PDF')
+      return cached
+    }
+    return {
+      getPdf,
+      getTable: async () => buildOrderTableData(data),
     }
   }
 
@@ -540,13 +566,7 @@ const PurchaseOrders = () => {
                         >
                           Edit
                         </button>
-                        <button
-                          onClick={() => handleOpenPDF(order.id)}
-                          className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                          title="Open PDF"
-                        >
-                          PDF
-                        </button>
+                        <DownloadMenu getOpts={() => buildDownloadOpts(order.id)} />
                         <ShareMenu
                           onShare={(target) => handleShare(order.id, target)}
                           phone={order.supplier?.phone}
@@ -907,7 +927,10 @@ const PurchaseOrders = () => {
                     {converting === viewingOrder.id ? 'Converting…' : 'Convert to Bill'}
                   </button>
                 )}
-                <button onClick={() => handleOpenPDF(viewingOrder.id)} className="btn btn-primary">Open PDF</button>
+                <DownloadMenu
+                  variant="button"
+                  getOpts={() => buildDownloadOpts(viewingOrder.id)}
+                />
               </div>
             </div>
           </div>
