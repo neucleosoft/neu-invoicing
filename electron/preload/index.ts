@@ -142,8 +142,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     delete: (id: string) => ipcRenderer.invoke("purchaseOrder:delete", id),
     generateOrderNumber: () =>
       ipcRenderer.invoke("purchaseOrder:generateOrderNumber"),
-    convertToBill: (id: string) =>
-      ipcRenderer.invoke("purchaseOrder:convertToBill", id),
+    markAsReceived: (
+      id: string,
+      lineUpdates: Array<{ lineId: string; receivedQuantity: number }>,
+    ) => ipcRenderer.invoke("purchaseOrder:markAsReceived", id, lineUpdates),
+    listOpenForSupplier: (supplierId: string) =>
+      ipcRenderer.invoke("purchaseOrder:listOpenForSupplier", supplierId),
   },
 
   // Payments

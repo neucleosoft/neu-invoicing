@@ -3,8 +3,13 @@ import { useStore } from '../store/useStore'
 import { Company } from '../types'
 import { InvoiceTemplate, TEMPLATE_INFO } from '../utils/generateInvoicePDF'
 import { useToast } from '../components/ToastContext'
+import {
+  PO_SPECIAL_INSTRUCTIONS_DEFAULT,
+  PO_GENERAL_TERMS_DEFAULT,
+  PO_SETTINGS_KEYS,
+} from '../utils/poDefaults'
 
-type SettingsTab = 'company' | 'templates' | 'tax' | 'backup'
+type SettingsTab = 'company' | 'templates' | 'tax' | 'po' | 'backup'
 
 const Settings = () => {
   const { company, setCompany } = useStore()
@@ -26,6 +31,12 @@ const Settings = () => {
   const [templateLoading, setTemplateLoading] = useState(true)
   const [logoMissing, setLogoMissing] = useState(false)
   const [logoLoading, setLogoLoading] = useState(false)
+  // PO boilerplate — printed on every Purchase Order PDF. Defaults seeded from a real PO
+  // we received; users edit to match their business.
+  const [poSpecialInstructions, setPoSpecialInstructions] = useState('')
+  const [poGeneralTerms, setPoGeneralTerms] = useState('')
+  const [poBoilerplateLoading, setPoBoilerplateLoading] = useState(true)
+  const [poBoilerplateSaving, setPoBoilerplateSaving] = useState(false)
   const toast = useToast()
 
   useEffect(() => {
@@ -36,6 +47,7 @@ const Settings = () => {
 
   useEffect(() => {
     loadTemplate()
+    loadPoBoilerplate()
   }, [])
 
   // Check whether the logo file exists on disk (Drive syncs DB but not upload folders,
@@ -117,6 +129,55 @@ const Settings = () => {
     }
   }
 
+  // Load saved PO boilerplate, falling back to the seeded defaults if the user has
+  // never touched the settings (so the textareas always show something useful).
+  const loadPoBoilerplate = async () => {
+    try {
+      const [specialRes, termsRes] = await Promise.all([
+        window.electronAPI.settings.get(PO_SETTINGS_KEYS.specialInstructions),
+        window.electronAPI.settings.get(PO_SETTINGS_KEYS.generalTerms),
+      ])
+      setPoSpecialInstructions(
+        (specialRes.success && specialRes.data) || PO_SPECIAL_INSTRUCTIONS_DEFAULT,
+      )
+      setPoGeneralTerms((termsRes.success && termsRes.data) || PO_GENERAL_TERMS_DEFAULT)
+    } catch (error) {
+      console.error('Failed to load PO boilerplate:', error)
+      setPoSpecialInstructions(PO_SPECIAL_INSTRUCTIONS_DEFAULT)
+      setPoGeneralTerms(PO_GENERAL_TERMS_DEFAULT)
+    } finally {
+      setPoBoilerplateLoading(false)
+    }
+  }
+
+  const handleSavePoBoilerplate = async () => {
+    setPoBoilerplateSaving(true)
+    try {
+      const [r1, r2] = await Promise.all([
+        window.electronAPI.settings.set(
+          PO_SETTINGS_KEYS.specialInstructions,
+          poSpecialInstructions,
+        ),
+        window.electronAPI.settings.set(PO_SETTINGS_KEYS.generalTerms, poGeneralTerms),
+      ])
+      if (r1.success && r2.success) {
+        toast.success('Purchase Order defaults saved')
+      } else {
+        toast.error('Failed to save one or both fields')
+      }
+    } catch (error) {
+      toast.error('Failed to save Purchase Order defaults')
+    } finally {
+      setPoBoilerplateSaving(false)
+    }
+  }
+
+  const handleResetPoBoilerplate = () => {
+    setPoSpecialInstructions(PO_SPECIAL_INSTRUCTIONS_DEFAULT)
+    setPoGeneralTerms(PO_GENERAL_TERMS_DEFAULT)
+    toast.info('Reverted to defaults — click Save to apply')
+  }
+
   const handleTemplateSelect = async (template: InvoiceTemplate) => {
     setSelectedTemplate(template)
     try {
@@ -133,6 +194,7 @@ const Settings = () => {
     { id: 'company', label: 'Company Profile' },
     { id: 'templates', label: 'Invoice Templates' },
     { id: 'tax', label: 'Tax Settings' },
+    { id: 'po', label: 'Purchase Orders' },
     { id: 'backup', label: 'Data & Backup' }
   ]
 
@@ -450,6 +512,69 @@ const Settings = () => {
                   </div>
                 </div>
               </div>
+            </>
+          )}
+
+          {/* Purchase Orders Tab */}
+          {activeTab === 'po' && (
+            <>
+              <h2 className="text-2xl font-bold mb-2">Purchase Order Defaults</h2>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-6">
+                These notes are printed on every Purchase Order PDF you generate. Edit them
+                once and they'll appear on every PO going forward.
+              </p>
+              {poBoilerplateLoading ? (
+                <div className="text-gray-500 dark:text-gray-400">Loading…</div>
+              ) : (
+                <div className="space-y-6">
+                  <div>
+                    <label className="label">Special Instructions</label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                      Numbered list shown on page 1 of the PO, below the items table.
+                    </p>
+                    <textarea
+                      className="input font-mono text-sm"
+                      rows={12}
+                      value={poSpecialInstructions}
+                      onChange={(e) => setPoSpecialInstructions(e.target.value)}
+                      placeholder="e.g. 1. Taxes and Levies extra as applicable…"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">General Terms &amp; Conditions</label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                      Long-form clauses (jurisdiction, arbitration, TDS/TCS, etc.) shown on page 2.
+                    </p>
+                    <textarea
+                      className="input font-mono text-sm"
+                      rows={20}
+                      value={poGeneralTerms}
+                      onChange={(e) => setPoGeneralTerms(e.target.value)}
+                      placeholder="Jurisdiction, dispute resolution, arbitration clauses…"
+                    />
+                  </div>
+
+                  <div className="flex gap-2 justify-end pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <button
+                      type="button"
+                      onClick={handleResetPoBoilerplate}
+                      className="btn btn-secondary"
+                      disabled={poBoilerplateSaving}
+                    >
+                      Reset to defaults
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSavePoBoilerplate}
+                      className="btn btn-primary"
+                      disabled={poBoilerplateSaving}
+                    >
+                      {poBoilerplateSaving ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           )}
 

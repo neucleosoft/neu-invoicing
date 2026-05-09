@@ -74,7 +74,6 @@ const PurchaseOrders = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalog, setCatalog] = useState<CatalogItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [converting, setConverting] = useState<string | null>(null)
 
   const [formData, setFormData] = useState({
     supplierId: '',
@@ -289,35 +288,7 @@ const PurchaseOrders = () => {
     }
   }
 
-  const handleConvertToBill = async (order: PurchaseOrder) => {
-    if (order.convertedBillId) {
-      toast.info('This PO has already been converted to a bill')
-      return
-    }
-    const ok = await confirm({
-      message: `Convert PO ${order.orderNumber} into a Purchase Bill? The PO will be marked RECEIVED.`,
-    })
-    if (!ok) return
-    setConverting(order.id)
-    try {
-      const result = await window.electronAPI.purchaseOrder.convertToBill(order.id)
-      if (result.success) {
-        toast.success('Purchase Bill created — open Purchase to attach the supplier invoice.')
-        loadOrders()
-        navigate('/purchase')
-      } else {
-        toast.error(result.error || 'Failed to convert PO')
-      }
-    } finally {
-      setConverting(null)
-    }
-  }
-
   const handleEdit = async (order: PurchaseOrder) => {
-    if (order.convertedBillId) {
-      toast.info('This PO has been converted to a bill — edit the bill instead.')
-      return
-    }
     const result = await window.electronAPI.purchaseOrder.getById(order.id)
     if (!result.success || !result.data) {
       toast.error('Failed to load order')
@@ -560,9 +531,7 @@ const PurchaseOrders = () => {
                         <button onClick={() => handleView(order.id)} className="text-primary-600 hover:text-primary-700">View</button>
                         <button
                           onClick={() => handleEdit(order)}
-                          className="text-green-600 hover:text-green-700 disabled:opacity-50"
-                          disabled={!!order.convertedBillId}
-                          title={order.convertedBillId ? 'Already converted to a bill' : 'Edit'}
+                          className="text-green-600 hover:text-green-700"
                         >
                           Edit
                         </button>
@@ -573,14 +542,6 @@ const PurchaseOrders = () => {
                           email={order.supplier?.email}
                           partyName={order.supplier?.name}
                         />
-                        <button
-                          onClick={() => handleConvertToBill(order)}
-                          className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 font-medium disabled:opacity-50"
-                          disabled={!!order.convertedBillId || converting === order.id}
-                          title={order.convertedBillId ? 'Already converted' : 'Convert to Bill'}
-                        >
-                          {converting === order.id ? 'Converting…' : 'Convert'}
-                        </button>
                         <button onClick={() => handleDelete(order.id)} className="text-red-600 hover:text-red-700">Delete</button>
                       </div>
                     </td>
@@ -901,11 +862,16 @@ const PurchaseOrders = () => {
                 </div>
               )}
 
-              {viewingOrder.convertedBillId && (
+              {viewingOrder.bills && viewingOrder.bills.length > 0 && (
                 <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                  <p className="text-sm text-amber-800 dark:text-amber-200">
-                    This PO has been converted to a purchase bill. Edit and payments now happen on the bill.
+                  <p className="text-sm text-amber-800 dark:text-amber-200 font-medium mb-1">
+                    {viewingOrder.bills.length} bill{viewingOrder.bills.length === 1 ? '' : 's'} against this PO:
                   </p>
+                  <ul className="text-sm text-amber-700 dark:text-amber-300 list-disc ml-5">
+                    {viewingOrder.bills.map((b) => (
+                      <li key={b.id}>{b.billNumber} — {formatCurrency(b.totalAmount)} ({b.status})</li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
@@ -918,15 +884,6 @@ const PurchaseOrders = () => {
                   email={viewingOrder.supplier?.email}
                   partyName={viewingOrder.supplier?.name}
                 />
-                {!viewingOrder.convertedBillId && (
-                  <button
-                    onClick={() => handleConvertToBill(viewingOrder)}
-                    className="btn btn-secondary"
-                    disabled={converting === viewingOrder.id}
-                  >
-                    {converting === viewingOrder.id ? 'Converting…' : 'Convert to Bill'}
-                  </button>
-                )}
                 <DownloadMenu
                   variant="button"
                   getOpts={() => buildDownloadOpts(viewingOrder.id)}

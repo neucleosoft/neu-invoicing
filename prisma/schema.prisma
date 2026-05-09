@@ -376,6 +376,11 @@ model PurchaseBill {
   // Attachment — original bill image/PDF uploaded by user (used for AI extraction + audit trail)
   attachmentData        Bytes? // raw file bytes (BLOB), null when no attachment
   attachmentMimeType    String? // e.g., "image/jpeg", "image/png", "application/pdf"
+  // Optional link back to the Purchase Order this bill satisfies. Bills can exist
+  // without a PO (cash purchases, walk-in suppliers); when set, the PO can be
+  // closed once it's fully invoiced. SetNull on PO delete keeps the bill standalone.
+  purchaseOrderId       String?
+  purchaseOrder         PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
@@ -385,9 +390,9 @@ model PurchaseBill {
 }
 
 // Purchase Orders — sent to suppliers BEFORE goods/services are received.
-// Mirrors PurchaseBill structure; once goods arrive, a PO is converted to a
-// PurchaseBill (via the convertToBill handler) which is the actual financial
-// record. PO doesn't affect stock or balances by itself.
+// A PO records what you ORDERED. The actual financial obligation lives on the
+// PurchaseBill the supplier sends back; bills reference their originating PO via
+// PurchaseBill.purchaseOrderId. PO doesn't affect stock or balances by itself.
 model PurchaseOrder {
   id                 String   @id @default(cuid())
   orderNumber        String   @unique
@@ -417,12 +422,12 @@ model PurchaseOrder {
   sgstAmount         Float    @default(0)
   igstAmount         Float    @default(0)
   cessAmount         Float    @default(0)
-  // Set after a PO is converted into a Bill, so we don't convert it twice.
-  convertedBillId    String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   items PurchaseOrderItem[]
+  // Bills issued against this PO. A PO can have multiple bills if deliveries are split.
+  bills PurchaseBill[]
 }
 
 model PurchaseOrderItem {
