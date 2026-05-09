@@ -20,6 +20,11 @@ import {
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import DownloadMenu from '../components/DownloadMenu'
 import { DispatchOpts, TableData } from '../utils/downloadHelpers'
+import {
+  PO_SPECIAL_INSTRUCTIONS_DEFAULT,
+  PO_GENERAL_TERMS_DEFAULT,
+  PO_SETTINGS_KEYS,
+} from '../utils/poDefaults'
 
 interface CatalogItem {
   id: string
@@ -206,6 +211,15 @@ const PurchaseOrders = () => {
     const order: any = result.data
     const company = await loadCompanyForPDF()
     const supplier = order.supplier || {}
+    // Fetch boilerplate text from Settings (defaults to the seeded Schoolnet text
+    // when the user has never opened the Settings → Purchase Orders tab).
+    const [siRes, gtRes] = await Promise.all([
+      window.electronAPI.settings.get(PO_SETTINGS_KEYS.specialInstructions),
+      window.electronAPI.settings.get(PO_SETTINGS_KEYS.generalTerms),
+    ])
+    const specialInstructions =
+      (siRes.success && siRes.data) || PO_SPECIAL_INSTRUCTIONS_DEFAULT
+    const generalTerms = (gtRes.success && gtRes.data) || PO_GENERAL_TERMS_DEFAULT
     const items = (order.items || []).map((it: any) => {
       const quantity = it.quantity || 0
       const rate = it.rate || 0
@@ -233,6 +247,11 @@ const PurchaseOrders = () => {
       expectedDate: order.expectedDate,
       notes: order.notes,
       termsConditions: order.termsConditions,
+      billingAddress: order.billingAddress,
+      shippingAddress: order.shippingAddress,
+      vendorQuotationRef: order.vendorQuotationRef,
+      specialInstructions,
+      generalTerms,
       totalAmount: order.totalAmount || 0,
       subtotal: order.subtotal,
       taxAmount: order.taxAmount,
@@ -484,7 +503,7 @@ const PurchaseOrders = () => {
       if (!orderNumber) {
         const numRes = await window.electronAPI.purchaseOrder.generateOrderNumber()
         if (!numRes.success) {
-          toast.error('Failed to generate order number')
+          toast.error('Failed to generate order number: ' + (numRes.error || 'unknown error'))
           return
         }
         orderNumber = numRes.data || ''
