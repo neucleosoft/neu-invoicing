@@ -20,7 +20,10 @@ interface Challan {
   id: string
   challanNumber: string
   challanDate: string
-  status: 'PENDING' | 'DELIVERED' | 'CONVERTED'
+  // RETURNABLE = goods sent for repair/job-work (will come back).
+  // NON_RETURNABLE = goods sent for sale (can convert to invoice).
+  // CONVERTED is set programmatically once a non-returnable challan becomes an invoice.
+  status: 'RETURNABLE' | 'NON_RETURNABLE' | 'CONVERTED'
   customerId?: string
   totalAmount: number
   subtotal?: number
@@ -98,7 +101,7 @@ const DeliveryChallan = () => {
     customerId: '',
     challanNumber: '',
     challanDate: new Date().toISOString().split('T')[0],
-    status: 'PENDING' as string,
+    status: 'NON_RETURNABLE' as string,
     transportMode: '',
     vehicleNumber: '',
     notes: '',
@@ -304,7 +307,7 @@ const DeliveryChallan = () => {
         customerId: fullChallan.customerId || fullChallan.customer?.id || '',
         challanNumber: fullChallan.challanNumber || '',
         challanDate: new Date(fullChallan.challanDate).toISOString().split('T')[0],
-        status: fullChallan.status || 'PENDING',
+        status: fullChallan.status || 'NON_RETURNABLE',
         transportMode: fullChallan.transportMode || '',
         vehicleNumber: fullChallan.vehicleNumber || '',
         notes: fullChallan.notes || '',
@@ -458,7 +461,7 @@ const DeliveryChallan = () => {
       customerId: '',
       challanNumber: '',
       challanDate: new Date().toISOString().split('T')[0],
-      status: 'PENDING',
+      status: 'NON_RETURNABLE',
       transportMode: '',
       vehicleNumber: '',
       notes: '',
@@ -574,11 +577,13 @@ const DeliveryChallan = () => {
                     <td className="table-cell">{formatCurrency(challan.totalAmount)}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
-                        challan.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                        challan.status === 'DELIVERED' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                        challan.status === 'RETURNABLE' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' :
+                        challan.status === 'NON_RETURNABLE' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300' :
                         'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                       }`}>
-                        {challan.status}
+                        {challan.status === 'RETURNABLE' ? 'Returnable' :
+                         challan.status === 'NON_RETURNABLE' ? 'Non-Returnable' :
+                         'Converted'}
                       </span>
                     </td>
                     <td className="table-cell">
@@ -604,7 +609,7 @@ const DeliveryChallan = () => {
                             Edit
                           </button>
                         )}
-                        {(challan.status === 'PENDING' || challan.status === 'DELIVERED') && (
+                        {challan.status === 'NON_RETURNABLE' && (
                           <button
                             onClick={() => handleConvertToInvoice(challan.id)}
                             className="text-purple-600 hover:text-purple-700"
@@ -675,8 +680,8 @@ const DeliveryChallan = () => {
                       value={formData.status}
                       onChange={(e) => setFormData({...formData, status: e.target.value})}
                     >
-                      <option value="PENDING">Pending</option>
-                      <option value="DELIVERED">Delivered</option>
+                      <option value="NON_RETURNABLE">Non-Returnable</option>
+                      <option value="RETURNABLE">Returnable</option>
                     </select>
                   </div>
 
@@ -953,11 +958,13 @@ const DeliveryChallan = () => {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
-                    viewingChallan.status === 'PENDING' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                    viewingChallan.status === 'DELIVERED' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                    viewingChallan.status === 'RETURNABLE' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' :
+                    viewingChallan.status === 'NON_RETURNABLE' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300' :
                     'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                   }`}>
-                    {viewingChallan.status}
+                    {viewingChallan.status === 'RETURNABLE' ? 'Returnable' :
+                     viewingChallan.status === 'NON_RETURNABLE' ? 'Non-Returnable' :
+                     'Converted'}
                   </span>
                 </div>
                 <div>
@@ -1063,7 +1070,7 @@ const DeliveryChallan = () => {
                   email={viewingChallan.customer?.email}
                   partyName={viewingChallan.customer?.name}
                 />
-                {(viewingChallan.status === 'PENDING' || viewingChallan.status === 'DELIVERED') && (
+                {viewingChallan.status === 'NON_RETURNABLE' && (
                   <button
                     onClick={() => {
                       setShowViewModal(false)
