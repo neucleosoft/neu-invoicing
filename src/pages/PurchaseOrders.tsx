@@ -20,6 +20,11 @@ import {
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import DownloadMenu from '../components/DownloadMenu'
 import { DispatchOpts, TableData } from '../utils/downloadHelpers'
+import {
+  PO_SPECIAL_INSTRUCTIONS_DEFAULT,
+  PO_GENERAL_TERMS_DEFAULT,
+  PO_SETTINGS_KEYS,
+} from '../utils/poDefaults'
 
 interface CatalogItem {
   id: string
@@ -43,8 +48,22 @@ interface OrderLine {
 const STATUS_BADGE: Record<string, string> = {
   DRAFT: 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200',
   SENT: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300',
+  ACCEPTED: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300',
+  PARTIALLY_RECEIVED: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300',
   RECEIVED: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300',
+  CLOSED: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300',
   CANCELLED: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300',
+}
+
+// Human-readable label for status; falls back to raw value.
+const STATUS_LABEL: Record<string, string> = {
+  DRAFT: 'Draft',
+  SENT: 'Sent',
+  ACCEPTED: 'Accepted',
+  PARTIALLY_RECEIVED: 'Partially Received',
+  RECEIVED: 'Received',
+  CLOSED: 'Closed',
+  CANCELLED: 'Cancelled',
 }
 
 // Mirrors normalizeBill in Purchase.tsx — backend returns SupplierItem rows on each line.
@@ -74,17 +93,26 @@ const PurchaseOrders = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalog, setCatalog] = useState<CatalogItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
-  const [converting, setConverting] = useState<string | null>(null)
 
   const [formData, setFormData] = useState({
     supplierId: '',
     orderNumber: '',
     orderDate: new Date().toISOString().split('T')[0],
     expectedDate: '',
+    billingAddress: '',
+    shippingAddress: '',
+    vendorQuotationRef: '',
     notes: '',
     termsConditions: '',
     status: 'DRAFT' as PurchaseOrder['status'],
   })
+
+  // Mark Received modal: per-line received qty editor
+  const [showReceiveModal, setShowReceiveModal] = useState(false)
+  const [receiveLines, setReceiveLines] = useState<
+    Array<{ lineId: string; itemName: string; ordered: number; received: number }>
+  >([])
+  const [savingReceive, setSavingReceive] = useState(false)
 
   const [taxBreakdown, setTaxBreakdown] = useState<{
     cgst: number
@@ -183,6 +211,15 @@ const PurchaseOrders = () => {
     const order: any = result.data
     const company = await loadCompanyForPDF()
     const supplier = order.supplier || {}
+    // Fetch boilerplate text from Settings (defaults to the seeded Schoolnet text
+    // when the user has never opened the Settings → Purchase Orders tab).
+    const [siRes, gtRes] = await Promise.all([
+      window.electronAPI.settings.get(PO_SETTINGS_KEYS.specialInstructions),
+      window.electronAPI.settings.get(PO_SETTINGS_KEYS.generalTerms),
+    ])
+    const specialInstructions =
+      (siRes.success && siRes.data) || PO_SPECIAL_INSTRUCTIONS_DEFAULT
+    const generalTerms = (gtRes.success && gtRes.data) || PO_GENERAL_TERMS_DEFAULT
     const items = (order.items || []).map((it: any) => {
       const quantity = it.quantity || 0
       const rate = it.rate || 0
@@ -210,6 +247,11 @@ const PurchaseOrders = () => {
       expectedDate: order.expectedDate,
       notes: order.notes,
       termsConditions: order.termsConditions,
+      billingAddress: order.billingAddress,
+      shippingAddress: order.shippingAddress,
+      vendorQuotationRef: order.vendorQuotationRef,
+      specialInstructions,
+      generalTerms,
       totalAmount: order.totalAmount || 0,
       subtotal: order.subtotal,
       taxAmount: order.taxAmount,
@@ -289,35 +331,7 @@ const PurchaseOrders = () => {
     }
   }
 
-  const handleConvertToBill = async (order: PurchaseOrder) => {
-    if (order.convertedBillId) {
-      toast.info('This PO has already been converted to a bill')
-      return
-    }
-    const ok = await confirm({
-      message: `Convert PO ${order.orderNumber} into a Purchase Bill? The PO will be marked RECEIVED.`,
-    })
-    if (!ok) return
-    setConverting(order.id)
-    try {
-      const result = await window.electronAPI.purchaseOrder.convertToBill(order.id)
-      if (result.success) {
-        toast.success('Purchase Bill created — open Purchase to attach the supplier invoice.')
-        loadOrders()
-        navigate('/purchase')
-      } else {
-        toast.error(result.error || 'Failed to convert PO')
-      }
-    } finally {
-      setConverting(null)
-    }
-  }
-
   const handleEdit = async (order: PurchaseOrder) => {
-    if (order.convertedBillId) {
-      toast.info('This PO has been converted to a bill — edit the bill instead.')
-      return
-    }
     const result = await window.electronAPI.purchaseOrder.getById(order.id)
     if (!result.success || !result.data) {
       toast.error('Failed to load order')
@@ -330,6 +344,9 @@ const PurchaseOrders = () => {
       orderNumber: full.orderNumber || '',
       orderDate: new Date(full.orderDate).toISOString().split('T')[0],
       expectedDate: full.expectedDate ? new Date(full.expectedDate).toISOString().split('T')[0] : '',
+      billingAddress: full.billingAddress || '',
+      shippingAddress: full.shippingAddress || '',
+      vendorQuotationRef: full.vendorQuotationRef || '',
       notes: full.notes || '',
       termsConditions: full.termsConditions || '',
       status: full.status,
@@ -400,6 +417,9 @@ const PurchaseOrders = () => {
       orderNumber: '',
       orderDate: new Date().toISOString().split('T')[0],
       expectedDate: '',
+      billingAddress: '',
+      shippingAddress: '',
+      vendorQuotationRef: '',
       notes: '',
       termsConditions: '',
       status: 'DRAFT',
@@ -407,6 +427,38 @@ const PurchaseOrders = () => {
     setOrderLines([])
     setEditingOrder(null)
     setTaxBreakdown({ cgst: 0, sgst: 0, igst: 0 })
+  }
+
+  // Mark Received modal helpers
+  const openReceiveModal = (order: PurchaseOrder) => {
+    setReceiveLines(
+      (order.items || []).map((it: any) => ({
+        lineId: it.id,
+        itemName: it.item?.name || it.supplierItem?.name || 'Item',
+        ordered: it.quantity,
+        received: it.receivedQuantity || 0,
+      })),
+    )
+    setShowReceiveModal(true)
+  }
+
+  const handleSaveReceive = async () => {
+    if (!viewingOrder) return
+    setSavingReceive(true)
+    try {
+      const lineUpdates = receiveLines.map((l) => ({ lineId: l.lineId, receivedQuantity: l.received }))
+      const result = await window.electronAPI.purchaseOrder.markAsReceived(viewingOrder.id, lineUpdates)
+      if (result.success && result.data) {
+        toast.success('Receipt recorded')
+        setViewingOrder(normalizeOrder(result.data))
+        setShowReceiveModal(false)
+        loadOrders()
+      } else {
+        toast.error(result.error || 'Failed to save receipt')
+      }
+    } finally {
+      setSavingReceive(false)
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -451,7 +503,7 @@ const PurchaseOrders = () => {
       if (!orderNumber) {
         const numRes = await window.electronAPI.purchaseOrder.generateOrderNumber()
         if (!numRes.success) {
-          toast.error('Failed to generate order number')
+          toast.error('Failed to generate order number: ' + (numRes.error || 'unknown error'))
           return
         }
         orderNumber = numRes.data || ''
@@ -552,7 +604,7 @@ const PurchaseOrders = () => {
                     <td className="table-cell">{formatCurrency(order.totalAmount)}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${STATUS_BADGE[order.status] || STATUS_BADGE.DRAFT}`}>
-                        {order.status}
+                        {STATUS_LABEL[order.status] || order.status}
                       </span>
                     </td>
                     <td className="table-cell">
@@ -560,9 +612,7 @@ const PurchaseOrders = () => {
                         <button onClick={() => handleView(order.id)} className="text-primary-600 hover:text-primary-700">View</button>
                         <button
                           onClick={() => handleEdit(order)}
-                          className="text-green-600 hover:text-green-700 disabled:opacity-50"
-                          disabled={!!order.convertedBillId}
-                          title={order.convertedBillId ? 'Already converted to a bill' : 'Edit'}
+                          className="text-green-600 hover:text-green-700"
                         >
                           Edit
                         </button>
@@ -573,14 +623,6 @@ const PurchaseOrders = () => {
                           email={order.supplier?.email}
                           partyName={order.supplier?.name}
                         />
-                        <button
-                          onClick={() => handleConvertToBill(order)}
-                          className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 font-medium disabled:opacity-50"
-                          disabled={!!order.convertedBillId || converting === order.id}
-                          title={order.convertedBillId ? 'Already converted' : 'Convert to Bill'}
-                        >
-                          {converting === order.id ? 'Converting…' : 'Convert'}
-                        </button>
                         <button onClick={() => handleDelete(order.id)} className="text-red-600 hover:text-red-700">Delete</button>
                       </div>
                     </td>
@@ -629,7 +671,10 @@ const PurchaseOrders = () => {
                     >
                       <option value="DRAFT">Draft</option>
                       <option value="SENT">Sent</option>
+                      <option value="ACCEPTED">Accepted (vendor confirmed)</option>
+                      <option value="PARTIALLY_RECEIVED">Partially Received</option>
                       <option value="RECEIVED">Received</option>
+                      <option value="CLOSED">Closed</option>
                       <option value="CANCELLED">Cancelled</option>
                     </select>
                   </div>
@@ -662,6 +707,46 @@ const PurchaseOrders = () => {
                       onChange={(e) => setFormData({ ...formData, orderNumber: e.target.value })}
                       placeholder="Auto-generated if left blank"
                       readOnly={!!editingOrder}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Vendor Quotation Ref</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={formData.vendorQuotationRef}
+                      onChange={(e) => setFormData({ ...formData, vendorQuotationRef: e.target.value })}
+                      placeholder='e.g. "QUOT-2026-042 02.03.2026" (optional)'
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Billing Address</label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      Where supplier should send the invoice. Leave blank to use your company default.
+                    </p>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.billingAddress}
+                      onChange={(e) => setFormData({ ...formData, billingAddress: e.target.value })}
+                      placeholder="HQ / billing address"
+                    />
+                  </div>
+                  <div>
+                    <label className="label">Shipping Address</label>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                      Where goods should be delivered. Often a warehouse, separate from billing.
+                    </p>
+                    <textarea
+                      className="input"
+                      rows={3}
+                      value={formData.shippingAddress}
+                      onChange={(e) => setFormData({ ...formData, shippingAddress: e.target.value })}
+                      placeholder="Warehouse / delivery address"
                     />
                   </div>
                 </div>
@@ -829,7 +914,7 @@ const PurchaseOrders = () => {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${STATUS_BADGE[viewingOrder.status] || STATUS_BADGE.DRAFT}`}>
-                    {viewingOrder.status}
+                    {STATUS_LABEL[viewingOrder.status] || viewingOrder.status}
                   </span>
                 </div>
                 <div>
@@ -857,22 +942,42 @@ const PurchaseOrders = () => {
                       <th className="table-header sticky top-0 z-10">Item</th>
                       <th className="table-header sticky top-0 z-10">HSN/SKU</th>
                       <th className="table-header sticky top-0 z-10">Qty</th>
+                      <th className="table-header sticky top-0 z-10">Received</th>
                       <th className="table-header sticky top-0 z-10">Rate</th>
                       <th className="table-header sticky top-0 z-10">Tax %</th>
                       <th className="table-header sticky top-0 z-10">Total</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {viewingOrder.items?.map((item: any, index: number) => (
-                      <tr key={index} className="border-t">
-                        <td className="table-cell">{item.item?.name}</td>
-                        <td className="table-cell text-gray-500">{item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '-'}</td>
-                        <td className="table-cell">{item.quantity}</td>
-                        <td className="table-cell">{formatCurrency(item.rate)}</td>
-                        <td className="table-cell">{item.taxRate}%</td>
-                        <td className="table-cell">{formatCurrency(item.total)}</td>
-                      </tr>
-                    ))}
+                    {viewingOrder.items?.map((item: any, index: number) => {
+                      const received = item.receivedQuantity || 0
+                      const ordered = item.quantity || 0
+                      const fullyReceived = received >= ordered
+                      const partialReceived = received > 0 && received < ordered
+                      return (
+                        <tr key={index} className="border-t">
+                          <td className="table-cell">{item.item?.name}</td>
+                          <td className="table-cell text-gray-500">{item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '-'}</td>
+                          <td className="table-cell">{ordered}</td>
+                          <td className="table-cell">
+                            <span
+                              className={
+                                fullyReceived
+                                  ? 'text-green-700 dark:text-green-400 font-medium'
+                                  : partialReceived
+                                  ? 'text-yellow-700 dark:text-yellow-400 font-medium'
+                                  : 'text-gray-500 dark:text-gray-400'
+                              }
+                            >
+                              {received} of {ordered}
+                            </span>
+                          </td>
+                          <td className="table-cell">{formatCurrency(item.rate)}</td>
+                          <td className="table-cell">{item.taxRate}%</td>
+                          <td className="table-cell">{formatCurrency(item.total)}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -901,16 +1006,29 @@ const PurchaseOrders = () => {
                 </div>
               )}
 
-              {viewingOrder.convertedBillId && (
+              {viewingOrder.bills && viewingOrder.bills.length > 0 && (
                 <div className="mb-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg">
-                  <p className="text-sm text-amber-800 dark:text-amber-200">
-                    This PO has been converted to a purchase bill. Edit and payments now happen on the bill.
+                  <p className="text-sm text-amber-800 dark:text-amber-200 font-medium mb-1">
+                    {viewingOrder.bills.length} bill{viewingOrder.bills.length === 1 ? '' : 's'} against this PO:
                   </p>
+                  <ul className="text-sm text-amber-700 dark:text-amber-300 list-disc ml-5">
+                    {viewingOrder.bills.map((b) => (
+                      <li key={b.id}>{b.billNumber} — {formatCurrency(b.totalAmount)} ({b.status})</li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
               <div className="flex justify-end gap-3 pt-4 border-t">
                 <button onClick={() => { setShowViewModal(false); setViewingOrder(null) }} className="btn btn-secondary">Close</button>
+                {viewingOrder.status !== 'CLOSED' && viewingOrder.status !== 'CANCELLED' && (
+                  <button
+                    onClick={() => openReceiveModal(viewingOrder)}
+                    className="btn btn-secondary"
+                  >
+                    Mark Received
+                  </button>
+                )}
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingOrder.id, target)}
@@ -918,19 +1036,89 @@ const PurchaseOrders = () => {
                   email={viewingOrder.supplier?.email}
                   partyName={viewingOrder.supplier?.name}
                 />
-                {!viewingOrder.convertedBillId && (
-                  <button
-                    onClick={() => handleConvertToBill(viewingOrder)}
-                    className="btn btn-secondary"
-                    disabled={converting === viewingOrder.id}
-                  >
-                    {converting === viewingOrder.id ? 'Converting…' : 'Convert to Bill'}
-                  </button>
-                )}
                 <DownloadMenu
                   variant="button"
                   getOpts={() => buildDownloadOpts(viewingOrder.id)}
                 />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mark Received Modal — per-line received quantity editor. PO doesn't touch
+          stock or balances; the linked Bill (created later) is what posts to books. */}
+      {showReceiveModal && viewingOrder && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-2xl font-bold">Mark Received</h2>
+                <button
+                  onClick={() => setShowReceiveModal(false)}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl"
+                >×</button>
+              </div>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                Enter the quantity received for each line. Status updates automatically based on totals — full
+                across all lines = Received; some across any line = Partially Received.
+              </p>
+
+              <div className="space-y-3 mb-6">
+                {receiveLines.map((line, index) => (
+                  <div
+                    key={line.lineId}
+                    className="flex items-center gap-4 p-3 bg-gray-50 dark:bg-gray-900/40 rounded-lg"
+                  >
+                    <div className="flex-1">
+                      <p className="font-medium">{line.itemName}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Ordered: {line.ordered}</p>
+                    </div>
+                    <div className="w-32">
+                      <label className="label text-xs">Received</label>
+                      <NumberInput
+                        className="input"
+                        value={line.received}
+                        onChange={(v) => {
+                          const next = [...receiveLines]
+                          next[index] = { ...next[index], received: v || 0 }
+                          setReceiveLines(next)
+                        }}
+                        min={0}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const next = [...receiveLines]
+                        next[index] = { ...next[index], received: line.ordered }
+                        setReceiveLines(next)
+                      }}
+                      className="text-xs text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 self-end pb-2"
+                    >
+                      All
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <button
+                  type="button"
+                  onClick={() => setShowReceiveModal(false)}
+                  className="btn btn-secondary"
+                  disabled={savingReceive}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveReceive}
+                  className="btn btn-primary"
+                  disabled={savingReceive}
+                >
+                  {savingReceive ? 'Saving…' : 'Save Receipt'}
+                </button>
               </div>
             </div>
           </div>

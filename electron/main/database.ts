@@ -7,15 +7,28 @@ import { execSync } from 'child_process'
 let prisma: PrismaClient
 
 /**
- * Creates all database tables from prisma/schema.prisma if they don't exist.
- * Uses ELECTRON_RUN_AS_NODE=1 so Electron's binary acts as Node.js
- * and runs the Prisma CLI to sync schema → SQLite tables.
+ * Bring the user's DB up to the current schema. Handles three populations with one code path:
+ *
+ *   1. Fresh install (no DB yet)        → migrate deploy applies all migrations from scratch
+ *   2. Pre-existing user, never tracked → db push aligns schema, then we baseline by marking
+ *      every shipped migration as applied. Future versions then run migrate deploy normally.
+ *   3. User already on the migrate-deploy track → migrate deploy is a no-op or applies any
+ *      new migrations shipped since their last update.
+ *
+ * The detection: try `migrate deploy` first. If it fails (existing tables collide with the
+ * init migration's CREATE TABLE), fall back to db push + migrate resolve baseline.
  */
 export const ensureTablesExist = (dbUrl: string) => {
   const isDevMode = !!process.env.VITE_DEV_SERVER_URL
   const appPath = isDevMode ? process.cwd() : app.getAppPath()
-  const schemaPath = path.join(appPath, 'prisma', 'schema.prisma')
-  const prismaCliPath = path.join(appPath, 'node_modules', 'prisma', 'build', 'index.js')
+  // In production with asar, the schema, migration files, and prisma CLI all live in
+  // app.asar.unpacked (configured via asarUnpack in package.json) — child_process.execSync
+  // cannot spawn a Node entry point from inside the asar archive, and prisma's CLI reads
+  // schema.prisma + migration .sql files as real files, not via Electron's asar shim.
+  const resourcePath = isDevMode ? appPath : appPath.replace('app.asar', 'app.asar.unpacked')
+  const schemaPath = path.join(resourcePath, 'prisma', 'schema.prisma')
+  const migrationsDir = path.join(resourcePath, 'prisma', 'migrations')
+  const prismaCliPath = path.join(resourcePath, 'node_modules', 'prisma', 'build', 'index.js')
 
   if (!fs.existsSync(prismaCliPath)) {
     console.warn('Prisma CLI not found at:', prismaCliPath)
@@ -26,24 +39,79 @@ export const ensureTablesExist = (dbUrl: string) => {
     return
   }
 
+  const execOpts = {
+    env: {
+      ...process.env,
+      DATABASE_URL: dbUrl,
+      ELECTRON_RUN_AS_NODE: '1'
+    },
+    cwd: resourcePath,
+    stdio: 'pipe' as const,
+    timeout: 60000
+  }
+
+  // Path 1 + 3: try migrate deploy. Works for fresh installs and already-baselined users.
+  try {
+    execSync(
+      `"${process.execPath}" "${prismaCliPath}" migrate deploy --schema="${schemaPath}"`,
+      execOpts
+    )
+    console.log('Database migrations applied successfully')
+    return
+  } catch (deployError: any) {
+    // Most likely cause: existing user whose DB was created via `db push` and lacks the
+    // _prisma_migrations tracking table. The init migration tries to CREATE TABLE and
+    // collides with already-existing tables. Fall through to baseline path below.
+    console.warn(
+      'migrate deploy failed — attempting baseline for existing user:',
+      deployError.stderr?.toString()?.slice(0, 200) || deployError.message
+    )
+  }
+
+  // Path 2: align the schema with db push first (idempotent, fixes any drift), then
+  // mark every migration as applied so future migrate deploy runs are clean no-ops or
+  // only apply genuinely new migrations.
   try {
     execSync(
       `"${process.execPath}" "${prismaCliPath}" db push --skip-generate --accept-data-loss --schema="${schemaPath}"`,
-      {
-        env: {
-          ...process.env,
-          DATABASE_URL: dbUrl,
-          ELECTRON_RUN_AS_NODE: '1'
-        },
-        cwd: appPath,
-        stdio: 'pipe',
-        timeout: 30000
-      }
+      execOpts
     )
-    console.log('Database tables synced successfully')
-  } catch (error: any) {
-    console.error('Schema sync error:', error.stderr?.toString() || error.message)
+    console.log('Schema aligned via db push')
+  } catch (pushError: any) {
+    console.error('db push failed during baseline:', pushError.stderr?.toString() || pushError.message)
+    return
   }
+
+  if (!fs.existsSync(migrationsDir)) {
+    console.warn('Migrations folder missing — skipping baseline:', migrationsDir)
+    return
+  }
+
+  const migrations = fs.readdirSync(migrationsDir).filter((name) => {
+    try {
+      return fs.statSync(path.join(migrationsDir, name)).isDirectory()
+    } catch {
+      return false
+    }
+  })
+
+  let baselined = 0
+  for (const migration of migrations) {
+    try {
+      execSync(
+        `"${process.execPath}" "${prismaCliPath}" migrate resolve --applied "${migration}" --schema="${schemaPath}"`,
+        execOpts
+      )
+      baselined++
+    } catch (resolveError: any) {
+      // Already-recorded migrations throw — safe to ignore. Log others.
+      const errMsg = resolveError.stderr?.toString() || ''
+      if (!/already (recorded|applied)/i.test(errMsg)) {
+        console.warn(`Failed to mark ${migration} as applied:`, errMsg.slice(0, 200))
+      }
+    }
+  }
+  console.log(`Baselined ${baselined}/${migrations.length} migrations as applied`)
 }
 
 export const setupDatabase = async () => {

@@ -27,6 +27,16 @@ export interface PurchaseOrderPDFData {
   totalAmount: number
   subtotal?: number
   taxAmount?: number
+  // Per-PO addresses (override company defaults). Either or both can be blank,
+  // in which case the PDF falls back to company.address for billing and a "—" for shipping.
+  billingAddress?: string | null
+  shippingAddress?: string | null
+  // Free-text reference to the supplier's quotation (if any)
+  vendorQuotationRef?: string | null
+  // Boilerplate text from Settings (po_special_instructions, po_general_terms).
+  // If absent, the corresponding sections aren't rendered.
+  specialInstructions?: string
+  generalTerms?: string
   supplier: {
     name: string
     taxId?: string
@@ -91,20 +101,125 @@ function buildPurchaseOrderDefinition(po: PurchaseOrderPDFData): any {
   const hsnGroups = getHSNGroups(itemsForGroups as any, isInter)
   const logo = po.company?.logoBase64 || LOGO_BASE64
 
+  // Sections are conditionally added so a PO without (e.g.) a shipping address
+  // doesn't render an empty box. Order: header → items → totals → quote ref →
+  // long-form text (instructions then general terms, flowing) → footer (signatures)
+  // at the very end. Pdfmake handles wrapping to additional pages automatically.
+  const content: Content[] = [
+    buildTitle(),
+    buildCompanySection(po, logo),
+    buildBuyerSupplierSection(po),
+  ]
+  if (po.billingAddress || po.shippingAddress) {
+    content.push(buildAddressSplit(po))
+  }
+  content.push(
+    buildItemsSection(po, isInter, taxGroups),
+    buildHSNSection(hsnGroups, isInter),
+    buildAmountInWords(po.totalAmount),
+  )
+  if (po.vendorQuotationRef) {
+    content.push(buildVendorQuotationRef(po))
+  }
+  if (po.specialInstructions && po.specialInstructions.trim()) {
+    content.push(buildSpecialInstructions(po))
+  }
+  if (po.generalTerms && po.generalTerms.trim()) {
+    content.push(buildGeneralTerms(po))
+  }
+  content.push(buildFooter(po, logo))
+
   return {
     pageSize: 'A4',
     pageMargins: [17, 13, 17, 13],
-    content: [
-      buildTitle(),
-      buildCompanySection(po, logo),
-      buildBuyerSupplierSection(po),
-      buildItemsSection(po, isInter, taxGroups),
-      buildHSNSection(hsnGroups, isInter),
-      buildAmountInWords(po.totalAmount),
-      buildFooter(po, logo),
-    ],
+    content,
     defaultStyle: { fontSize: 9 },
   }
+}
+
+// ─── New PO-specific sections (Phase 5) ──────────────────────────────────────
+
+// Side-by-side billing / shipping addresses captured per-PO. Falls back to the
+// company default for billing, and shows a dash for shipping if not provided.
+function buildAddressSplit(po: PurchaseOrderPDFData): Content {
+  const billing = po.billingAddress?.trim() || po.company?.address || '—'
+  const shipping = po.shippingAddress?.trim() || '—'
+  return {
+    table: {
+      widths: ['50%', '50%'],
+      body: [
+        [
+          { text: 'BILLING ADDRESS', bold: true, fontSize: 9, fillColor: GREEN },
+          { text: 'SHIPPING ADDRESS', bold: true, fontSize: 9, fillColor: GREEN },
+        ],
+        [
+          { text: billing, fontSize: 9 },
+          { text: shipping, fontSize: 9 },
+        ],
+      ],
+    },
+    layout: {
+      hLineWidth: () => 0.5,
+      vLineWidth: () => 0.5,
+      hLineColor: () => '#000',
+      vLineColor: () => '#000',
+      paddingLeft: () => 4,
+      paddingRight: () => 4,
+      paddingTop: () => 3,
+      paddingBottom: () => 3,
+    },
+    margin: [0, 4, 0, 0],
+  }
+}
+
+// One-liner showing the supplier's earlier quotation reference (e.g. "QUOT-2026-042").
+// Standard B2B practice: PO references the prior quote so supplier can match against it.
+function buildVendorQuotationRef(po: PurchaseOrderPDFData): Content {
+  return {
+    text: [
+      { text: 'Vendor Quotation No. & Date: ', bold: true, fontSize: 9 },
+      { text: po.vendorQuotationRef || '', fontSize: 9 },
+    ],
+    margin: [0, 4, 0, 0],
+  }
+}
+
+// Numbered Special Instructions block — long-form text from Settings (default
+// is the standard 10-clause Indian PO boilerplate). Rendered as a single text
+// block, preserving the user's line breaks.
+function buildSpecialInstructions(po: PurchaseOrderPDFData): Content {
+  return {
+    table: {
+      widths: ['*'],
+      body: [
+        [{ text: 'Special Instructions:', bold: true, fontSize: 9, fillColor: GREEN }],
+        [{ text: po.specialInstructions || '', fontSize: 8.5, lineHeight: 1.25 }],
+      ],
+    },
+    layout: {
+      hLineWidth: () => 0.5,
+      vLineWidth: () => 0.5,
+      hLineColor: () => '#000',
+      vLineColor: () => '#000',
+      paddingLeft: () => 4,
+      paddingRight: () => 4,
+      paddingTop: () => 3,
+      paddingBottom: () => 3,
+    },
+    margin: [0, 6, 0, 0],
+  }
+}
+
+// General T&C (legal boilerplate — TDS/TCS, jurisdiction, arbitration). Renders
+// inline right after Special Instructions; pdfmake wraps to a new page on its own
+// if the content overflows.
+function buildGeneralTerms(po: PurchaseOrderPDFData): Content {
+  return {
+    stack: [
+      { text: 'General Terms & Conditions', bold: true, fontSize: 12, margin: [0, 12, 0, 6] },
+      { text: po.generalTerms || '', fontSize: 8.5, lineHeight: 1.3 },
+    ],
+  } as Content
 }
 
 function buildTitle(): Content {
@@ -521,17 +636,9 @@ function buildFooter(po: PurchaseOrderPDFData, logo: string): Content {
     })
   }
 
-  const termsStack: Content[] = [
-    { text: 'Terms and Conditions', bold: true, fontSize: 9, margin: [0, 0, 0, 3] as [number, number, number, number] },
-  ]
-  // PO-specific terms override the company default if provided.
-  const termsText = (po.termsConditions && po.termsConditions.trim())
-    ? po.termsConditions
-    : company?.termsConditions
-  if (termsText) {
-    termsStack.push({ text: termsText, fontSize: 8, lineHeight: 1.2 })
-  }
-
+  // Per-PO and company-level T&C used to live here, but Phase 5 introduced the
+  // long-form Special Instructions and General Terms blocks (sourced from Settings)
+  // which already cover this content. Keeping a third T&C box would just duplicate.
   const sigStack: Content[] = [
     { text: '', fontSize: 1 },
     { image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] },
@@ -540,11 +647,21 @@ function buildFooter(po: PurchaseOrderPDFData, logo: string): Content {
   ]
 
   const layout = {
-    hLineWidth: (i: number) => i === 0 ? 0 : 0.5,
+    // Footer used to omit its top line because it sat directly under the bordered
+    // Amount-in-Words box and shared borders. After Phase 5 reorder it sits below
+    // the (borderless) General Terms text block, so the top line must be drawn
+    // for it to read as a complete table.
+    hLineWidth: () => 0.5,
     vLineWidth: () => 0.5,
     hLineColor: () => '#000', vLineColor: () => '#000',
     paddingLeft: () => 4, paddingRight: () => 4, paddingTop: () => 5, paddingBottom: () => 5,
   }
+
+  // Top margin separates the footer table from the General Terms text above.
+  // Before Phase 5, footer sat under a bordered Amount-in-Words box and shared
+  // its border, so margin: 0 was correct. After reorder it follows borderless
+  // text and needs visible breathing room.
+  const outerMargin: [number, number, number, number] = [0, 12, 0, 0]
 
   if (hasNotes) {
     return {
@@ -552,18 +669,22 @@ function buildFooter(po: PurchaseOrderPDFData, logo: string): Content {
         widths: ['50%', '50%'],
         body: [
           [{ stack: notesStack }, { stack: bankStack }],
-          [{ stack: termsStack }, { stack: sigStack }],
+          // Signature spans both bottom columns now that Terms is gone — keeps
+          // the authorised-signature block centered visually.
+          [{ stack: sigStack, colSpan: 2 }, {}],
         ],
       },
       layout,
+      margin: outerMargin,
     }
   }
 
   return {
     table: {
-      widths: ['36%', '34%', '30%'],
-      body: [[{ stack: bankStack }, { stack: termsStack }, { stack: sigStack }]],
+      widths: ['50%', '50%'],
+      body: [[{ stack: bankStack }, { stack: sigStack }]],
     },
     layout,
+    margin: outerMargin,
   }
 }

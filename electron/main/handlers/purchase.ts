@@ -25,7 +25,9 @@ const purchaseBillInclude = {
       }
     }
   },
-  payments: true
+  payments: true,
+  // Surface the linked PO summary so the bill view modal can show "Issued against PO-N"
+  purchaseOrder: { select: { id: true, orderNumber: true, orderDate: true, status: true } }
 } as const
 
 const purchaseBillListInclude = {
@@ -38,7 +40,9 @@ const purchaseBillListInclude = {
         }
       }
     }
-  }
+  },
+  // Same summary on list rows so the bills table can show a "PO" tag inline
+  purchaseOrder: { select: { id: true, orderNumber: true } }
 } as const
 
 async function resolveSupplierItem(tx: any, supplierId: string, item: any) {
@@ -554,6 +558,10 @@ export const setupPurchaseHandlers = () => {
             // which is unique-constrained. AI extraction populates this from the bill image.
             supplierInvoiceNumber: data.supplierInvoiceNumber || null,
             supplierInvoiceDate: data.supplierInvoiceDate ? new Date(data.supplierInvoiceDate) : null,
+            // Optional link back to the originating Purchase Order. If set, the PO is
+            // closed below once at least one bill exists against it. Bills can also be
+            // standalone (no PO) for cash purchases / walk-in suppliers.
+            purchaseOrderId: data.purchaseOrderId || null,
             subtotal,
             discount: data.discount || 0,
             taxAmount,
@@ -588,6 +596,17 @@ export const setupPurchaseHandlers = () => {
         })
 
         await applyStockUpdates(tx, normalizedItems, created.id, 'increment')
+
+        // If this bill references a PO, mark that PO as CLOSED now that the
+        // financial side is recorded. Future bills referencing the same PO are
+        // still allowed (split deliveries) — closing just signals "no more
+        // expected." Manual reopen would require an explicit status update.
+        if (data.purchaseOrderId) {
+          await tx.purchaseOrder.update({
+            where: { id: data.purchaseOrderId },
+            data: { status: 'CLOSED' },
+          })
+        }
 
         return created
       })
@@ -687,6 +706,8 @@ export const setupPurchaseHandlers = () => {
             supplierId,
             supplierInvoiceNumber: data.supplierInvoiceNumber ?? undefined,
             supplierInvoiceDate: data.supplierInvoiceDate ? new Date(data.supplierInvoiceDate) : undefined,
+            // Allow updating the PO link (or clearing it) on edit
+            purchaseOrderId: data.purchaseOrderId ?? undefined,
             subtotal,
             discount: data.discount || 0,
             taxAmount,

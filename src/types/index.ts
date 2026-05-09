@@ -325,6 +325,10 @@ export interface PurchaseBill {
   supplierInvoiceDate?: string | null
   attachmentData?: Uint8Array
   attachmentMimeType?: string
+  // Optional link to the originating Purchase Order (when this bill was created
+  // against a PO). Bills can also be standalone (no PO).
+  purchaseOrderId?: string | null
+  purchaseOrder?: PurchaseOrder
   items: PurchaseBillItem[]
   createdAt: string
   updatedAt: string
@@ -365,11 +369,14 @@ export interface PurchaseOrder {
   expectedDate?: string | null
   supplierId: string
   supplier?: Supplier
+  billingAddress?: string | null
+  shippingAddress?: string | null
+  vendorQuotationRef?: string | null
   subtotal: number
   discount: number
   taxAmount: number
   totalAmount: number
-  status: 'DRAFT' | 'SENT' | 'RECEIVED' | 'CANCELLED'
+  status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED'
   notes?: string
   termsConditions?: string
   placeOfSupply?: string
@@ -379,8 +386,16 @@ export interface PurchaseOrder {
   sgstAmount?: number
   igstAmount?: number
   cessAmount?: number
-  convertedBillId?: string | null
   items: PurchaseOrderItem[]
+  // Bills issued against this PO. Populated when fetched via `getById` / `getAll`.
+  // Useful for "X bills against this PO" UI hints.
+  bills?: Array<{
+    id: string
+    billNumber: string
+    billDate: string | Date
+    totalAmount: number
+    status: string
+  }>
   createdAt: string
   updatedAt: string
 }
@@ -392,6 +407,7 @@ export interface PurchaseOrderItem {
   supplierItem?: SupplierItem
   item?: Item
   quantity: number
+  receivedQuantity: number
   rate: number
   discount: number
   taxRate: number
@@ -655,7 +671,13 @@ declare global {
         update: (id: string, data: any) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
         generateOrderNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
-        convertToBill: (id: string) => Promise<{ success: boolean; data?: PurchaseBill; error?: string }>
+        markAsReceived: (
+          id: string,
+          lineUpdates: Array<{ lineId: string; receivedQuantity: number }>,
+        ) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
+        listOpenForSupplier: (
+          supplierId: string,
+        ) => Promise<{ success: boolean; data?: PurchaseOrder[]; error?: string }>
       }
       payment: {
         recordPaymentIn: (data: any) => Promise<{ success: boolean; data?: PaymentTransaction; error?: string }>

@@ -21,6 +21,9 @@ const purchaseOrderInclude = {
       supplierItem: { include: { linkedItem: true } },
     },
   },
+  // Bills referencing this PO. The frontend uses .length to decide whether the PO
+  // can be edited/closed/deleted, and to surface "X bills against this PO" hints.
+  bills: { select: { id: true, billNumber: true, billDate: true, totalAmount: true, status: true } },
 } as const
 
 async function resolveSupplierItem(tx: any, supplierId: string, item: any) {
@@ -148,6 +151,9 @@ export const setupPurchaseOrderHandlers = () => {
             orderDate: new Date(data.orderDate),
             expectedDate: data.expectedDate ? new Date(data.expectedDate) : null,
             supplierId,
+            billingAddress: data.billingAddress || null,
+            shippingAddress: data.shippingAddress || null,
+            vendorQuotationRef: data.vendorQuotationRef || null,
             subtotal,
             discount: data.discount || 0,
             taxAmount,
@@ -216,6 +222,9 @@ export const setupPurchaseOrderHandlers = () => {
             orderDate: new Date(data.orderDate),
             expectedDate: data.expectedDate ? new Date(data.expectedDate) : null,
             supplierId,
+            billingAddress: data.billingAddress ?? existing.billingAddress,
+            shippingAddress: data.shippingAddress ?? existing.shippingAddress,
+            vendorQuotationRef: data.vendorQuotationRef ?? existing.vendorQuotationRef,
             subtotal,
             discount: data.discount || 0,
             taxAmount,
@@ -283,69 +292,78 @@ export const setupPurchaseOrderHandlers = () => {
     }
   })
 
-  // Convert a PO into a Purchase Bill. The PO is marked RECEIVED + linked to the
-  // new bill so we don't accidentally convert it twice. The frontend opens the
-  // bill's edit dialog so the user can attach the supplier's actual invoice.
-  ipcMain.handle('purchaseOrder:convertToBill', async (_, id: string) => {
+  // Mark received quantities for individual lines, then recompute the PO header
+  // status. Caller passes [{ lineId, receivedQuantity }, ...]. Lines not listed
+  // are left untouched. PO doesn't touch supplier balance or stock — those side
+  // effects live on the Bill, not the PO.
+  ipcMain.handle(
+    'purchaseOrder:markAsReceived',
+    async (_, id: string, lineUpdates: Array<{ lineId: string; receivedQuantity: number }>) => {
+      try {
+        const order = await prisma.$transaction(async (tx: any) => {
+          const existing = await tx.purchaseOrder.findUnique({
+            where: { id },
+            include: { items: true },
+          })
+          if (!existing) throw new Error('Purchase order not found')
+
+          // Apply each line update. Clamp received to [0, ordered] so a fat-finger
+          // doesn't show "received 1000 of 10."
+          const updateMap = new Map(lineUpdates.map((u) => [u.lineId, u.receivedQuantity]))
+          for (const line of existing.items) {
+            if (!updateMap.has(line.id)) continue
+            const requested = updateMap.get(line.id) || 0
+            const clamped = Math.max(0, Math.min(requested, line.quantity))
+            await tx.purchaseOrderItem.update({
+              where: { id: line.id },
+              data: { receivedQuantity: clamped },
+            })
+          }
+
+          // Re-read items so the status math sees the updated values
+          const refreshed = await tx.purchaseOrder.findUnique({
+            where: { id },
+            include: { items: true },
+          })
+          const allReceived = refreshed.items.every((it: any) => it.receivedQuantity >= it.quantity)
+          const anyReceived = refreshed.items.some((it: any) => it.receivedQuantity > 0)
+          const newStatus = allReceived ? 'RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : refreshed.status
+
+          return tx.purchaseOrder.update({
+            where: { id },
+            data: { status: newStatus },
+            include: purchaseOrderInclude,
+          })
+        })
+
+        await triggerSyncAfterChange()
+        return { success: true, data: order }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to mark PO as received',
+        }
+      }
+    },
+  )
+
+  // Open POs (no bills yet, status not closed/cancelled) for a given supplier.
+  // Used by the Purchase Bill form to let users link a new bill to an existing PO.
+  ipcMain.handle('purchaseOrder:listOpenForSupplier', async (_, supplierId: string) => {
     try {
-      const result = await prisma.$transaction(async (tx: any) => {
-        const order = await tx.purchaseOrder.findUnique({
-          where: { id },
-          include: { items: true },
-        })
-        if (!order) throw new Error('Purchase order not found')
-        if (order.convertedBillId) throw new Error('This PO has already been converted to a bill')
-
-        // Auto-number the bill same way purchase:generateBillNumber does
-        const lastBill = await tx.purchaseBill.findFirst({ orderBy: { billNumber: 'desc' } })
-        const year = new Date().getFullYear()
-        const lastNum = lastBill ? parseInt(lastBill.billNumber.split('-').pop() || '0') : 0
-        const billNumber = `BILL-${year}-${String(lastNum + 1).padStart(3, '0')}`
-
-        const bill = await tx.purchaseBill.create({
-          data: {
-            billNumber,
-            billDate: new Date(),
-            supplierId: order.supplierId,
-            subtotal: order.subtotal,
-            discount: order.discount,
-            taxAmount: order.taxAmount,
-            cgstAmount: order.cgstAmount,
-            sgstAmount: order.sgstAmount,
-            igstAmount: order.igstAmount,
-            totalAmount: order.totalAmount,
-            balanceDue: order.totalAmount,
-            status: 'DRAFT',
-            notes: order.notes,
-            items: {
-              create: order.items.map((it: any) => ({
-                supplierItemId: it.supplierItemId,
-                hsnCode: it.hsnCode,
-                quantity: it.quantity,
-                rate: it.rate,
-                discount: it.discount,
-                taxRate: it.taxRate,
-                total: it.total,
-                taxableAmount: it.taxableAmount,
-              })),
-            },
-          },
-        })
-
-        await tx.purchaseOrder.update({
-          where: { id },
-          data: { status: 'RECEIVED', convertedBillId: bill.id },
-        })
-
-        return bill
+      const orders = await prisma.purchaseOrder.findMany({
+        where: {
+          supplierId,
+          status: { notIn: ['CLOSED', 'CANCELLED'] },
+        },
+        include: purchaseOrderInclude,
+        orderBy: { orderDate: 'desc' },
       })
-
-      await triggerSyncAfterChange()
-      return { success: true, data: result }
+      return { success: true, data: orders }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to convert PO to bill',
+        error: error instanceof Error ? error.message : 'Failed to list open POs',
       }
     }
   })
