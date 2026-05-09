@@ -325,6 +325,10 @@ export interface PurchaseBill {
   supplierInvoiceDate?: string | null
   attachmentData?: Uint8Array
   attachmentMimeType?: string
+  // Optional link to the originating Purchase Order (when this bill was created
+  // against a PO). Bills can also be standalone (no PO).
+  purchaseOrderId?: string | null
+  purchaseOrder?: PurchaseOrder
   items: PurchaseBillItem[]
   createdAt: string
   updatedAt: string
@@ -356,6 +360,61 @@ export interface ExtractedBillData {
   sgstAmount: number
   igstAmount: number
   items: ExtractedBillItem[]
+}
+
+export interface PurchaseOrder {
+  id: string
+  orderNumber: string
+  orderDate: string
+  expectedDate?: string | null
+  supplierId: string
+  supplier?: Supplier
+  billingAddress?: string | null
+  shippingAddress?: string | null
+  vendorQuotationRef?: string | null
+  subtotal: number
+  discount: number
+  taxAmount: number
+  totalAmount: number
+  status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED'
+  notes?: string
+  termsConditions?: string
+  placeOfSupply?: string
+  placeOfSupplyName?: string
+  isInterState?: boolean
+  cgstAmount?: number
+  sgstAmount?: number
+  igstAmount?: number
+  cessAmount?: number
+  items: PurchaseOrderItem[]
+  // Bills issued against this PO. Populated when fetched via `getById` / `getAll`.
+  // Useful for "X bills against this PO" UI hints.
+  bills?: Array<{
+    id: string
+    billNumber: string
+    billDate: string | Date
+    totalAmount: number
+    status: string
+  }>
+  createdAt: string
+  updatedAt: string
+}
+
+export interface PurchaseOrderItem {
+  id: string
+  purchaseOrderId: string
+  supplierItemId: string
+  supplierItem?: SupplierItem
+  item?: Item
+  quantity: number
+  receivedQuantity: number
+  rate: number
+  discount: number
+  taxRate: number
+  total: number
+  hsnCode?: string
+  taxableAmount?: number
+  createdAt: string
 }
 
 export interface PurchaseBillItem {
@@ -604,6 +663,21 @@ declare global {
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
         generateBillNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
         extractFromImage: (args: { fileBytes: Uint8Array; mimeType: string }) => Promise<{ success: boolean; data?: ExtractedBillData; error?: string }>
+      }
+      purchaseOrder: {
+        getAll: () => Promise<{ success: boolean; data?: PurchaseOrder[]; error?: string }>
+        getById: (id: string) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
+        create: (data: any) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
+        update: (id: string, data: any) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        generateOrderNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
+        markAsReceived: (
+          id: string,
+          lineUpdates: Array<{ lineId: string; receivedQuantity: number }>,
+        ) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
+        listOpenForSupplier: (
+          supplierId: string,
+        ) => Promise<{ success: boolean; data?: PurchaseOrder[]; error?: string }>
       }
       payment: {
         recordPaymentIn: (data: any) => Promise<{ success: boolean; data?: PaymentTransaction; error?: string }>

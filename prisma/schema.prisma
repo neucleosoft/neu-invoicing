@@ -99,9 +99,10 @@ model Supplier {
   updatedAt       DateTime  @updatedAt
 
   // Relations
-  purchaseBills PurchaseBill[]
-  supplierItems SupplierItem[]
-  payments      PaymentTransaction[]
+  purchaseBills   PurchaseBill[]
+  purchaseOrders  PurchaseOrder[]
+  supplierItems   SupplierItem[]
+  payments        PaymentTransaction[]
 }
 
 // Catalog of items each supplier sells YOU (separate from your sellable Item catalog).
@@ -122,7 +123,8 @@ model SupplierItem {
   updatedAt         DateTime @updatedAt
 
   // Relations
-  purchaseBillItems PurchaseBillItem[]
+  purchaseBillItems  PurchaseBillItem[]
+  purchaseOrderItems PurchaseOrderItem[]
 }
 
 // Items (Products and Services)
@@ -374,12 +376,84 @@ model PurchaseBill {
   // Attachment — original bill image/PDF uploaded by user (used for AI extraction + audit trail)
   attachmentData        Bytes? // raw file bytes (BLOB), null when no attachment
   attachmentMimeType    String? // e.g., "image/jpeg", "image/png", "application/pdf"
+  // Optional link back to the Purchase Order this bill satisfies. Bills can exist
+  // without a PO (cash purchases, walk-in suppliers); when set, the PO can be
+  // closed once it's fully invoiced. SetNull on PO delete keeps the bill standalone.
+  purchaseOrderId       String?
+  purchaseOrder         PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
   // Relations
   items    PurchaseBillItem[]
   payments PaymentTransaction[]
+}
+
+// Purchase Orders — sent to suppliers BEFORE goods/services are received.
+// A PO records what you ORDERED. The actual financial obligation lives on the
+// PurchaseBill the supplier sends back; bills reference their originating PO via
+// PurchaseBill.purchaseOrderId. PO doesn't affect stock or balances by itself.
+model PurchaseOrder {
+  id                 String   @id @default(cuid())
+  orderNumber        String   @unique
+  orderDate          DateTime @default(now())
+  expectedDate       DateTime?
+  supplierId         String
+  supplier           Supplier @relation(fields: [supplierId], references: [id])
+  // Captured per-PO so they can override the company default for this order.
+  // billingAddress = where supplier should send their invoice; shippingAddress = where
+  // goods should be delivered. They're often different (HQ vs warehouse).
+  billingAddress     String?
+  shippingAddress    String?
+  // Free-text reference to the supplier's earlier quotation, e.g. "QUOT-2026-042 02.03.2026".
+  vendorQuotationRef String?
+  subtotal           Float    @default(0)
+  discount           Float    @default(0)
+  taxAmount          Float    @default(0)
+  totalAmount        Float    @default(0)
+  status             String   @default("DRAFT") // DRAFT, SENT, ACCEPTED, PARTIALLY_RECEIVED, RECEIVED, CLOSED, CANCELLED
+  notes              String?
+  termsConditions    String?
+  // GST fields (mirrors PurchaseBill so PDF rendering shares the same input shape)
+  placeOfSupply      String?
+  placeOfSupplyName  String?
+  isInterState       Boolean  @default(false)
+  cgstAmount         Float    @default(0)
+  sgstAmount         Float    @default(0)
+  igstAmount         Float    @default(0)
+  cessAmount         Float    @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  items PurchaseOrderItem[]
+  // Bills issued against this PO. A PO can have multiple bills if deliveries are split.
+  bills PurchaseBill[]
+}
+
+model PurchaseOrderItem {
+  id               String        @id @default(cuid())
+  purchaseOrderId  String
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  supplierItemId   String
+  supplierItem     SupplierItem  @relation(fields: [supplierItemId], references: [id])
+  quantity         Float
+  // How many units have actually been received against this line so far. Set during the
+  // "Mark Received" flow; PO header status derives from comparing receivedQuantity to
+  // quantity across all lines: none → SENT/ACCEPTED, some → PARTIALLY_RECEIVED, all → RECEIVED.
+  receivedQuantity Float         @default(0)
+  rate             Float
+  discount         Float         @default(0)
+  taxRate          Float         @default(0)
+  total            Float
+  hsnCode          String?
+  taxableAmount    Float         @default(0)
+  cgstRate         Float         @default(0)
+  cgstAmount       Float         @default(0)
+  sgstRate         Float         @default(0)
+  sgstAmount       Float         @default(0)
+  igstRate         Float         @default(0)
+  igstAmount       Float         @default(0)
+  createdAt        DateTime      @default(now())
 }
 
 // Line items for purchase bills

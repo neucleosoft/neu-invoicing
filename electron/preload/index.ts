@@ -132,6 +132,24 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("purchase:extractFromImage", args),
   },
 
+  // Purchase Orders
+  purchaseOrder: {
+    getAll: () => ipcRenderer.invoke("purchaseOrder:getAll"),
+    getById: (id: string) => ipcRenderer.invoke("purchaseOrder:getById", id),
+    create: (data: any) => ipcRenderer.invoke("purchaseOrder:create", data),
+    update: (id: string, data: any) =>
+      ipcRenderer.invoke("purchaseOrder:update", id, data),
+    delete: (id: string) => ipcRenderer.invoke("purchaseOrder:delete", id),
+    generateOrderNumber: () =>
+      ipcRenderer.invoke("purchaseOrder:generateOrderNumber"),
+    markAsReceived: (
+      id: string,
+      lineUpdates: Array<{ lineId: string; receivedQuantity: number }>,
+    ) => ipcRenderer.invoke("purchaseOrder:markAsReceived", id, lineUpdates),
+    listOpenForSupplier: (supplierId: string) =>
+      ipcRenderer.invoke("purchaseOrder:listOpenForSupplier", supplierId),
+  },
+
   // Payments
   payment: {
     recordPaymentIn: (data: any) =>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
 import { getChallanPDFBytes, buildChallanFilename } from '../utils/pdfmakeChallan'
-import { openPdfInWindow } from '../utils/openPdfInWindow'
+import DownloadMenu from '../components/DownloadMenu'
+import { DispatchOpts, TableData } from '../utils/downloadHelpers'
 import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
@@ -181,18 +182,46 @@ const DeliveryChallan = () => {
     return { ...result.data, company }
   }
 
-  const handleDownloadPDF = async (challanId: string) => {
-    try {
-      const challanData = await loadChallanPDFData(challanId)
-      if (!challanData) {
-        toast.error('Failed to load challan details')
-        return
+  const buildChallanTableData = (challanData: any): TableData => {
+    const customer = challanData.customer || challanData.party || {}
+    const meta: Array<[string, string | number]> = [
+      ['Challan', challanData.challanNumber || ''],
+      ['Date', challanData.challanDate ? new Date(challanData.challanDate).toLocaleDateString('en-GB') : ''],
+      ['Customer', customer.name || ''],
+      ['GSTIN', customer.taxId || ''],
+    ]
+    const metaSuffix: Array<[string, string | number]> = [
+      ['Status', challanData.status || ''],
+      ['Subtotal', challanData.subtotal || 0],
+      ['Tax', challanData.taxAmount || 0],
+      ['Total', challanData.totalAmount || 0],
+    ]
+    const headers = ['Item', 'HSN', 'Qty', 'Rate', 'Tax %', 'Amount']
+    const rows: (string | number)[][] = (challanData.items || []).map((it: any) => [
+      it.item?.name || '',
+      it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+      it.quantity || 0,
+      it.rate || 0,
+      it.taxRate || 0,
+      it.total || 0,
+    ])
+    return { baseName: buildChallanFilename(challanData).replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+  }
+
+  const buildDownloadOpts = async (id: string): Promise<DispatchOpts> => {
+    const challanData = await loadChallanPDFData(id)
+    if (!challanData) throw new Error('Failed to load challan details')
+    let cached: { bytes: Uint8Array; filename: string } | null = null
+    const getPdf = async () => {
+      if (!cached) {
+        const bytes = await getChallanPDFBytes(challanData)
+        cached = { bytes, filename: buildChallanFilename(challanData) }
       }
-      const bytes = await getChallanPDFBytes(challanData)
-      openPdfInWindow(bytes, buildChallanFilename(challanData))
-    } catch (error) {
-      console.error('Error generating challan PDF:', error)
-      toast.error('Failed to generate PDF')
+      return cached
+    }
+    return {
+      getPdf,
+      getTable: async () => buildChallanTableData(challanData),
     }
   }
 
@@ -560,12 +589,7 @@ const DeliveryChallan = () => {
                         >
                           View
                         </button>
-                        <button
-                          onClick={() => handleDownloadPDF(challan.id)}
-                          className="text-indigo-600 hover:text-indigo-700"
-                        >
-                          PDF
-                        </button>
+                        <DownloadMenu getOpts={() => buildDownloadOpts(challan.id)} />
                         <ShareMenu
                           onShare={(target) => handleShare(challan.id, target)}
                           phone={challan.customer?.phone}
@@ -1028,12 +1052,10 @@ const DeliveryChallan = () => {
                 >
                   Close
                 </button>
-                <button
-                  onClick={() => handleDownloadPDF(viewingChallan.id)}
-                  className="btn btn-secondary"
-                >
-                  Download PDF
-                </button>
+                <DownloadMenu
+                  variant="button"
+                  getOpts={() => buildDownloadOpts(viewingChallan.id)}
+                />
                 <ShareMenu
                   variant="button"
                   onShare={(target) => handleShare(viewingChallan.id, target)}
