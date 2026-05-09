@@ -69,4 +69,6 @@ issues.md
 /decisions
 2026-05-06-160621-local-command-caveatcaveat-the-messages-below.txt
 learning_pdf.md
+# Local-only originals of pre-blur README screenshots
+docs/screenshots/.originals/
 engineering_notes.pdf
