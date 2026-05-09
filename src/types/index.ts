@@ -730,6 +730,8 @@ declare global {
         getGSTR9: (filters: GSTReportFilters) => Promise<{ success: boolean; data?: any; error?: string }>
         getHSNSummary: (filters: GSTReportFilters) => Promise<{ success: boolean; data?: HSNSummaryItem[]; error?: string }>
         exportToJSON: (reportType: string, data: any) => Promise<{ success: boolean; data?: string; error?: string }>
+        exportGSTR1ToGSTNJSON: (data: GSTR1Data) => Promise<{ success: boolean; data?: string; error?: string }>
+        exportGSTR1ToFriendlyJSON: (data: GSTR1Data) => Promise<{ success: boolean; data?: string; error?: string }>
         exportGSTR1ToExcel: (data: GSTR1Data) => Promise<{ success: boolean; data?: string; error?: string }>
         exportGSTR3BToExcel: (data: GSTR3BData) => Promise<{ success: boolean; data?: string; error?: string }>
         getCompanyGSTDetails: () => Promise<{ success: boolean; data?: { gstin?: string; legalName?: string; stateCode?: string; stateName?: string }; error?: string }>

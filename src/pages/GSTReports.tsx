@@ -3,6 +3,9 @@ import { formatCurrency } from '../utils/currency'
 import { useToast } from '../components/ToastContext'
 import DateInput from '../components/DateInput'
 import type { GSTR1Data, GSTR3BData, HSNSummaryItem, GSTReportFilters } from '../types'
+import { bulkDownloadPdfs } from '../utils/bulkDownloadPdfs'
+import { getInvoicePDFBytes, InvoiceTemplate } from '../utils/generateInvoicePDF'
+import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 
 type ReportType = 'dashboard' | 'gstr1' | 'gstr2' | 'gstr3b' | 'gstr9' | 'hsn'
 type DatePreset = 'thisMonth' | 'lastMonth' | 'thisQuarter' | 'lastQuarter' | 'thisYear' | 'custom'
@@ -26,7 +29,25 @@ const GSTReports = () => {
   const [drillDownSection, setDrillDownSection] = useState<string | null>(null)
   const [drillDownInvoices, setDrillDownInvoices] = useState<any[]>([])
 
+  // Bulk-download (sales PDFs zipped) state
+  const [bulkDownloading, setBulkDownloading] = useState(false)
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number }>({ done: 0, total: 0 })
+  // Invoice template defaults to 'classic'; overridden by user's saved choice in Settings.
+  const [invoiceTemplate, setInvoiceTemplate] = useState<InvoiceTemplate>('classic')
+
   const toast = useToast()
+
+  // Format a Date as YYYY-MM-DD using LOCAL time, not UTC. The whole app is
+  // India-only (UTC+5:30); using `toISOString().split('T')[0]` would shift the
+  // date one day earlier (e.g., May 1 IST midnight → Apr 30 in UTC). That
+  // off-by-one was the source of "GSTR1_2026-04-30_2026-05-30.xlsx" filenames
+  // when the user picked May.
+  const toLocalISODate = (d: Date): string => {
+    const yyyy = d.getFullYear()
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    return `${yyyy}-${mm}-${dd}`
+  }
 
   // Initialize dates based on preset
   useEffect(() => {
@@ -68,8 +89,8 @@ const GSTReports = () => {
         end = new Date(now.getFullYear(), now.getMonth() + 1, 0)
     }
 
-    setStartDate(start.toISOString().split('T')[0])
-    setEndDate(end.toISOString().split('T')[0])
+    setStartDate(toLocalISODate(start))
+    setEndDate(toLocalISODate(end))
   }, [datePreset])
 
   // Fetch company GST details on mount
@@ -81,7 +102,32 @@ const GSTReports = () => {
       }
     }
     fetchCompanyGST()
+
+    // Also load the user's selected invoice template — bulk-downloaded PDFs
+    // should match what the user gets when downloading invoices individually.
+    const loadTemplate = async () => {
+      const r = await window.electronAPI.settings.get('invoiceTemplate')
+      if (r.success && r.data) setInvoiceTemplate(r.data as InvoiceTemplate)
+    }
+    loadTemplate()
   }, [])
+
+  // When the date range changes, invalidate any cached report data. Otherwise
+  // the user can change dates and then click "Export Excel" — which would
+  // export the previously-generated report (with old dates baked into the
+  // filename) instead of the current range. Forcing a re-click of the report
+  // card after a date change keeps export and dates in sync.
+  useEffect(() => {
+    setGstr1Data(null)
+    setGstr3bData(null)
+    setGstr2Data(null)
+    setGstr9Data(null)
+    setHsnData([])
+    if (activeReport !== 'dashboard') {
+      setActiveReport('dashboard')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDate, endDate])
 
   const getFilters = (): GSTReportFilters => ({
     startDate,
@@ -176,6 +222,134 @@ const GSTReports = () => {
     }
   }
 
+  // GST Portal-compliant JSON for GSTR-1. Uses the dedicated backend handler
+  // that re-shapes our internal report data into GSTN's strict schema (b2b,
+  // b2cl, b2cs, hsn.data, doc_issue) with abbreviated keys and DD-MM-YYYY dates.
+  // This is the file your CA uploads to the portal directly.
+  const handleExportGSTR1GSTNJSON = async () => {
+    if (!gstr1Data) return
+    try {
+      const result = await window.electronAPI.gstReport.exportGSTR1ToGSTNJSON(gstr1Data)
+      if (result.success && result.data) {
+        const blob = new Blob([result.data], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `GSTR1_GSTN_${startDate}_${endDate}.json`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        toast.success('GSTN-format JSON downloaded — upload directly to gst.gov.in')
+      } else {
+        toast.error(result.error || 'Failed to export GSTN JSON')
+      }
+    } catch (error) {
+      toast.error('Failed to export GSTN JSON')
+    }
+  }
+
+  // Bulk-download every sales invoice in the active date range as a single
+  // ZIP file of PDFs. CA-friendly companion to GSTR-1 — they get the report
+  // PLUS the underlying invoice documents in one click. Uses the same template
+  // the user has selected in Settings → Invoice Templates.
+  const handleBulkDownloadSalesPDFs = async () => {
+    if (!startDate || !endDate) {
+      toast.info('Please select a date range first')
+      return
+    }
+    setBulkDownloading(true)
+    setBulkProgress({ done: 0, total: 0 })
+    try {
+      const result = await window.electronAPI.sales.getAll()
+      if (!result.success || !result.data) {
+        toast.error(result.error || 'Failed to load invoices')
+        return
+      }
+      // Filter to the selected range. End date is inclusive — use end-of-day so
+      // an invoice dated on the last day of the range is included.
+      const start = new Date(startDate + 'T00:00:00')
+      const endInclusive = new Date(endDate + 'T23:59:59.999')
+      const inRange = result.data.filter((inv: any) => {
+        const d = new Date(inv.invoiceDate)
+        return d >= start && d <= endInclusive
+      })
+      if (inRange.length === 0) {
+        toast.info('No sales invoices in this date range')
+        return
+      }
+
+      // Build flat zip: one PDF per invoice, file named by invoice + customer.
+      const items = inRange.map((inv: any) => {
+        const safeNum = (inv.invoiceNumber || 'invoice').replace(/[\\/]/g, '_')
+        const safeName = (inv.customer?.name || 'customer').replace(/[^a-z0-9]/gi, '_')
+        return { id: inv.id, filename: `${safeNum}_${safeName}.pdf` }
+      })
+
+      // Cache the company (logo loaded once) — saves N-1 logo decodes when N invoices
+      const company = await loadCompanyForPDF()
+      setBulkProgress({ done: 0, total: items.length })
+
+      const dlResult = await bulkDownloadPdfs({
+        items,
+        zipFilename: `Sales_${startDate}_${endDate}.zip`,
+        getBytes: async (id) => {
+          const r = await window.electronAPI.sales.getById(id)
+          if (!r.success || !r.data) return null
+          // PDF data shape comes from Prisma (with optional customer); the PDF
+          // builder accepts a looser shape at runtime — match Sales.tsx's pattern
+          // and cast to any to bridge the type gap.
+          const pdfData: any = { ...r.data, items: r.data.items || [], company }
+          const { bytes } = await getInvoicePDFBytes(pdfData, invoiceTemplate)
+          return bytes
+        },
+        onProgress: (done, total) => setBulkProgress({ done, total }),
+      })
+
+      if (dlResult.added > 0) {
+        toast.success(
+          `Downloaded ${dlResult.added} invoice${dlResult.added === 1 ? '' : 's'}` +
+            (dlResult.failed > 0 ? ` (${dlResult.failed} failed)` : ''),
+        )
+      } else {
+        toast.error('Could not generate any PDFs')
+      }
+    } catch (error) {
+      toast.error(
+        'Bulk download failed: ' + (error instanceof Error ? error.message : 'unknown'),
+      )
+    } finally {
+      setBulkDownloading(false)
+      setBulkProgress({ done: 0, total: 0 })
+    }
+  }
+
+  // Human-friendly JSON: same data, descriptive keys, totals at the bottom
+  // of every section + grand total. For CA review / your own archive — NOT
+  // for portal upload.
+  const handleExportGSTR1FriendlyJSON = async () => {
+    if (!gstr1Data) return
+    try {
+      const result = await window.electronAPI.gstReport.exportGSTR1ToFriendlyJSON(gstr1Data)
+      if (result.success && result.data) {
+        const blob = new Blob([result.data], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `GSTR1_Friendly_${startDate}_${endDate}.json`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        toast.success('Friendly JSON downloaded — readable with section totals')
+      } else {
+        toast.error(result.error || 'Failed to export friendly JSON')
+      }
+    } catch (error) {
+      toast.error('Failed to export friendly JSON')
+    }
+  }
+
   const handleExportExcel = async (reportType: 'GSTR1' | 'GSTR3B') => {
     try {
       let result
@@ -230,15 +404,18 @@ const GSTReports = () => {
     </button>
   )
 
-  // Summary metric component
+  // Summary metric component. `format` defaults to 'currency' (₹ + 2 decimals);
+  // pass 'count' for plain integers like invoice counts, document counts, etc.
   const SummaryMetric = ({
     label,
     value,
-    type = 'default'
+    type = 'default',
+    format = 'currency',
   }: {
     label: string
     value: number
     type?: 'default' | 'positive' | 'negative'
+    format?: 'currency' | 'count'
   }) => (
     <div className="bg-white dark:bg-gray-800 p-4 rounded-lg border dark:border-gray-700">
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">{label}</p>
@@ -247,7 +424,7 @@ const GSTReports = () => {
         type === 'negative' ? 'text-red-600 dark:text-red-400' :
         'text-gray-900 dark:text-gray-100'
       }`}>
-        {formatCurrency(value)}
+        {format === 'count' ? value.toLocaleString('en-IN') : formatCurrency(value)}
       </p>
     </div>
   )
@@ -312,6 +489,18 @@ const GSTReports = () => {
               }}
             />
           </div>
+          <div className="ml-auto">
+            <button
+              onClick={handleBulkDownloadSalesPDFs}
+              disabled={bulkDownloading || !startDate || !endDate}
+              className="btn btn-secondary"
+              title="Zip every sales invoice PDF in the selected range — useful for handing to your CA alongside GSTR-1"
+            >
+              {bulkDownloading
+                ? `Downloading… ${bulkProgress.done}/${bulkProgress.total}`
+                : 'Download All Sales PDFs (ZIP)'}
+            </button>
+          </div>
         </div>
       </div>
 
@@ -363,16 +552,24 @@ const GSTReports = () => {
             <h2 className="text-2xl font-bold">GSTR-1 - Outward Supplies</h2>
             <div className="flex gap-2">
               <button
-                onClick={() => handleExportExcel('GSTR1')}
+                onClick={handleExportGSTR1GSTNJSON}
                 className="btn btn-primary"
+                title="GSTN-compliant JSON — upload directly to gst.gov.in"
               >
-                Export Excel
+                Export GSTN JSON
               </button>
               <button
-                onClick={() => handleExportJSON('GSTR1', gstr1Data)}
+                onClick={handleExportGSTR1FriendlyJSON}
+                className="btn btn-secondary"
+                title="Readable JSON with section totals — for CA review / archive"
+              >
+                Export Friendly JSON
+              </button>
+              <button
+                onClick={() => handleExportExcel('GSTR1')}
                 className="btn btn-secondary"
               >
-                Export JSON
+                Export Excel
               </button>
             </div>
           </div>
@@ -381,7 +578,7 @@ const GSTReports = () => {
           <div className="card">
             <h3 className="text-lg font-semibold mb-4">Summary</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <SummaryMetric label="Total Invoices" value={gstr1Data.docSummary.totalInvoices} />
+              <SummaryMetric label="Total Invoices" value={gstr1Data.docSummary.totalInvoices} format="count" />
               <SummaryMetric label="Total Taxable Value" value={gstr1Data.docSummary.totalTaxableValue} />
               <SummaryMetric label="Total IGST" value={gstr1Data.docSummary.totalIgst} />
               <SummaryMetric label="Total CGST" value={gstr1Data.docSummary.totalCgst} />
@@ -645,7 +842,7 @@ const GSTReports = () => {
           <div className="card">
             <h3 className="text-lg font-semibold mb-4">Summary</h3>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <SummaryMetric label="Total Bills" value={gstr2Data.docSummary.totalBills} />
+              <SummaryMetric label="Total Bills" value={gstr2Data.docSummary.totalBills} format="count" />
               <SummaryMetric label="Total Taxable Value" value={gstr2Data.docSummary.totalTaxableValue} />
               <SummaryMetric label="Total Tax" value={gstr2Data.docSummary.totalTax} />
               <SummaryMetric label="Total Value" value={gstr2Data.docSummary.totalValue} />

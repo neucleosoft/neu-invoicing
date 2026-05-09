@@ -64,6 +64,357 @@ interface GSTR1Section {
   invoiceCount: number
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// GSTN-compliant GSTR-1 JSON converter
+// Reference: GSTN GSTR-1 JSON Schema v3 (offline tool / portal upload format).
+//
+// The internal `getGSTR1` handler returns data shaped for our UI (sections with
+// full Prisma rows). This function transforms that shape into the strict GSTN
+// schema with abbreviated keys (b2b, b2cs, hsn.data, doc_issue, etc.) that the
+// GST Portal and any GSTN-spec validator will accept.
+// ────────────────────────────────────────────────────────────────────────────
+
+const round2 = (n: number) => Math.round((n || 0) * 100) / 100
+
+// GSTN expects DD-MM-YYYY date strings (NOT ISO YYYY-MM-DD)
+const fmtGSTNDate = (d: any): string => {
+  const dt = new Date(d)
+  const dd = String(dt.getDate()).padStart(2, '0')
+  const mm = String(dt.getMonth() + 1).padStart(2, '0')
+  const yyyy = dt.getFullYear()
+  return `${dd}-${mm}-${yyyy}`
+}
+
+// Filing period in MMYYYY format derived from the report's startDate (YYYY-MM-DD).
+// e.g. "2026-04-01" → "042026"
+const periodToFP = (startDateStr: string | undefined): string => {
+  if (!startDateStr || startDateStr.length < 10) return ''
+  return startDateStr.substring(5, 7) + startDateStr.substring(0, 4)
+}
+
+// Group an invoice's line items by tax rate, returning the GSTN itms[] array.
+// Each tax rate becomes one entry with summed taxable value + tax amounts.
+const groupItemsByRateForGSTN = (items: any[], isInter: boolean) => {
+  const buckets: Record<number, { txval: number; iamt: number; camt: number; samt: number; csamt: number }> = {}
+  for (const it of items || []) {
+    const rt = it.taxRate || 0
+    if (!buckets[rt]) buckets[rt] = { txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 }
+    const taxable = it.taxableAmount ?? (it.quantity * it.rate - (it.discount || 0))
+    buckets[rt].txval += taxable
+    if (isInter) {
+      buckets[rt].iamt += it.igstAmount ?? (taxable * rt) / 100
+    } else {
+      buckets[rt].camt += it.cgstAmount ?? (taxable * rt) / 200
+      buckets[rt].samt += it.sgstAmount ?? (taxable * rt) / 200
+    }
+    buckets[rt].csamt += it.cessAmount || 0
+  }
+  return Object.entries(buckets).map(([rate, v], idx) => ({
+    num: idx + 1,
+    itm_det: {
+      rt: parseFloat(rate),
+      txval: round2(v.txval),
+      iamt: round2(v.iamt),
+      camt: round2(v.camt),
+      samt: round2(v.samt),
+      csamt: round2(v.csamt),
+    },
+  }))
+}
+
+const stateCodeFromGstin = (g: string | null | undefined) => (g || '').substring(0, 2)
+
+function toGSTNGstr1(data: any, companyGstin: string): any {
+  // === B2B: invoices grouped by customer GSTIN (ctin) ===
+  const b2bByCtin: Record<string, any[]> = {}
+  for (const inv of data.sections?.b2b?.invoices || []) {
+    const ctin = inv.customer?.taxId
+    if (!ctin) continue
+    if (!b2bByCtin[ctin]) b2bByCtin[ctin] = []
+    b2bByCtin[ctin].push({
+      inum: inv.invoiceNumber,
+      idt: fmtGSTNDate(inv.invoiceDate),
+      val: round2(inv.totalAmount),
+      pos: stateCodeFromGstin(inv.customer?.taxId),
+      rchrg: inv.reverseCharge ? 'Y' : 'N',
+      inv_typ: 'R', // R=Regular. SEZ/Deemed Export not tracked in our schema yet.
+      itms: groupItemsByRateForGSTN(inv.items || [], !!inv.isInterState),
+    })
+  }
+  const b2b = Object.entries(b2bByCtin).map(([ctin, inv]) => ({ ctin, inv }))
+
+  // === B2CL: invoices grouped by place-of-supply (pos) ===
+  const b2clByPos: Record<string, any[]> = {}
+  for (const inv of data.sections?.b2cl?.invoices || []) {
+    const pos = inv.placeOfSupply || stateCodeFromGstin(inv.customer?.taxId) || ''
+    if (!pos) continue
+    if (!b2clByPos[pos]) b2clByPos[pos] = []
+    b2clByPos[pos].push({
+      inum: inv.invoiceNumber,
+      idt: fmtGSTNDate(inv.invoiceDate),
+      val: round2(inv.totalAmount),
+      itms: groupItemsByRateForGSTN(inv.items || [], true), // B2CL is always inter-state
+    })
+  }
+  const b2cl = Object.entries(b2clByPos).map(([pos, inv]) => ({ pos, inv }))
+
+  // === B2CS: aggregated rows by (sply_ty × rt × pos × typ) ===
+  const b2csBuckets: Record<string, any> = {}
+  for (const inv of data.sections?.b2cs?.invoices || []) {
+    const pos = inv.placeOfSupply || stateCodeFromGstin(inv.customer?.taxId) || stateCodeFromGstin(companyGstin)
+    const isInter = !!inv.isInterState
+    const sply_ty = isInter ? 'INTER' : 'INTRA'
+    for (const it of inv.items || []) {
+      const rt = it.taxRate || 0
+      const key = `${sply_ty}|${rt}|${pos}|OE`
+      if (!b2csBuckets[key]) {
+        b2csBuckets[key] = { sply_ty, rt, typ: 'OE', pos, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 }
+      }
+      const taxable = it.taxableAmount ?? (it.quantity * it.rate - (it.discount || 0))
+      b2csBuckets[key].txval += taxable
+      if (isInter) {
+        b2csBuckets[key].iamt += it.igstAmount ?? (taxable * rt) / 100
+      } else {
+        b2csBuckets[key].camt += it.cgstAmount ?? (taxable * rt) / 200
+        b2csBuckets[key].samt += it.sgstAmount ?? (taxable * rt) / 200
+      }
+      b2csBuckets[key].csamt += it.cessAmount || 0
+    }
+  }
+  const b2cs = Object.values(b2csBuckets).map((v: any) => ({
+    sply_ty: v.sply_ty,
+    rt: v.rt,
+    typ: v.typ,
+    pos: v.pos,
+    txval: round2(v.txval),
+    iamt: round2(v.iamt),
+    camt: round2(v.camt),
+    samt: round2(v.samt),
+    csamt: round2(v.csamt),
+  }))
+
+  // === HSN summary ===
+  const hsnData = (data.hsnSummary || []).map((h: any, idx: number) => ({
+    num: idx + 1,
+    hsn_sc: h.hsnCode || '',
+    desc: h.description || '',
+    uqc: h.uqc || 'NOS',
+    qty: round2(h.totalQuantity || 0),
+    val: round2(h.totalValue || 0),
+    txval: round2(h.taxableValue || 0),
+    iamt: round2(h.igstAmount || 0),
+    camt: round2(h.cgstAmount || 0),
+    samt: round2(h.sgstAmount || 0),
+    csamt: round2(h.cessAmount || 0),
+  }))
+
+  // === Document issue summary (doc_num: 1 = Invoices for outward supply) ===
+  const totalIssued = data.docSummary?.totalInvoices || 0
+  const docIssue = {
+    doc_det: [
+      {
+        doc_num: 1,
+        docs: [
+          {
+            num: 1,
+            from: data.sections?.b2b?.invoices?.[0]?.invoiceNumber || '',
+            to:
+              data.sections?.b2b?.invoices?.[data.sections?.b2b?.invoices?.length - 1]?.invoiceNumber ||
+              '',
+            totnum: totalIssued,
+            cancel: 0,
+            net_issue: totalIssued,
+          },
+        ],
+      },
+    ],
+  }
+
+  const out: any = {
+    gstin: companyGstin || '',
+    fp: periodToFP(data.period?.startDate),
+    gt: 0, // Gross turnover preceding FY — not tracked; user fills on portal if needed.
+    cur_gt: round2(data.docSummary?.totalValue || 0),
+  }
+  if (b2b.length > 0) out.b2b = b2b
+  if (b2cl.length > 0) out.b2cl = b2cl
+  if (b2cs.length > 0) out.b2cs = b2cs
+  if (hsnData.length > 0) out.hsn = { data: hsnData }
+  out.doc_issue = docIssue
+  // cdnr / cdnur / exp / nil omitted for v1 — add when those sections actually
+  // have data in your books (most small businesses won't have any in a given month).
+  return out
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Human-friendly GSTR-1 JSON
+// Same data as the GSTN file but with full descriptive keys and section
+// totals at the bottom of each section (like a spreadsheet's footer row),
+// plus a grand-total at the very end. Intended for CA review / archiving,
+// NOT for direct GST Portal upload (use exportGSTR1ToGSTNJSON for that).
+// ────────────────────────────────────────────────────────────────────────────
+
+function toFriendlyGstr1(data: any, company: any): any {
+  // Sum a list of friendly-shape items into a totals object.
+  const sumLineItems = (items: any[]) => ({
+    totalTaxableValue: round2(items.reduce((s, it) => s + (it.taxableValue || 0), 0)),
+    totalIgst: round2(items.reduce((s, it) => s + (it.igstAmount || 0), 0)),
+    totalCgst: round2(items.reduce((s, it) => s + (it.cgstAmount || 0), 0)),
+    totalSgst: round2(items.reduce((s, it) => s + (it.sgstAmount || 0), 0)),
+    totalCess: round2(items.reduce((s, it) => s + (it.cessAmount || 0), 0)),
+  })
+
+  // Transform a Prisma invoice's items into the friendly shape.
+  const transformItems = (rawItems: any[], isInter: boolean) =>
+    (rawItems || []).map((it, idx) => {
+      const taxPercentage = it.taxRate || 0
+      const taxable = it.taxableAmount ?? (it.quantity * it.rate - (it.discount || 0))
+      return {
+        serialNumber: idx + 1,
+        itemName: it.item?.name || '',
+        hsnCode: it.hsnCode || it.item?.hsnCode || '',
+        quantity: it.quantity,
+        rate: it.rate,
+        taxPercentage,
+        taxableValue: round2(taxable),
+        igstAmount: round2(isInter ? (it.igstAmount ?? (taxable * taxPercentage) / 100) : 0),
+        cgstAmount: round2(isInter ? 0 : (it.cgstAmount ?? (taxable * taxPercentage) / 200)),
+        sgstAmount: round2(isInter ? 0 : (it.sgstAmount ?? (taxable * taxPercentage) / 200)),
+        cessAmount: round2(it.cessAmount || 0),
+      }
+    })
+
+  // === B2B section ===
+  const b2bInvoices = (data.sections?.b2b?.invoices || []).map((inv: any) => {
+    const items = transformItems(inv.items || [], !!inv.isInterState)
+    return {
+      customerGstin: inv.customer?.taxId || '',
+      customerName: inv.customer?.name || '',
+      invoiceNumber: inv.invoiceNumber,
+      invoiceDate: fmtGSTNDate(inv.invoiceDate),
+      placeOfSupply: stateCodeFromGstin(inv.customer?.taxId),
+      reverseCharge: !!inv.reverseCharge,
+      invoiceType: 'Regular',
+      isInterState: !!inv.isInterState,
+      totalValue: round2(inv.totalAmount),
+      items,
+      totals: sumLineItems(items),
+    }
+  })
+  const b2bAllItems = b2bInvoices.flatMap((i: any) => i.items)
+  const b2bSection = {
+    invoices: b2bInvoices,
+    totals: {
+      invoiceCount: b2bInvoices.length,
+      ...sumLineItems(b2bAllItems),
+      totalValue: round2(b2bInvoices.reduce((s: number, i: any) => s + i.totalValue, 0)),
+    },
+  }
+
+  // === B2C Large section ===
+  const b2clInvoices = (data.sections?.b2cl?.invoices || []).map((inv: any) => {
+    const items = transformItems(inv.items || [], true)
+    return {
+      customerName: inv.customer?.name || '',
+      invoiceNumber: inv.invoiceNumber,
+      invoiceDate: fmtGSTNDate(inv.invoiceDate),
+      placeOfSupply: inv.placeOfSupply || stateCodeFromGstin(inv.customer?.taxId),
+      totalValue: round2(inv.totalAmount),
+      items,
+      totals: sumLineItems(items),
+    }
+  })
+  const b2clSection = {
+    invoices: b2clInvoices,
+    totals: {
+      invoiceCount: b2clInvoices.length,
+      ...sumLineItems(b2clInvoices.flatMap((i: any) => i.items)),
+      totalValue: round2(b2clInvoices.reduce((s: number, i: any) => s + i.totalValue, 0)),
+    },
+  }
+
+  // === B2C Small section ===
+  const b2csInvoices = (data.sections?.b2cs?.invoices || []).map((inv: any) => {
+    const items = transformItems(inv.items || [], !!inv.isInterState)
+    return {
+      customerName: inv.customer?.name || '(walk-in / unregistered)',
+      invoiceNumber: inv.invoiceNumber,
+      invoiceDate: fmtGSTNDate(inv.invoiceDate),
+      placeOfSupply: inv.placeOfSupply || stateCodeFromGstin(inv.customer?.taxId),
+      isInterState: !!inv.isInterState,
+      totalValue: round2(inv.totalAmount),
+      items,
+      totals: sumLineItems(items),
+    }
+  })
+  const b2csSection = {
+    invoices: b2csInvoices,
+    totals: {
+      invoiceCount: b2csInvoices.length,
+      ...sumLineItems(b2csInvoices.flatMap((i: any) => i.items)),
+      totalValue: round2(b2csInvoices.reduce((s: number, i: any) => s + i.totalValue, 0)),
+    },
+  }
+
+  // === HSN Summary ===
+  const hsnRows = (data.hsnSummary || []).map((h: any, idx: number) => ({
+    serialNumber: idx + 1,
+    hsnCode: h.hsnCode || '',
+    description: h.description || '',
+    unit: h.uqc || 'NOS',
+    totalQuantity: round2(h.totalQuantity || 0),
+    totalValue: round2(h.totalValue || 0),
+    taxableValue: round2(h.taxableValue || 0),
+    igstAmount: round2(h.igstAmount || 0),
+    cgstAmount: round2(h.cgstAmount || 0),
+    sgstAmount: round2(h.sgstAmount || 0),
+    cessAmount: round2(h.cessAmount || 0),
+  }))
+  const hsnSummarySection = {
+    rows: hsnRows,
+    totals: {
+      hsnCodeCount: hsnRows.length,
+      totalQuantity: round2(hsnRows.reduce((s: number, r: any) => s + (r.totalQuantity || 0), 0)),
+      totalValue: round2(hsnRows.reduce((s: number, r: any) => s + (r.totalValue || 0), 0)),
+      totalTaxableValue: round2(hsnRows.reduce((s: number, r: any) => s + (r.taxableValue || 0), 0)),
+      totalIgst: round2(hsnRows.reduce((s: number, r: any) => s + (r.igstAmount || 0), 0)),
+      totalCgst: round2(hsnRows.reduce((s: number, r: any) => s + (r.cgstAmount || 0), 0)),
+      totalSgst: round2(hsnRows.reduce((s: number, r: any) => s + (r.sgstAmount || 0), 0)),
+      totalCess: round2(hsnRows.reduce((s: number, r: any) => s + (r.cessAmount || 0), 0)),
+    },
+  }
+
+  // === Grand total (the document-footer row) ===
+  const grandTotal = {
+    totalInvoices: data.docSummary?.totalInvoices || 0,
+    totalTaxableValue: round2(data.docSummary?.totalTaxableValue || 0),
+    totalIgst: round2(data.docSummary?.totalIgst || 0),
+    totalCgst: round2(data.docSummary?.totalCgst || 0),
+    totalSgst: round2(data.docSummary?.totalSgst || 0),
+    totalCess: round2(data.docSummary?.totalCess || 0),
+    totalTax: round2(data.docSummary?.totalTax || 0),
+    totalValue: round2(data.docSummary?.totalValue || 0),
+  }
+
+  return {
+    company: {
+      gstin: company?.taxId || '',
+      name: company?.name || '',
+      stateCode: company?.stateCode || stateCodeFromGstin(company?.taxId),
+    },
+    period: {
+      startDate: data.period?.startDate || '',
+      endDate: data.period?.endDate || '',
+      filingPeriod: periodToFP(data.period?.startDate),
+    },
+    b2bInvoices: b2bSection,
+    b2cLargeInvoices: b2clSection,
+    b2cSmallSupplies: b2csSection,
+    hsnSummary: hsnSummarySection,
+    grandTotal,
+  }
+}
+
 export const setupGSTReportHandlers = () => {
   const prisma = getPrisma()
 
@@ -733,7 +1084,9 @@ export const setupGSTReportHandlers = () => {
     }
   })
 
-  // Export report to JSON
+  // Export report to JSON (raw internal shape — useful for debugging /
+  // backups, NOT for GST Portal upload). For portal-compatible GSTR-1, use
+  // exportGSTR1ToGSTNJSON below.
   ipcMain.handle('gstReport:exportToJSON', async (_, _reportType: string, data: any) => {
     try {
       const jsonData = JSON.stringify(data, null, 2)
@@ -745,6 +1098,46 @@ export const setupGSTReportHandlers = () => {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to export to JSON'
+      }
+    }
+  })
+
+  // Export GSTR-1 in the GSTN-compliant JSON shape that the GST Portal and
+  // GSTN's offline tool accept directly. Reads the company's GSTIN from the
+  // Company table — fails loudly if unset, since the schema requires it.
+  ipcMain.handle('gstReport:exportGSTR1ToGSTNJSON', async (_, data: any) => {
+    try {
+      const company = await prisma.company.findFirst()
+      const gstin = company?.taxId
+      if (!gstin) {
+        return {
+          success: false,
+          error: 'Company GSTIN is not set. Open Settings → Company Profile and add it before exporting.',
+        }
+      }
+      const payload = toGSTNGstr1(data, gstin)
+      return { success: true, data: JSON.stringify(payload, null, 2) }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to export GSTN JSON',
+      }
+    }
+  })
+
+  // Human-friendly GSTR-1 JSON: same data as the GSTN file but with full
+  // descriptive keys (`taxPercentage` instead of `rt`) and totals appended at
+  // the bottom of every section plus a grand total at the very end. For CA
+  // review and archiving — NOT for portal upload.
+  ipcMain.handle('gstReport:exportGSTR1ToFriendlyJSON', async (_, data: any) => {
+    try {
+      const company = await prisma.company.findFirst()
+      const payload = toFriendlyGstr1(data, company)
+      return { success: true, data: JSON.stringify(payload, null, 2) }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to export friendly JSON',
       }
     }
   })
