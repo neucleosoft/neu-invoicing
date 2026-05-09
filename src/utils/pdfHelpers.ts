@@ -62,7 +62,7 @@ export interface PDFDocumentData {
 export interface ChallanData extends PDFDocumentData {
   challanNumber: string
   challanDate: string
-  status: 'PENDING' | 'DELIVERED' | 'CONVERTED'
+  status: 'RETURNABLE' | 'NON_RETURNABLE' | 'CONVERTED'
   transportMode?: string
   vehicleNumber?: string
   // Additional fields (all optional)

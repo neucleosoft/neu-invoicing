@@ -110,7 +110,7 @@ export const setupChallanHandlers = () => {
             vehicleNumber: data.vehicleNumber || null,
             notes: data.notes || null,
             termsConditions: data.termsConditions ?? null,
-            status: data.status || 'PENDING',
+            status: data.status || 'NON_RETURNABLE',
             poNumber: data.poNumber || null,
             ewayBillNo: data.ewayBillNo || null,
             warrantyPeriod: data.warrantyPeriod || null,
@@ -328,6 +328,13 @@ export const setupChallanHandlers = () => {
 
         if (challan.status === 'CONVERTED') {
           throw new Error('Challan has already been converted to an invoice')
+        }
+
+        // Returnable challans dispatch goods that come back (repair, job-work, etc.)
+        // — they aren't a sale, so blocking the invoice conversion prevents
+        // accidentally double-counting revenue.
+        if (challan.status === 'RETURNABLE') {
+          throw new Error('Returnable challans cannot be converted to an invoice')
         }
 
         // Generate new invoice number (same pattern as sales handler)

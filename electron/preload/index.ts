@@ -195,6 +195,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("gstReport:getHSNSummary", filters),
     exportToJSON: (reportType: string, data: any) =>
       ipcRenderer.invoke("gstReport:exportToJSON", reportType, data),
+    exportGSTR1ToGSTNJSON: (data: any) =>
+      ipcRenderer.invoke("gstReport:exportGSTR1ToGSTNJSON", data),
+    exportGSTR1ToFriendlyJSON: (data: any) =>
+      ipcRenderer.invoke("gstReport:exportGSTR1ToFriendlyJSON", data),
     exportGSTR1ToExcel: (data: any) =>
       ipcRenderer.invoke("gstReport:exportGSTR1ToExcel", data),
     exportGSTR3BToExcel: (data: any) =>

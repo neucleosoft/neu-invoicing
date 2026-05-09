@@ -36,15 +36,6 @@ const navigationGroups: { label?: string; items: { name: string; path: string; i
     ],
   },
   {
-    label: 'Master',
-    items: [
-      { name: 'Customers', path: '/customers', icon: Users },
-      { name: 'Suppliers', path: '/suppliers', icon: Users },
-      { name: 'Items', path: '/items', icon: Package },
-      { name: 'Supplier Items', path: '/supplier-items', icon: Package },
-    ],
-  },
-  {
     label: 'Sales',
     items: [
       { name: 'Invoices', path: '/invoices', icon: Wallet },
@@ -61,6 +52,15 @@ const navigationGroups: { label?: string; items: { name: string; path: string; i
       { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText },
       { name: 'Payments', path: '/payments', icon: CreditCard },
       { name: 'Cash & Bank', path: '/cash-bank', icon: Landmark },
+    ],
+  },
+  {
+    label: 'Master',
+    items: [
+      { name: 'Customers', path: '/customers', icon: Users },
+      { name: 'Suppliers', path: '/suppliers', icon: Users },
+      { name: 'Items', path: '/items', icon: Package },
+      { name: 'Supplier Items', path: '/supplier-items', icon: Package },
     ],
   },
   {
