@@ -365,11 +365,14 @@ export interface PurchaseOrder {
   expectedDate?: string | null
   supplierId: string
   supplier?: Supplier
+  billingAddress?: string | null
+  shippingAddress?: string | null
+  vendorQuotationRef?: string | null
   subtotal: number
   discount: number
   taxAmount: number
   totalAmount: number
-  status: 'DRAFT' | 'SENT' | 'RECEIVED' | 'CANCELLED'
+  status: 'DRAFT' | 'SENT' | 'ACCEPTED' | 'PARTIALLY_RECEIVED' | 'RECEIVED' | 'CLOSED' | 'CANCELLED'
   notes?: string
   termsConditions?: string
   placeOfSupply?: string
@@ -392,6 +395,7 @@ export interface PurchaseOrderItem {
   supplierItem?: SupplierItem
   item?: Item
   quantity: number
+  receivedQuantity: number
   rate: number
   discount: number
   taxRate: number
