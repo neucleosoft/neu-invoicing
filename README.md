@@ -8,13 +8,13 @@
 
 Run your shop, your studio, your side hustle without paying a SaaS tax every month. Your data stays in a SQLite file you can copy, your backups go to *your* Google Drive, and the app works on the train.
 
-[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/neucleosoft/neuInvoicing/releases/latest)
-[![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/neucleosoft/neuInvoicing/releases/latest)
-[![Download for Linux](https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/neucleosoft/neuInvoicing/releases/latest)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/neucleosoft/neu-invoicing/releases/latest)
+[![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/neucleosoft/neu-invoicing/releases/latest)
+[![Download for Linux](https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/neucleosoft/neu-invoicing/releases/latest)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
-[![GitHub release](https://img.shields.io/github/v/release/neucleosoft/neuInvoicing?style=flat-square)](https://github.com/neucleosoft/neuInvoicing/releases/latest)
-[![GitHub stars](https://img.shields.io/github/stars/neucleosoft/neuInvoicing?style=flat-square)](https://github.com/neucleosoft/neuInvoicing/stargazers)
+[![GitHub release](https://img.shields.io/github/v/release/neucleosoft/neu-invoicing?style=flat-square)](https://github.com/neucleosoft/neu-invoicing/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/neucleosoft/neu-invoicing?style=flat-square)](https://github.com/neucleosoft/neu-invoicing/stargazers)
 
 <img src="docs/screenshots/hero.png" alt="Neu Invoicing dashboard" width="900" />
 
@@ -39,7 +39,7 @@ Three steps. No terminal, no Node, no Prisma.
 <td width="33%" align="center">
 
 ### 1. Download
-[Grab the latest installer →](https://github.com/neucleosoft/neuInvoicing/releases/latest)
+[Grab the latest installer →](https://github.com/neucleosoft/neu-invoicing/releases/latest)
 
 Pick **Windows**, **macOS**, or **Linux**.
 
@@ -180,7 +180,7 @@ Short answer: **into a SQLite file on your computer**, and into **your own Googl
 <summary><b>Run from source</b></summary>
 
 ```bash
-git clone https://github.com/neucleosoft/neuInvoicing.git
+git clone https://github.com/neucleosoft/neu-invoicing.git
 cd neu-invoicing
 npm install
 cp .env.example .env       # fill in GOOGLE_CLIENT_ID / SECRET (see below)
@@ -297,7 +297,7 @@ That feature needs `GEMINI_API_KEY` (or an OpenRouter key) in `.env`, and a *bui
 
 ## 🤝 Contributing
 
-Bug reports, feature ideas, and PRs are welcome — open an [issue](https://github.com/neucleosoft/neuInvoicing/issues) and let's chat first if it's a big change.
+Bug reports, feature ideas, and PRs are welcome — open an [issue](https://github.com/neucleosoft/neu-invoicing/issues) and let's chat first if it's a big change.
 
 ## 📄 License
 
