@@ -119,8 +119,15 @@ const Purchase = () => {
     // billNumber, which is unique-constrained and auto-generated.
     supplierInvoiceNumber: '',
     billDate: new Date().toISOString().split('T')[0],
-    notes: ''
+    notes: '',
+    // Optional link back to the originating PurchaseOrder. When set, the PO is closed
+    // by the backend on bill save. Bills can also be standalone (cash/walk-in purchases).
+    purchaseOrderId: '',
   })
+
+  // Open POs for the currently-selected supplier (populated when supplier changes).
+  // Drives the "Reference PO" dropdown on the bill form.
+  const [openPOs, setOpenPOs] = useState<Array<{ id: string; orderNumber: string; orderDate: string | Date; totalAmount: number }>>([])
 
   // Bill-level tax breakdown (CGST + SGST for intra-state, IGST for inter-state).
   // Some invoice photos show tax only as separate CGST/SGST/IGST totals at the bottom
@@ -161,12 +168,15 @@ const Purchase = () => {
     loadSuppliers()
   }, [])
 
-  // Items are scoped per-supplier — refetch whenever the supplier changes (or clear if none picked).
+  // Items + open POs are scoped per-supplier — refetch whenever the supplier changes
+  // (or clear if none picked).
   useEffect(() => {
     if (formData.supplierId) {
       loadItems(formData.supplierId)
+      loadOpenPOs(formData.supplierId)
     } else {
       setItems([])
+      setOpenPOs([])
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [formData.supplierId])
@@ -400,7 +410,8 @@ const Purchase = () => {
         // IPC structured-clone preserves Date objects, so billDate may be a Date instance
         // (not the string the type claims). Wrap in `new Date()` so this works for both shapes.
         billDate: new Date(fullBill.billDate).toISOString().split('T')[0],
-        notes: fullBill.notes || ''
+        notes: fullBill.notes || '',
+        purchaseOrderId: fullBill.purchaseOrderId || '',
       })
       setBillItems(fullBill.items?.map((item: any) => ({
         // normalizeBill already resolved itemId to the SupplierItem.id (the dropdown's value space).
@@ -821,7 +832,8 @@ const Purchase = () => {
       billNumber: '',
       supplierInvoiceNumber: '',
       billDate: new Date().toISOString().split('T')[0],
-      notes: ''
+      notes: '',
+      purchaseOrderId: '',
     })
     setBillItems([])
     setEditingBill(null)
@@ -829,6 +841,64 @@ const Purchase = () => {
     setAttachmentMimeType(null)
     setUnmatchedSupplier(null)
     setTaxBreakdown({ cgst: 0, sgst: 0, igst: 0 })
+  }
+
+  // Load PO summaries for the currently-selected supplier (used by Reference PO dropdown).
+  const loadOpenPOs = async (supplierId: string) => {
+    const result = await window.electronAPI.purchaseOrder.listOpenForSupplier(supplierId)
+    if (result.success && result.data) {
+      setOpenPOs(
+        result.data.map((po: any) => ({
+          id: po.id,
+          orderNumber: po.orderNumber,
+          orderDate: po.orderDate,
+          totalAmount: po.totalAmount,
+        })),
+      )
+    } else {
+      setOpenPOs([])
+    }
+  }
+
+  // When user picks a PO from the Reference dropdown, optionally pre-fill the bill's line
+  // items from that PO. If the bill form already has items entered, ask before overwriting
+  // (so users don't lose data they've typed).
+  const handleSelectPO = async (poId: string) => {
+    if (!poId) {
+      setFormData((prev) => ({ ...prev, purchaseOrderId: '' }))
+      return
+    }
+    const proceed =
+      billItems.length === 0 ||
+      (await confirm({
+        message: 'Replace the current line items with this PO\'s items?',
+      }))
+    if (!proceed) {
+      // User declined pre-fill but still wants the link
+      setFormData((prev) => ({ ...prev, purchaseOrderId: poId }))
+      return
+    }
+    const result = await window.electronAPI.purchaseOrder.getById(poId)
+    if (!result.success || !result.data) {
+      toast.error('Failed to load PO details')
+      return
+    }
+    const po: any = result.data
+    setBillItems(
+      (po.items || []).map((it: any) => ({
+        // Map PO line → bill line. supplierItemId on the PO maps to itemId on the bill
+        // form (per Purchase.tsx's existing convention where itemId is supplierItemId).
+        itemId: it.supplierItemId || it.supplierItem?.id || '',
+        hsnCode: it.hsnCode || it.supplierItem?.hsnCode || '',
+        quantity: it.quantity,
+        rate: it.rate,
+        taxRate: it.taxRate || 0,
+        discount: it.discount || 0,
+        amount: it.total || 0,
+      })),
+    )
+    setFormData((prev) => ({ ...prev, purchaseOrderId: poId }))
+    toast.info('Items pre-filled from PO. Review and edit to match the supplier\'s actual invoice.')
   }
 
   const totals = calculateTotals()
@@ -895,7 +965,17 @@ const Purchase = () => {
             <tbody>
               {filteredBills.map((bill) => (
                 <tr key={bill.id} className="border-t">
-                  <td className="table-cell font-medium">{bill.billNumber}</td>
+                  <td className="table-cell font-medium">
+                    {bill.billNumber}
+                    {(bill as any).purchaseOrder?.orderNumber && (
+                      <span
+                        className="ml-2 inline-block px-1.5 py-0.5 text-xs rounded bg-indigo-50 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300"
+                        title="Issued against this Purchase Order"
+                      >
+                        ↩ {(bill as any).purchaseOrder.orderNumber}
+                      </span>
+                    )}
+                  </td>
                   <td className="table-cell">{new Date(bill.billDate).toLocaleDateString('en-GB')}</td>
                   <td className="table-cell">{bill.supplier?.name}</td>
                   <td className="table-cell">{formatCurrency(bill.totalAmount)}</td>
@@ -1128,6 +1208,28 @@ const Purchase = () => {
                       required
                     />
                   </div>
+
+                  {formData.supplierId && openPOs.length > 0 && (
+                    <div className="col-span-2">
+                      <label className="label">Reference Purchase Order</label>
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                        Link this bill to one of {openPOs.length} open PO{openPOs.length === 1 ? '' : 's'} for this supplier.
+                        Picking a PO pre-fills the items below — edit them to match the supplier's actual invoice.
+                      </p>
+                      <select
+                        className="input"
+                        value={formData.purchaseOrderId}
+                        onChange={(e) => handleSelectPO(e.target.value)}
+                      >
+                        <option value="">No PO (cash / walk-in purchase)</option>
+                        {openPOs.map((po) => (
+                          <option key={po.id} value={po.id}>
+                            {po.orderNumber} — {formatCurrency(po.totalAmount)} ({new Date(po.orderDate).toLocaleDateString('en-GB')})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
 
                   <div>
                     <label className="label">Supplier's Invoice Number</label>
@@ -1399,6 +1501,11 @@ const Purchase = () => {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Bill Number</p>
                   <p className="font-semibold text-lg">{viewingBill.billNumber}</p>
+                  {(viewingBill as any).purchaseOrder?.orderNumber && (
+                    <p className="text-xs text-indigo-700 dark:text-indigo-300 mt-1">
+                      ↩ Issued against PO {(viewingBill as any).purchaseOrder.orderNumber}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>

@@ -25,7 +25,9 @@ const purchaseBillInclude = {
       }
     }
   },
-  payments: true
+  payments: true,
+  // Surface the linked PO summary so the bill view modal can show "Issued against PO-N"
+  purchaseOrder: { select: { id: true, orderNumber: true, orderDate: true, status: true } }
 } as const
 
 const purchaseBillListInclude = {
@@ -38,7 +40,9 @@ const purchaseBillListInclude = {
         }
       }
     }
-  }
+  },
+  // Same summary on list rows so the bills table can show a "PO" tag inline
+  purchaseOrder: { select: { id: true, orderNumber: true } }
 } as const
 
 async function resolveSupplierItem(tx: any, supplierId: string, item: any) {
