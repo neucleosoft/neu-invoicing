@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { triggerSyncAfterChange } from '../sync'
 
 // Generate fiscal year string (e.g., "26-27" for April 2026 - March 2027)
 const getFiscalYear = (): string => {
@@ -162,7 +161,6 @@ export const setupChallanHandlers = () => {
         return created
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: challan }
     } catch (error) {
       return {
@@ -252,7 +250,6 @@ export const setupChallanHandlers = () => {
         }
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: challan }
     } catch (error) {
       return {
@@ -303,7 +300,6 @@ export const setupChallanHandlers = () => {
         })
       })
 
-      await triggerSyncAfterChange()
       return { success: true }
     } catch (error) {
       return {
@@ -422,7 +418,6 @@ export const setupChallanHandlers = () => {
         return invoice
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: result }
     } catch (error) {
       return {

@@ -1,6 +1,5 @@
 import { ipcMain, dialog, app } from "electron";
 import { getPrisma } from "../database";
-import { triggerSyncAfterChange } from "../sync";
 import fs from "fs";
 import path from "path";
 
@@ -41,7 +40,6 @@ export const setupCompanyHandlers = () => {
         },
       });
 
-      await triggerSyncAfterChange();
       return { success: true, data: company };
     } catch (error) {
       return {
@@ -73,7 +71,6 @@ export const setupCompanyHandlers = () => {
         },
       });
 
-      await triggerSyncAfterChange();
       return { success: true, data: company };
     } catch (error) {
       return {

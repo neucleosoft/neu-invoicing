@@ -1,7 +1,6 @@
 import { ipcMain } from 'electron'
 
 import { getPrisma } from '../database'
-import { triggerSyncAfterChange } from '../sync'
 import {
   buildSalesDocumentValues,
   convertQuotationToInvoice,
@@ -104,7 +103,6 @@ export const setupQuotationHandlers = () => {
         })
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: quotation }
     } catch (error) {
       return {
@@ -179,7 +177,6 @@ export const setupQuotationHandlers = () => {
         })
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: quotation }
     } catch (error) {
       return {
@@ -203,7 +200,6 @@ export const setupQuotationHandlers = () => {
         where: { id },
       })
 
-      await triggerSyncAfterChange()
       return { success: true }
     } catch (error) {
       return {
@@ -216,7 +212,6 @@ export const setupQuotationHandlers = () => {
   ipcMain.handle('quotation:convertToInvoice', async (_, quotationId: string) => {
     try {
       const invoice = await convertQuotationToInvoice(prisma, quotationId)
-      await triggerSyncAfterChange()
       return { success: true, data: invoice }
     } catch (error) {
       return {

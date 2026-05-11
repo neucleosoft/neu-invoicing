@@ -56,8 +56,13 @@ const Onboarding = () => {
 
       if (result.success && result.data) {
         setCompany(result.data);
-        // Trigger initial sync
-        await window.electronAPI.sync.syncNow();
+        // Push the newly created company to cloud. If this fails (offline, etc.)
+        // we still navigate forward — the user can sync manually later.
+        try {
+          await window.electronAPI.sync.upload();
+        } catch (e) {
+          console.log('Initial upload failed:', e);
+        }
         navigate("/");
       } else {
         setError(result.error || "Failed to create company profile");

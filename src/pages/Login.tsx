@@ -16,16 +16,22 @@ const Login = () => {
       const result = await window.electronAPI.auth.signInWithGoogle()
 
       if (result.success) {
-        // Sync first — cloud might have existing data
-        // Do this BEFORE setting auth status so the user stays on login page
-        // instead of flashing the onboarding page
+        // Cloud may have existing data — pull it down before checking for a
+        // local company, so returning users don't briefly see the onboarding
+        // page. Done BEFORE setAuthStatus so the user stays on the login screen
+        // while this resolves.
+        // (See open question in MIGRATIONS / issues: this silently bypasses the
+        // Phase 1 restore prompt for sign-in flows — intentional for now.)
         try {
-          await window.electronAPI.sync.syncNow()
+          const backup = await window.electronAPI.sync.checkCloudBackup()
+          if (backup.exists) {
+            await window.electronAPI.sync.download()
+          }
         } catch (syncError) {
-          console.log('Sync failed, continuing with local data:', syncError)
+          console.log('Cloud check failed, continuing with local data:', syncError)
         }
 
-        // Check if company exists (after sync, so cloud data is available)
+        // Check if company exists (after possible download, so cloud data is available)
         const companyResult = await window.electronAPI.company.get()
 
         // Now update state — React renders the right page in one go

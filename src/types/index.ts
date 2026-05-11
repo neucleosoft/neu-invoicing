@@ -582,8 +582,25 @@ declare global {
         onAuthInvalidated: (callback: () => void) => () => void
       }
       sync: {
-        syncNow: () => Promise<any>
         getSyncStatus: () => Promise<SyncStatus>
+        checkCloudBackup: () => Promise<{ exists: boolean; modifiedTime?: string; size?: number }>
+        syncState: () => Promise<{
+          cloudExists: boolean
+          localChanged: boolean
+          cloudChanged: boolean
+          isConflict: boolean
+          firstSync: boolean
+          cloudModifiedTime?: string
+          cloudSize?: number
+        }>
+        upload: () => Promise<{ success: boolean; error?: string }>
+        download: () => Promise<{ success: boolean; error?: string }>
+        getBackupInfo: () => Promise<{
+          cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
+          thisDeviceLastUpload: string | null
+          backupFrequency: 'off' | 'daily' | 'weekly' | 'monthly'
+        }>
+        setBackupFrequency: (freq: 'off' | 'daily' | 'weekly' | 'monthly') => Promise<{ success: boolean }>
         onSyncStatusChange: (callback: (status: SyncStatus) => void) => void
       }
       company: {

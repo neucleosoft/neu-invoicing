@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { triggerSyncAfterChange } from '../sync'
 
 // Idempotent migration: copy legacy `Party` rows with type='SUPPLIER' into the
 // Supplier table, then delete the originals when safe. Skips any Party row
@@ -88,7 +87,6 @@ export async function migrateLegacySuppliersFromParty(): Promise<void> {
       console.log(
         `[migrate-suppliers] scanned=${legacyRows.length} created=${created} skippedDup=${skipped} kept=${kept} deleted=${deleted}`,
       )
-      await triggerSyncAfterChange()
     }
   } catch (err) {
     console.error('Legacy supplier migration failed:', err)
@@ -164,7 +162,6 @@ export const setupSupplierHandlers = () => {
         }
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: supplier }
     } catch (error) {
       return {
@@ -200,7 +197,6 @@ export const setupSupplierHandlers = () => {
         }
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: supplier }
     } catch (error) {
       return {
@@ -244,7 +240,6 @@ export const setupSupplierHandlers = () => {
         where: { id }
       })
 
-      await triggerSyncAfterChange()
       return { success: true }
     } catch (error) {
       return {

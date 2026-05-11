@@ -6,7 +6,7 @@ import fs from 'fs'
 import { app, BrowserWindow, protocol } from 'electron'
 import { setupDatabase } from './database'
 import { setupAuthHandlers } from './auth'
-import { setupSyncHandlers } from './sync'
+import { setupSyncHandlers, startBackupScheduler } from './sync'
 import { setupCustomerHandlers } from './handlers/customer'
 import { setupSupplierHandlers, migrateLegacySuppliersFromParty } from './handlers/supplier'
 import { setupSupplierItemHandlers } from './handlers/supplierItem'
@@ -134,6 +134,10 @@ app.whenReady().then(async () => {
   // table with type='SUPPLIER'. Move them into the dedicated Supplier table.
   // Idempotent — no-op once everything's been migrated.
   migrateLegacySuppliersFromParty()
+
+  // Kick off scheduled-backup watchdog. Runs an immediate due-check, then
+  // ticks every hour for as long as the app is open.
+  startBackupScheduler()
 
   createWindow()
 

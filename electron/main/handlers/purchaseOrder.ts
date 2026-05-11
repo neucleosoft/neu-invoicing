@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { triggerSyncAfterChange } from '../sync'
 
 // Mirrors normalizeItemName in purchase.ts so dedupe behavior is consistent
 // across PO and Bill flows. If a PO line references a SupplierItem by id, use
@@ -181,7 +180,6 @@ export const setupPurchaseOrderHandlers = () => {
         })
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: order }
     } catch (error) {
       return {
@@ -252,7 +250,6 @@ export const setupPurchaseOrderHandlers = () => {
         })
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: order }
     } catch (error) {
       return {
@@ -265,7 +262,6 @@ export const setupPurchaseOrderHandlers = () => {
   ipcMain.handle('purchaseOrder:delete', async (_, id: string) => {
     try {
       await prisma.purchaseOrder.delete({ where: { id } })
-      await triggerSyncAfterChange()
       return { success: true }
     } catch (error) {
       return {
@@ -336,7 +332,6 @@ export const setupPurchaseOrderHandlers = () => {
           })
         })
 
-        await triggerSyncAfterChange()
         return { success: true, data: order }
       } catch (error) {
         return {
