@@ -19,7 +19,9 @@ import {
 } from '../utils/pdfmakePurchaseOrder'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import DownloadMenu from '../components/DownloadMenu'
+import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import { DispatchOpts, TableData } from '../utils/downloadHelpers'
+import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename } from '../utils/bulkDownloadPdfs'
 import {
   PO_SPECIAL_INSTRUCTIONS_DEFAULT,
   PO_GENERAL_TERMS_DEFAULT,
@@ -93,6 +95,10 @@ const PurchaseOrders = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [catalog, setCatalog] = useState<CatalogItem[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [dateFilter, setDateFilter] = useState<'all' | '7d' | '1m' | '1q' | '1y' | 'custom'>('all')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
+  const [bulkDownloading, setBulkDownloading] = useState(false)
 
   const [formData, setFormData] = useState({
     supplierId: '',
@@ -293,6 +299,121 @@ const PurchaseOrders = () => {
       it.total || 0,
     ])
     return { baseName: buildPurchaseOrderFilename(data).replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+  }
+
+  const handleBulkDownloadPdfs = async (matching: PurchaseOrder[]) => {
+    if (matching.length === 0) {
+      toast.info('No purchase orders to download')
+      return
+    }
+    const partyName = matching[0]?.supplier?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const items = matching.map(o => ({
+        id: o.id,
+        filename: `${o.orderNumber.replace(/\//g, '_')}.pdf`,
+      }))
+      const result = await bulkDownloadPdfs({
+        items,
+        zipFilename: buildZipFilename('Purchase_Orders', partyName),
+        getBytes: async (id) => {
+          const data = await loadPOPDFData(id)
+          if (!data) return null
+          return await getPurchaseOrderPDFBytes(data)
+        },
+      })
+      if (result.added > 0) {
+        toast.success(`Downloaded ${result.added} PDF${result.added === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}`)
+      } else {
+        toast.error('Failed to generate any PDFs')
+      }
+    } catch (error) {
+      console.error('Bulk PDF download error:', error)
+      toast.error('Failed to bulk-download PDFs')
+    } finally {
+      setBulkDownloading(false)
+    }
+  }
+
+  const handleBulkDownloadExcel = async (matching: PurchaseOrder[]) => {
+    if (matching.length === 0) {
+      toast.info('No purchase orders to download')
+      return
+    }
+    const partyName = matching[0]?.supplier?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const headers = [
+        'Order #', 'Date', 'Expected', 'Supplier', 'GSTIN',
+        'Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount',
+        'Subtotal', 'Tax', 'Total', 'Status',
+      ]
+      const rows: (string | number)[][] = []
+      for (const o of matching) {
+        let items: any[] = (o as any).items || []
+        if (!items.length) {
+          const res = await window.electronAPI.purchaseOrder.getById(o.id)
+          if (res.success && res.data) items = (res.data as any).items || []
+        }
+        const dateStr = o.orderDate ? new Date(o.orderDate).toLocaleDateString('en-GB') : ''
+        const expectedStr = (o as any).expectedDate ? new Date((o as any).expectedDate).toLocaleDateString('en-GB') : ''
+        const trailer: (string | number)[] = [
+          (o as any).subtotal || 0,
+          (o as any).taxAmount || 0,
+          o.totalAmount || 0,
+          o.status || '',
+        ]
+        if (items.length === 0) {
+          rows.push([
+            o.orderNumber || '',
+            dateStr,
+            expectedStr,
+            o.supplier?.name || '',
+            (o.supplier as any)?.taxId || '',
+            '', '', 0, 0, 0, 0, 0,
+            ...trailer,
+          ])
+          continue
+        }
+        for (const it of items) {
+          rows.push([
+            o.orderNumber || '',
+            dateStr,
+            expectedStr,
+            o.supplier?.name || '',
+            (o.supplier as any)?.taxId || '',
+            it.supplierItem?.name || it.item?.name || '',
+            it.hsnCode || it.supplierItem?.hsnCode || it.item?.hsnCode || '',
+            it.quantity || 0,
+            it.rate || 0,
+            it.discount || 0,
+            it.taxRate || 0,
+            it.total || 0,
+            ...trailer,
+          ])
+        }
+      }
+
+      const today = new Date().toISOString().slice(0, 10)
+      const filename = `Purchase_Orders_${(partyName || 'all').replace(/[^a-z0-9]+/gi, '_')}_${today}.xlsx`
+      await bulkDownloadExcel({
+        filename,
+        sheets: [{
+          name: 'Purchase Orders',
+          meta: [['Generated', new Date().toLocaleString()]],
+          headers,
+          rows,
+        }],
+      })
+      toast.success(`Exported ${matching.length} order${matching.length === 1 ? '' : 's'} to Excel`)
+    } catch (error) {
+      console.error('Bulk Excel error:', error)
+      toast.error('Failed to bulk-download Excel')
+    } finally {
+      setBulkDownloading(false)
+    }
   }
 
   const buildDownloadOpts = async (id: string): Promise<DispatchOpts> => {
@@ -533,14 +654,41 @@ const PurchaseOrders = () => {
 
   const totals = calculateTotals()
 
+  const getDateRange = (): { start: Date | null; end: Date | null } => {
+    if (dateFilter === 'all') return { start: null, end: null }
+    if (dateFilter === 'custom') {
+      const start = customStart ? new Date(customStart) : null
+      const end = customEnd ? new Date(customEnd) : null
+      if (start) start.setHours(0, 0, 0, 0)
+      if (end) end.setHours(23, 59, 59, 999)
+      return { start, end }
+    }
+    const end = new Date()
+    end.setHours(23, 59, 59, 999)
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    if (dateFilter === '7d') start.setDate(start.getDate() - 6)
+    else if (dateFilter === '1m') start.setDate(start.getDate() - 29)
+    else if (dateFilter === '1q') start.setMonth(start.getMonth() - 3)
+    else if (dateFilter === '1y') start.setDate(start.getDate() - 364)
+    return { start, end }
+  }
+
+  const { start: dateStart, end: dateEnd } = getDateRange()
+
   const filteredOrders = orders.filter((o) => {
-    if (!searchQuery.trim()) return true
-    const q = searchQuery.toLowerCase()
-    return (
-      o.orderNumber?.toLowerCase().includes(q) ||
-      o.supplier?.name?.toLowerCase().includes(q) ||
-      false
-    )
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase()
+      const matches = (o.orderNumber?.toLowerCase().includes(q)) ||
+        (o.supplier?.name?.toLowerCase().includes(q))
+      if (!matches) return false
+    }
+    if (dateStart || dateEnd) {
+      const d = new Date(o.orderDate)
+      if (dateStart && d < dateStart) return false
+      if (dateEnd && d > dateEnd) return false
+    }
+    return true
   })
 
   return (
@@ -550,25 +698,65 @@ const PurchaseOrders = () => {
         <button onClick={() => setShowModal(true)} className="btn btn-primary">+ New Purchase Order</button>
       </div>
 
-      <div>
+      <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
-          className="input max-w-md"
+          className="input max-w-md flex-1 min-w-[240px]"
           placeholder="Search by order number or supplier name..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
+        <select
+          className="input w-auto"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}
+        >
+          <option value="all">All Dates</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="1m">Last Month</option>
+          <option value="1q">Last Quarter</option>
+          <option value="1y">Last Year</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        {dateFilter === 'custom' && (
+          <>
+            <DateInput
+              className="input w-auto"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+            />
+            <span className="text-gray-500 dark:text-gray-400">to</span>
+            <DateInput
+              className="input w-auto"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+            />
+          </>
+        )}
+        {dateFilter !== 'all' && (
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            {filteredOrders.length} {filteredOrders.length === 1 ? 'order' : 'orders'}
+          </span>
+        )}
+        {filteredOrders.length > 0 && (
+          <BulkDownloadMenu
+            count={filteredOrders.length}
+            busy={bulkDownloading}
+            onPdfs={() => handleBulkDownloadPdfs(filteredOrders)}
+            onExcel={() => handleBulkDownloadExcel(filteredOrders)}
+          />
+        )}
       </div>
 
       <div className="card">
         {loading ? (
           <TableSkeleton rows={6} columns={6} />
         ) : filteredOrders.length === 0 ? (
-          searchQuery.trim() ? (
+          searchQuery.trim() || dateFilter !== 'all' ? (
             <EmptyState
               icon={SearchIcon}
-              title="No purchase orders match your search"
-              description={`Nothing matched "${searchQuery}".`}
+              title="No purchase orders match your filters"
+              description={searchQuery.trim() ? `Nothing matched "${searchQuery}".` : 'No purchase orders in this date range.'}
             />
           ) : (
             <EmptyState

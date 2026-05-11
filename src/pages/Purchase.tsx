@@ -21,7 +21,9 @@ import {
 } from '../utils/pdfmakePurchaseBill'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import DownloadMenu from '../components/DownloadMenu'
+import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import { DispatchOpts, TableData } from '../utils/downloadHelpers'
+import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename } from '../utils/bulkDownloadPdfs'
 
 interface Item {
   id: string
@@ -110,6 +112,10 @@ const Purchase = () => {
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [dateFilter, setDateFilter] = useState<'all' | '7d' | '1m' | '1q' | '1y' | 'custom'>('all')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
+  const [bulkDownloading, setBulkDownloading] = useState(false)
 
   // Form state
   const [formData, setFormData] = useState({
@@ -323,6 +329,122 @@ const Purchase = () => {
       it.total || 0,
     ])
     return { baseName: buildPurchaseBillFilename(data).replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+  }
+
+  const handleBulkDownloadPdfs = async (matching: PurchaseBill[]) => {
+    if (matching.length === 0) {
+      toast.info('No bills to download')
+      return
+    }
+    const partyName = matching[0]?.supplier?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const items = matching.map(b => ({
+        id: b.id,
+        filename: `${b.billNumber.replace(/\//g, '_')}.pdf`,
+      }))
+      const result = await bulkDownloadPdfs({
+        items,
+        zipFilename: buildZipFilename('Purchase_Bills', partyName),
+        getBytes: async (id) => {
+          const data = await loadPurchaseBillPDFData(id)
+          if (!data) return null
+          return await getPurchaseBillPDFBytes(data)
+        },
+      })
+      if (result.added > 0) {
+        toast.success(`Downloaded ${result.added} PDF${result.added === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}`)
+      } else {
+        toast.error('Failed to generate any PDFs')
+      }
+    } catch (error) {
+      console.error('Bulk PDF download error:', error)
+      toast.error('Failed to bulk-download PDFs')
+    } finally {
+      setBulkDownloading(false)
+    }
+  }
+
+  const handleBulkDownloadExcel = async (matching: PurchaseBill[]) => {
+    if (matching.length === 0) {
+      toast.info('No bills to download')
+      return
+    }
+    const partyName = matching[0]?.supplier?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const headers = [
+        'Bill #', 'Supplier Invoice #', 'Date', 'Supplier', 'GSTIN',
+        'Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount',
+        'Subtotal', 'Tax', 'Total', 'Paid', 'Balance', 'Status',
+      ]
+      const rows: (string | number)[][] = []
+      for (const b of matching) {
+        let items: any[] = (b as any).items || []
+        if (!items.length) {
+          const res = await window.electronAPI.purchase.getById(b.id)
+          if (res.success && res.data) items = (res.data as any).items || []
+        }
+        const dateStr = b.billDate ? new Date(b.billDate).toLocaleDateString('en-GB') : ''
+        const trailer: (string | number)[] = [
+          b.subtotal || 0,
+          b.taxAmount || 0,
+          b.totalAmount || 0,
+          b.amountPaid || 0,
+          b.balanceDue || 0,
+          b.status || '',
+        ]
+        if (items.length === 0) {
+          rows.push([
+            b.billNumber || '',
+            b.supplierInvoiceNumber || '',
+            dateStr,
+            b.supplier?.name || '',
+            b.supplier?.taxId || '',
+            '', '', 0, 0, 0, 0, 0,
+            ...trailer,
+          ])
+          continue
+        }
+        for (const it of items) {
+          rows.push([
+            b.billNumber || '',
+            b.supplierInvoiceNumber || '',
+            dateStr,
+            b.supplier?.name || '',
+            b.supplier?.taxId || '',
+            it.supplierItem?.name || it.item?.name || '',
+            it.hsnCode || it.supplierItem?.hsnCode || it.item?.hsnCode || '',
+            it.quantity || 0,
+            it.rate || 0,
+            it.discount || 0,
+            it.taxRate || 0,
+            it.total || 0,
+            ...trailer,
+          ])
+        }
+      }
+
+      const today = new Date().toISOString().slice(0, 10)
+      const filename = `Purchase_Bills_${(partyName || 'all').replace(/[^a-z0-9]+/gi, '_')}_${today}.xlsx`
+      await bulkDownloadExcel({
+        filename,
+        sheets: [{
+          name: 'Purchase Bills',
+          meta: [['Generated', new Date().toLocaleString()]],
+          headers,
+          rows,
+        }],
+      })
+      toast.success(`Exported ${matching.length} bill${matching.length === 1 ? '' : 's'} to Excel`)
+    } catch (error) {
+      console.error('Bulk Excel error:', error)
+      toast.error('Failed to bulk-download Excel')
+    } finally {
+      setBulkDownloading(false)
+    }
   }
 
   const buildDownloadOpts = async (id: string): Promise<DispatchOpts> => {
@@ -903,13 +1025,42 @@ const Purchase = () => {
 
   const totals = calculateTotals()
 
-  // Filter bills by search query
+  const getDateRange = (): { start: Date | null; end: Date | null } => {
+    if (dateFilter === 'all') return { start: null, end: null }
+    if (dateFilter === 'custom') {
+      const start = customStart ? new Date(customStart) : null
+      const end = customEnd ? new Date(customEnd) : null
+      if (start) start.setHours(0, 0, 0, 0)
+      if (end) end.setHours(23, 59, 59, 999)
+      return { start, end }
+    }
+    const end = new Date()
+    end.setHours(23, 59, 59, 999)
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    if (dateFilter === '7d') start.setDate(start.getDate() - 6)
+    else if (dateFilter === '1m') start.setDate(start.getDate() - 29)
+    else if (dateFilter === '1q') start.setMonth(start.getMonth() - 3)
+    else if (dateFilter === '1y') start.setDate(start.getDate() - 364)
+    return { start, end }
+  }
+
+  const { start: dateStart, end: dateEnd } = getDateRange()
+
+  // Filter bills by search query and date range
   const filteredBills = bills.filter((bill) => {
-    if (!searchQuery.trim()) return true
-    const query = searchQuery.toLowerCase()
-    const matchesNumber = bill.billNumber?.toLowerCase().includes(query)
-    const matchesParty = bill.supplier?.name?.toLowerCase().includes(query)
-    return matchesNumber || matchesParty
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      const matchesNumber = bill.billNumber?.toLowerCase().includes(query)
+      const matchesParty = bill.supplier?.name?.toLowerCase().includes(query)
+      if (!matchesNumber && !matchesParty) return false
+    }
+    if (dateStart || dateEnd) {
+      const d = new Date(bill.billDate)
+      if (dateStart && d < dateStart) return false
+      if (dateEnd && d > dateEnd) return false
+    }
+    return true
   })
 
   return (
@@ -919,15 +1070,55 @@ const Purchase = () => {
         <button onClick={() => setShowModal(true)} className="btn btn-primary">+ New Purchase Bill</button>
       </div>
 
-      {/* Search Input */}
-      <div>
+      {/* Search + Date Filter */}
+      <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
-          className="input max-w-md"
+          className="input max-w-md flex-1 min-w-[240px]"
           placeholder="Search by bill number or supplier name..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
+        <select
+          className="input w-auto"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}
+        >
+          <option value="all">All Dates</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="1m">Last Month</option>
+          <option value="1q">Last Quarter</option>
+          <option value="1y">Last Year</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        {dateFilter === 'custom' && (
+          <>
+            <DateInput
+              className="input w-auto"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+            />
+            <span className="text-gray-500 dark:text-gray-400">to</span>
+            <DateInput
+              className="input w-auto"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+            />
+          </>
+        )}
+        {dateFilter !== 'all' && (
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            {filteredBills.length} {filteredBills.length === 1 ? 'bill' : 'bills'}
+          </span>
+        )}
+        {filteredBills.length > 0 && (
+          <BulkDownloadMenu
+            count={filteredBills.length}
+            busy={bulkDownloading}
+            onPdfs={() => handleBulkDownloadPdfs(filteredBills)}
+            onExcel={() => handleBulkDownloadExcel(filteredBills)}
+          />
+        )}
       </div>
 
       {/* Bills Table */}
@@ -935,11 +1126,11 @@ const Purchase = () => {
         {loading ? (
           <TableSkeleton rows={6} columns={6} />
         ) : filteredBills.length === 0 ? (
-          searchQuery.trim() ? (
+          searchQuery.trim() || dateFilter !== 'all' ? (
             <EmptyState
               icon={SearchIcon}
-              title="No bills match your search"
-              description={`Nothing matched "${searchQuery}".`}
+              title="No bills match your filters"
+              description={searchQuery.trim() ? `Nothing matched "${searchQuery}".` : 'No bills in this date range.'}
             />
           ) : (
             <EmptyState
