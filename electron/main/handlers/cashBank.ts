@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { triggerSyncAfterChange } from '../sync'
 
 export const setupCashBankHandlers = () => {
   const prisma = getPrisma()
@@ -49,7 +48,6 @@ export const setupCashBankHandlers = () => {
         }
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: account }
     } catch (error) {
       return {
@@ -73,7 +71,6 @@ export const setupCashBankHandlers = () => {
         }
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: account }
     } catch (error) {
       return {
@@ -98,7 +95,6 @@ export const setupCashBankHandlers = () => {
         where: { id }
       })
 
-      await triggerSyncAfterChange()
       return { success: true }
     } catch (error) {
       return {
@@ -158,7 +154,6 @@ export const setupCashBankHandlers = () => {
         }
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: updated }
     } catch (error) {
       return {

@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { triggerSyncAfterChange } from '../sync'
 
 export const setupSupplierItemHandlers = () => {
   const prisma = getPrisma()
@@ -59,7 +58,6 @@ export const setupSupplierItemHandlers = () => {
           linkedItemId: data.linkedItemId || null
         }
       })
-      await triggerSyncAfterChange()
       return { success: true, data: item }
     } catch (error) {
       return {
@@ -83,7 +81,6 @@ export const setupSupplierItemHandlers = () => {
           linkedItemId: data.linkedItemId ?? null
         }
       })
-      await triggerSyncAfterChange()
       return { success: true, data: item }
     } catch (error) {
       return {
@@ -107,7 +104,6 @@ export const setupSupplierItemHandlers = () => {
         }
       }
       await prisma.supplierItem.delete({ where: { id } })
-      await triggerSyncAfterChange()
       return { success: true }
     } catch (error) {
       return {

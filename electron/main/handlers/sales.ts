@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { triggerSyncAfterChange } from '../sync'
 import {
   buildSalesDocumentValues,
   generateNextInvoiceNumber,
@@ -146,7 +145,6 @@ export const setupSalesHandlers = () => {
         return created
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: invoice }
     } catch (error) {
       return {
@@ -253,7 +251,6 @@ export const setupSalesHandlers = () => {
         return updated
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: invoice }
     } catch (error) {
       return {
@@ -313,7 +310,6 @@ export const setupSalesHandlers = () => {
         where: { id }
       })
 
-      await triggerSyncAfterChange()
       return { success: true }
     } catch (error) {
       return {

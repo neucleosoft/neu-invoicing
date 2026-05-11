@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { triggerSyncAfterChange } from '../sync'
 
 export const setupCreditNoteHandlers = () => {
   const prisma = getPrisma()
@@ -198,7 +197,6 @@ export const setupCreditNoteHandlers = () => {
         return created
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: note }
     } catch (error) {
       return {
@@ -393,7 +391,6 @@ export const setupCreditNoteHandlers = () => {
         return updated
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: note }
     } catch (error) {
       return {
@@ -455,7 +452,6 @@ export const setupCreditNoteHandlers = () => {
         })
       })
 
-      await triggerSyncAfterChange()
       return { success: true }
     } catch (error) {
       return {

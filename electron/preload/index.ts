@@ -16,8 +16,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
 
   // Sync
   sync: {
-    syncNow: () => ipcRenderer.invoke("sync:syncNow"),
     getSyncStatus: () => ipcRenderer.invoke("sync:getSyncStatus"),
+    checkCloudBackup: () => ipcRenderer.invoke("sync:checkCloudBackup"),
+    syncState: () => ipcRenderer.invoke("sync:syncState"),
+    upload: () => ipcRenderer.invoke("sync:upload"),
+    download: () => ipcRenderer.invoke("sync:download"),
+    getBackupInfo: () => ipcRenderer.invoke("sync:getBackupInfo"),
+    setBackupFrequency: (freq: "off" | "daily" | "weekly" | "monthly") =>
+      ipcRenderer.invoke("sync:setBackupFrequency", freq),
     onSyncStatusChange: (callback: (status: any) => void) => {
       ipcRenderer.on("sync:statusChanged", (_, status) => callback(status));
     },

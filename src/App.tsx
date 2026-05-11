@@ -24,6 +24,7 @@ import CreditNotes from './pages/CreditNotes'
 import CashBank from './pages/CashBank'
 import CustomerStatement from './pages/CustomerStatement'
 import Settings from './pages/Settings'
+import RestoreBackupDialog from './components/RestoreBackupDialog'
 
 type BootStage = 'connecting' | 'syncing' | 'workspace'
 
@@ -37,32 +38,37 @@ function App() {
   const { authStatus, setAuthStatus, company, setCompany, setSyncStatus } = useStore()
   const [initializing, setInitializing] = useState(true)
   const [bootStage, setBootStage] = useState<BootStage>('connecting')
+  const [backupInfo, setBackupInfo] = useState<{ modifiedTime?: string; size?: number } | null>(null)
+  const [isRestoring, setIsRestoring] = useState(false)
 
   useEffect(() => {
     const checkAuth = async () => {
       try {
         if (!window.electronAPI) {
-          setAuthStatus({ isAuthenticated: false, user: null });
+          setAuthStatus({ isAuthenticated: false, user: null })
           return
         }
         const status = await window.electronAPI.auth.getAuthStatus()
         setAuthStatus(status)
 
         if (status.isAuthenticated) {
-          // Sync first — if cloud has newer data, download it before checking company
-          // This way we don't show onboarding when cloud already has the user's data
-          setBootStage('syncing')
-          try {
-            await window.electronAPI.sync.syncNow()
-          } catch (syncError) {
-            // Sync failed (maybe offline) — no problem, continue with local data
-            console.log('Sync failed, continuing with local data:', syncError)
-          }
-
           setBootStage('workspace')
           const companyResult = await window.electronAPI.company.get()
           if (companyResult.success && companyResult.data) {
+            // Returning user with local data — no auto-sync, no cloud check.
+            // The Back Up Now button in Settings is the only path that touches Drive.
             setCompany(companyResult.data)
+          } else {
+            // No local company yet. Before falling into onboarding, see if a
+            // cloud backup exists for this Google account and offer to restore.
+            try {
+              const backup = await window.electronAPI.sync.checkCloudBackup()
+              if (backup.exists) {
+                setBackupInfo({ modifiedTime: backup.modifiedTime, size: backup.size })
+              }
+            } catch (e) {
+              console.log('checkCloudBackup failed, proceeding to onboarding:', e)
+            }
           }
 
           const syncStatus = await window.electronAPI.sync.getSyncStatus()
@@ -81,6 +87,26 @@ function App() {
 
     checkAuth()
   }, [setAuthStatus, setCompany, setSyncStatus])
+
+  const handleRestore = async () => {
+    setIsRestoring(true)
+    try {
+      const result = await window.electronAPI.sync.download()
+      if (!result.success) {
+        console.error('Restore failed:', result.error)
+        return
+      }
+      const companyResult = await window.electronAPI.company.get()
+      if (companyResult.success && companyResult.data) {
+        setCompany(companyResult.data)
+      }
+      setBackupInfo(null)
+    } catch (error) {
+      console.error('Restore failed:', error)
+    } finally {
+      setIsRestoring(false)
+    }
+  }
 
   // Simple test - return basic HTML first
   if (!window.electronAPI) {
@@ -144,8 +170,23 @@ function App() {
     )
   }
 
-  // If authenticated but no company exists, redirect to onboarding
+  // If authenticated but no company exists:
+  //  - if a cloud backup was found for this account, prompt to restore
+  //  - otherwise fall through to onboarding
   if (!company) {
+    if (backupInfo) {
+      return (
+        <ToastProvider><ConfirmProvider>
+          <RestoreBackupDialog
+            open
+            modifiedTime={backupInfo.modifiedTime}
+            size={backupInfo.size}
+            isRestoring={isRestoring}
+            onRestore={handleRestore}
+          />
+        </ConfirmProvider></ToastProvider>
+      )
+    }
     return (
       <ToastProvider><ConfirmProvider>
         <Router>

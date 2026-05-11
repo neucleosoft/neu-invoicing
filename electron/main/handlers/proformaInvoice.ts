@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { triggerSyncAfterChange } from '../sync'
 import {
   buildSalesDocumentValues,
   convertProformaInvoiceToInvoice,
@@ -101,7 +100,6 @@ export const setupProformaInvoiceHandlers = () => {
         })
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: proformaInvoice }
     } catch (error) {
       return {
@@ -174,7 +172,6 @@ export const setupProformaInvoiceHandlers = () => {
         })
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: proformaInvoice }
     } catch (error) {
       return {
@@ -198,7 +195,6 @@ export const setupProformaInvoiceHandlers = () => {
         where: { id }
       })
 
-      await triggerSyncAfterChange()
       return { success: true }
     } catch (error) {
       return {
@@ -211,7 +207,6 @@ export const setupProformaInvoiceHandlers = () => {
   ipcMain.handle('proformaInvoice:convertToInvoice', async (_, id: string) => {
     try {
       const invoice = await convertProformaInvoiceToInvoice(prisma, id)
-      await triggerSyncAfterChange()
       return { success: true, data: invoice }
     } catch (error) {
       return {

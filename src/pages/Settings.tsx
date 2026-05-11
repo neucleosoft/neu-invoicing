@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { Company } from '../types'
 import { InvoiceTemplate, TEMPLATE_INFO } from '../utils/generateInvoicePDF'
+import { AlertTriangle } from 'lucide-react'
 import { useToast } from '../components/ToastContext'
+import { useConfirm } from '../components/ConfirmDialogContext'
+import { useManualBackup } from '../hooks/useManualBackup'
+import SyncConflictDialog from '../components/SyncConflictDialog'
 import {
   PO_SPECIAL_INSTRUCTIONS_DEFAULT,
   PO_GENERAL_TERMS_DEFAULT,
@@ -13,7 +17,15 @@ type SettingsTab = 'company' | 'templates' | 'tax' | 'po' | 'backup'
 
 const Settings = () => {
   const { company, setCompany } = useStore()
+  const { triggerBackup, isWorking: isBackingUp, conflictDialogProps } = useManualBackup()
+  const confirm = useConfirm()
   const [activeTab, setActiveTab] = useState<SettingsTab>('company')
+  const [backupInfo, setBackupInfo] = useState<{
+    cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
+    thisDeviceLastUpload: string | null
+    backupFrequency: 'off' | 'daily' | 'weekly' | 'monthly'
+  } | null>(null)
+  const [isRestoring, setIsRestoring] = useState(false)
   const [formData, setFormData] = useState<Partial<Company>>({
     name: '',
     address: '',
@@ -64,6 +76,73 @@ const Settings = () => {
     }
     checkLogo()
   }, [company])
+
+  // Pull backup status whenever the user opens the Backup tab, and again every
+  // time isBackingUp flips (catches the "just finished syncing" state so the
+  // timestamps update without the user having to leave and come back).
+  useEffect(() => {
+    if (activeTab !== 'backup') return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const info = await window.electronAPI.sync.getBackupInfo()
+        if (!cancelled) setBackupInfo(info)
+      } catch (e) {
+        console.error('Failed to load backup info:', e)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [activeTab, isBackingUp])
+
+  const handleFrequencyChange = async (freq: 'off' | 'daily' | 'weekly' | 'monthly') => {
+    await window.electronAPI.sync.setBackupFrequency(freq)
+    const info = await window.electronAPI.sync.getBackupInfo()
+    setBackupInfo(info)
+  }
+
+  const formatBackupDate = (iso: string): string => {
+    const d = new Date(iso)
+    return d.toLocaleString(undefined, {
+      year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
+    })
+  }
+
+  // Power-user / disaster-recovery: pull the cloud copy down and replace local.
+  // Always destructive of any unsynced local changes, so we gate on an explicit
+  // confirm that names the backup's device + timestamp. Reloads the renderer
+  // after a successful download so all in-memory state (Zustand store, etc.)
+  // is rebuilt against the fresh DB instead of staying stale.
+  const handleRestoreFromCloud = async () => {
+    if (!backupInfo?.cloudBackup) {
+      toast.info('No cloud backup found yet. Click Sync Now first to create one.')
+      return
+    }
+    const ok = await confirm({
+      title: 'Restore from cloud backup?',
+      message: `This will REPLACE all your local data with the cloud backup from ${backupInfo.cloudBackup.deviceId} at ${formatBackupDate(backupInfo.cloudBackup.lastSyncTimestamp)}. Any unsynced local changes on this device will be lost.`,
+      confirmText: 'Replace local data',
+      cancelText: 'Cancel',
+      danger: true,
+    })
+    if (!ok) return
+
+    setIsRestoring(true)
+    try {
+      const result = await window.electronAPI.sync.download()
+      if (result.success) {
+        toast.success('Restored from cloud — reloading…')
+        // Brief delay so the toast is visible before the reload tears it down.
+        setTimeout(() => window.location.reload(), 800)
+      } else {
+        toast.error(result.error || 'Restore failed')
+        setIsRestoring(false)
+      }
+    } catch (e) {
+      console.error('Restore error:', e)
+      toast.error('Restore failed')
+      setIsRestoring(false)
+    }
+  }
 
   const loadTemplate = async () => {
     try {
@@ -584,15 +663,74 @@ const Settings = () => {
               <h2 className="text-2xl font-bold mb-6">Data & Backup</h2>
               <div className="space-y-6">
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
-                  <h3 className="font-semibold mb-2">Google Drive Sync</h3>
+                  <h3 className="font-semibold mb-2">Google Drive Backup</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Your data is automatically synced to Google Drive when you're signed in.
-                    This ensures your data is backed up and accessible across devices.
+                    Your data is backed up to your private Google Drive. Use Sync Now to back up immediately, or set an automatic schedule.
                   </p>
-                  <button className="btn btn-outline" onClick={() => window.electronAPI.sync.syncNow()}>
-                    Sync Now
+
+                  <div className="bg-white dark:bg-gray-800 rounded-lg p-3 mb-4 space-y-1.5">
+                    {backupInfo?.cloudBackup ? (
+                      <>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500 dark:text-gray-400">Last cloud backup</span>
+                          <span className="font-medium text-gray-900 dark:text-gray-100 text-right">
+                            {formatBackupDate(backupInfo.cloudBackup.lastSyncTimestamp)} · {backupInfo.cloudBackup.deviceId}
+                          </span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-gray-500 dark:text-gray-400">This device's last upload</span>
+                          <span className="font-medium text-gray-900 dark:text-gray-100">
+                            {backupInfo.thisDeviceLastUpload ? formatBackupDate(backupInfo.thisDeviceLastUpload) : 'Never'}
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-xs text-gray-500 dark:text-gray-400">No backup yet — click Sync Now to create one.</div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-3 mb-4">
+                    <label htmlFor="backup-frequency" className="text-sm text-gray-700 dark:text-gray-300">
+                      Automatic backup:
+                    </label>
+                    <select
+                      id="backup-frequency"
+                      value={backupInfo?.backupFrequency || 'off'}
+                      onChange={(e) => handleFrequencyChange(e.target.value as 'off' | 'daily' | 'weekly' | 'monthly')}
+                      className="input w-auto"
+                    >
+                      <option value="off">Off</option>
+                      <option value="daily">Daily</option>
+                      <option value="weekly">Weekly</option>
+                      <option value="monthly">Monthly</option>
+                    </select>
+                  </div>
+
+                  <button
+                    className="btn btn-primary"
+                    onClick={triggerBackup}
+                    disabled={isBackingUp || isRestoring}
+                  >
+                    {isBackingUp ? 'Syncing…' : 'Sync Now'}
                   </button>
+
+                  <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <div className="flex items-start gap-2 mb-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-600 dark:text-red-400" />
+                      <div className="text-xs text-red-800 dark:text-red-200">
+                        <strong>Destructive action.</strong> Restoring overwrites your local data with the cloud copy. Any unsynced changes on this device will be permanently lost. This cannot be undone.
+                      </div>
+                    </div>
+                    <button
+                      className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 disabled:cursor-wait"
+                      onClick={handleRestoreFromCloud}
+                      disabled={isBackingUp || isRestoring}
+                    >
+                      {isRestoring ? 'Restoring…' : 'Restore from cloud…'}
+                    </button>
+                  </div>
                 </div>
+                <SyncConflictDialog {...conflictDialogProps} />
 
                 <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-200 dark:border-yellow-800">
                   <h3 className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Local Database</h3>

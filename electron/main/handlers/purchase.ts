@@ -1,6 +1,5 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { triggerSyncAfterChange } from '../sync'
 
 // Normalize a SupplierItem name for fuzzy-but-bounded matching. Must stay in sync with
 // the inline normalizer in src/pages/Purchase.tsx — the frontend pre-selects on extraction
@@ -611,7 +610,6 @@ export const setupPurchaseHandlers = () => {
         return created
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: bill }
     } catch (error) {
       return {
@@ -745,7 +743,6 @@ export const setupPurchaseHandlers = () => {
         return updatedBill
       })
 
-      await triggerSyncAfterChange()
       return { success: true, data: bill }
     } catch (error) {
       return {
@@ -810,7 +807,6 @@ export const setupPurchaseHandlers = () => {
         })
       })
 
-      await triggerSyncAfterChange()
       return { success: true }
     } catch (error) {
       return {
