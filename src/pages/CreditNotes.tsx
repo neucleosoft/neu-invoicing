@@ -5,7 +5,7 @@ import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
-import { FileText } from 'lucide-react'
+import { FileText, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
 import { useStore } from '../store/useStore'
 import ShareMenu from '../components/ShareMenu'
@@ -17,7 +17,9 @@ import {
 } from '../utils/pdfmakeCreditNote'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import DownloadMenu from '../components/DownloadMenu'
+import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import { DispatchOpts, TableData } from '../utils/downloadHelpers'
+import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename } from '../utils/bulkDownloadPdfs'
 
 interface CreditDebitNote {
   id: string
@@ -105,6 +107,10 @@ const CreditNotes = () => {
   const [items, setItems] = useState<Item[]>([])
   const [partyInvoices, setPartyInvoices] = useState<PartyInvoice[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [dateFilter, setDateFilter] = useState<'all' | '7d' | '1m' | '1q' | '1y' | 'custom'>('all')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
+  const [bulkDownloading, setBulkDownloading] = useState(false)
   const toast = useToast()
   const confirm = useConfirm()
   const { company } = useStore()
@@ -275,6 +281,122 @@ const CreditNotes = () => {
       it.total || 0,
     ])
     return { baseName: buildCreditNoteFilename(data).replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+  }
+
+  const handleBulkDownloadPdfs = async (matching: CreditDebitNote[]) => {
+    if (matching.length === 0) {
+      toast.info('No notes to download')
+      return
+    }
+    const partyName = matching[0]?.customer?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const items = matching.map(n => ({
+        id: n.id,
+        filename: `${n.noteNumber.replace(/\//g, '_')}.pdf`,
+      }))
+      const result = await bulkDownloadPdfs({
+        items,
+        zipFilename: buildZipFilename('Credit_Debit_Notes', partyName),
+        getBytes: async (id) => {
+          const data = await loadCreditNotePDFData(id)
+          if (!data) return null
+          return await getCreditNotePDFBytes(data)
+        },
+      })
+      if (result.added > 0) {
+        toast.success(`Downloaded ${result.added} PDF${result.added === 1 ? '' : 's'}${result.failed ? ` (${result.failed} failed)` : ''}`)
+      } else {
+        toast.error('Failed to generate any PDFs')
+      }
+    } catch (error) {
+      console.error('Bulk PDF download error:', error)
+      toast.error('Failed to bulk-download PDFs')
+    } finally {
+      setBulkDownloading(false)
+    }
+  }
+
+  const handleBulkDownloadExcel = async (matching: CreditDebitNote[]) => {
+    if (matching.length === 0) {
+      toast.info('No notes to download')
+      return
+    }
+    const partyName = matching[0]?.customer?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const headers = [
+        'Note #', 'Date', 'Type', 'Customer', 'Reference Invoice',
+        'Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount',
+        'Subtotal', 'Tax', 'Total', 'Reason', 'Status',
+      ]
+      const rows: (string | number)[][] = []
+      for (const n of matching) {
+        let items: any[] = n.items || []
+        if (!items.length) {
+          const res = await window.electronAPI.creditNote.getById(n.id)
+          if (res.success && res.data) items = (res.data as any).items || []
+        }
+        const dateStr = n.noteDate ? new Date(n.noteDate).toLocaleDateString('en-GB') : ''
+        const typeLabel = n.type === 'CREDIT_NOTE' ? 'Credit Note' : 'Debit Note'
+        const trailer: (string | number)[] = [
+          n.subtotal || 0,
+          n.taxAmount || 0,
+          n.totalAmount || 0,
+          n.reason || '',
+          n.status || '',
+        ]
+        if (items.length === 0) {
+          rows.push([
+            n.noteNumber || '',
+            dateStr,
+            typeLabel,
+            n.customer?.name || '',
+            n.referenceInvoice?.invoiceNumber || '',
+            '', '', 0, 0, 0, 0, 0,
+            ...trailer,
+          ])
+          continue
+        }
+        for (const it of items) {
+          rows.push([
+            n.noteNumber || '',
+            dateStr,
+            typeLabel,
+            n.customer?.name || '',
+            n.referenceInvoice?.invoiceNumber || '',
+            it.item?.name || '',
+            it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+            it.quantity || 0,
+            it.rate || 0,
+            it.discount || 0,
+            it.taxRate || 0,
+            it.total || 0,
+            ...trailer,
+          ])
+        }
+      }
+
+      const today = new Date().toISOString().slice(0, 10)
+      const filename = `Credit_Debit_Notes_${(partyName || 'all').replace(/[^a-z0-9]+/gi, '_')}_${today}.xlsx`
+      await bulkDownloadExcel({
+        filename,
+        sheets: [{
+          name: 'Credit Debit Notes',
+          meta: [['Generated', new Date().toLocaleString()]],
+          headers,
+          rows,
+        }],
+      })
+      toast.success(`Exported ${matching.length} note${matching.length === 1 ? '' : 's'} to Excel`)
+    } catch (error) {
+      console.error('Bulk Excel error:', error)
+      toast.error('Failed to bulk-download Excel')
+    } finally {
+      setBulkDownloading(false)
+    }
   }
 
   const buildDownloadOpts = async (id: string): Promise<DispatchOpts> => {
@@ -489,13 +611,41 @@ const CreditNotes = () => {
     setShowModal(true)
   }
 
+  const getDateRange = (): { start: Date | null; end: Date | null } => {
+    if (dateFilter === 'all') return { start: null, end: null }
+    if (dateFilter === 'custom') {
+      const start = customStart ? new Date(customStart) : null
+      const end = customEnd ? new Date(customEnd) : null
+      if (start) start.setHours(0, 0, 0, 0)
+      if (end) end.setHours(23, 59, 59, 999)
+      return { start, end }
+    }
+    const end = new Date()
+    end.setHours(23, 59, 59, 999)
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    if (dateFilter === '7d') start.setDate(start.getDate() - 6)
+    else if (dateFilter === '1m') start.setDate(start.getDate() - 29)
+    else if (dateFilter === '1q') start.setMonth(start.getMonth() - 3)
+    else if (dateFilter === '1y') start.setDate(start.getDate() - 364)
+    return { start, end }
+  }
+
+  const { start: dateStart, end: dateEnd } = getDateRange()
+
   const filteredNotes = notes.filter(note => {
-    if (!searchQuery) return true
-    const query = searchQuery.toLowerCase()
-    return (
-      note.noteNumber.toLowerCase().includes(query) ||
-      (note.customer?.name || '').toLowerCase().includes(query)
-    )
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase()
+      const matches = note.noteNumber.toLowerCase().includes(query) ||
+        (note.customer?.name || '').toLowerCase().includes(query)
+      if (!matches) return false
+    }
+    if (dateStart || dateEnd) {
+      const d = new Date(note.noteDate)
+      if (dateStart && d < dateStart) return false
+      if (dateEnd && d > dateEnd) return false
+    }
+    return true
   })
 
   const totals = calculateTotals()
@@ -512,15 +662,55 @@ const CreditNotes = () => {
         </button>
       </div>
 
-      {/* Search */}
-      <div>
+      {/* Search + Date Filter */}
+      <div className="flex flex-wrap items-center gap-3">
         <input
           type="text"
-          className="input max-w-sm"
+          className="input max-w-sm flex-1 min-w-[240px]"
           placeholder="Search by note number or party name..."
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
+        <select
+          className="input w-auto"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}
+        >
+          <option value="all">All Dates</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="1m">Last Month</option>
+          <option value="1q">Last Quarter</option>
+          <option value="1y">Last Year</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        {dateFilter === 'custom' && (
+          <>
+            <DateInput
+              className="input w-auto"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+            />
+            <span className="text-gray-500 dark:text-gray-400">to</span>
+            <DateInput
+              className="input w-auto"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+            />
+          </>
+        )}
+        {dateFilter !== 'all' && (
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            {filteredNotes.length} {filteredNotes.length === 1 ? 'note' : 'notes'}
+          </span>
+        )}
+        {filteredNotes.length > 0 && (
+          <BulkDownloadMenu
+            count={filteredNotes.length}
+            busy={bulkDownloading}
+            onPdfs={() => handleBulkDownloadPdfs(filteredNotes)}
+            onExcel={() => handleBulkDownloadExcel(filteredNotes)}
+          />
+        )}
       </div>
 
       {/* Filter Tabs */}
@@ -541,12 +731,20 @@ const CreditNotes = () => {
       {/* Notes Table */}
       <div className="card">
         {filteredNotes.length === 0 ? (
-          <EmptyState
-            icon={FileText}
-            title="No credit/debit notes yet"
-            description="Issue credit or debit notes to adjust invoices and bills with automatic ledger entries."
-            action={{ label: '+ Create your first note', onClick: handleNewNote }}
-          />
+          searchQuery.trim() || dateFilter !== 'all' ? (
+            <EmptyState
+              icon={SearchIcon}
+              title="No notes match your filters"
+              description={searchQuery.trim() ? `Nothing matched "${searchQuery}".` : 'No notes in this date range.'}
+            />
+          ) : (
+            <EmptyState
+              icon={FileText}
+              title="No credit/debit notes yet"
+              description="Issue credit or debit notes to adjust invoices and bills with automatic ledger entries."
+              action={{ label: '+ Create your first note', onClick: handleNewNote }}
+            />
+          )
         ) : (
           <div className="overflow-auto max-h-[calc(100vh-280px)]">
             <table className="table">

@@ -5,7 +5,7 @@ import { getInvoicePDFBytes, InvoiceTemplate } from '../utils/generateInvoicePDF
 import DownloadMenu from '../components/DownloadMenu'
 import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import { DispatchOpts, TableData } from '../utils/downloadHelpers'
-import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
+import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename } from '../utils/bulkDownloadPdfs'
 import { formatInvoiceStatus, getDueCountdown, dueCountdownColorClass } from '../utils/invoiceStatus'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
@@ -61,11 +61,10 @@ const Sales = () => {
   const [items, setItems] = useState<Item[]>([])
   const [selectedTemplate, setSelectedTemplate] = useState<InvoiceTemplate>('classic')
   const [searchQuery, setSearchQuery] = useState('')
-  const [dateFilter, setDateFilter] = useState<'all' | '7d' | '1m' | '1y' | 'custom'>('all')
+  const [dateFilter, setDateFilter] = useState<'all' | '7d' | '1m' | '1q' | '1y' | 'custom'>('all')
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [bulkDownloading, setBulkDownloading] = useState(false)
-  const [bulkRange, setBulkRange] = useState<BulkRange>('all')
   const toast = useToast()
   const confirm = useConfirm()
   const { company } = useStore()
@@ -607,6 +606,7 @@ const Sales = () => {
     start.setHours(0, 0, 0, 0)
     if (dateFilter === '7d') start.setDate(start.getDate() - 6) // last 7 days inclusive of today
     else if (dateFilter === '1m') start.setDate(start.getDate() - 29) // last 30 days
+    else if (dateFilter === '1q') start.setMonth(start.getMonth() - 3) // last quarter
     else if (dateFilter === '1y') start.setDate(start.getDate() - 364) // last 365 days
     return { start, end }
   }
@@ -666,6 +666,7 @@ const Sales = () => {
           <option value="all">All Dates</option>
           <option value="7d">Last 7 Days</option>
           <option value="1m">Last Month</option>
+          <option value="1q">Last Quarter</option>
           <option value="1y">Last Year</option>
           <option value="custom">Custom Range</option>
         </select>
@@ -689,31 +690,14 @@ const Sales = () => {
             {filteredInvoices.length} {filteredInvoices.length === 1 ? 'invoice' : 'invoices'}
           </span>
         )}
-        {searchQuery.trim() && filteredInvoices.length > 0 && (() => {
-          const rangeStart = getBulkRangeStart(bulkRange)
-          const bulkFiltered = rangeStart
-            ? filteredInvoices.filter(inv => new Date(inv.invoiceDate) >= rangeStart)
-            : filteredInvoices
-          return (
-            <>
-              <select
-                className="input w-auto"
-                value={bulkRange}
-                onChange={(e) => setBulkRange(e.target.value as BulkRange)}
-              >
-                {BULK_RANGE_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <BulkDownloadMenu
-                count={bulkFiltered.length}
-                busy={bulkDownloading}
-                onPdfs={() => handleBulkDownloadPdfs(bulkFiltered)}
-                onExcel={() => handleBulkDownloadExcel(bulkFiltered)}
-              />
-            </>
-          )
-        })()}
+        {filteredInvoices.length > 0 && (
+          <BulkDownloadMenu
+            count={filteredInvoices.length}
+            busy={bulkDownloading}
+            onPdfs={() => handleBulkDownloadPdfs(filteredInvoices)}
+            onExcel={() => handleBulkDownloadExcel(filteredInvoices)}
+          />
+        )}
       </div>
 
       {/* Invoices Table */}

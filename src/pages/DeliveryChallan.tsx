@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { formatCurrency } from '../utils/currency'
 import { getChallanPDFBytes, buildChallanFilename } from '../utils/pdfmakeChallan'
 import DownloadMenu from '../components/DownloadMenu'
+import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import { DispatchOpts, TableData } from '../utils/downloadHelpers'
-import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
+import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
 import ShareMenu from '../components/ShareMenu'
@@ -93,8 +94,10 @@ const DeliveryChallan = () => {
   const [parties, setParties] = useState<Party[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [searchTerm, setSearchTerm] = useState('')
+  const [dateFilter, setDateFilter] = useState<'all' | '7d' | '1m' | '1q' | '1y' | 'custom'>('all')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
   const [bulkDownloading, setBulkDownloading] = useState(false)
-  const [bulkRange, setBulkRange] = useState<BulkRange>('all')
 
   // Form state
   const [formData, setFormData] = useState({
@@ -258,6 +261,84 @@ const DeliveryChallan = () => {
     } catch (error) {
       console.error('Bulk PDF download error:', error)
       toast.error('Failed to bulk-download PDFs')
+    } finally {
+      setBulkDownloading(false)
+    }
+  }
+
+  const handleBulkDownloadExcel = async (matching: Challan[]) => {
+    if (matching.length === 0) {
+      toast.info('No delivery challans to download')
+      return
+    }
+    const partyName = matching[0]?.customer?.name || searchTerm || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const headers = [
+        'Challan #', 'Date', 'Customer', 'Type',
+        'Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount',
+        'Subtotal', 'Tax', 'Total', 'Vehicle', 'Transport Mode',
+      ]
+      const rows: (string | number)[][] = []
+      for (const c of matching) {
+        let items: any[] = c.items || []
+        if (!items.length) {
+          const res = await window.electronAPI.challan.getById(c.id)
+          if (res.success && res.data) items = (res.data as any).items || []
+        }
+        const dateStr = c.challanDate ? new Date(c.challanDate).toLocaleDateString('en-GB') : ''
+        const trailer: (string | number)[] = [
+          c.subtotal || 0,
+          c.taxAmount || 0,
+          c.totalAmount || 0,
+          c.vehicleNumber || '',
+          c.transportMode || '',
+        ]
+        if (items.length === 0) {
+          rows.push([
+            c.challanNumber || '',
+            dateStr,
+            c.customer?.name || '',
+            c.status || '',
+            '', '', 0, 0, 0, 0, 0,
+            ...trailer,
+          ])
+          continue
+        }
+        for (const it of items) {
+          rows.push([
+            c.challanNumber || '',
+            dateStr,
+            c.customer?.name || '',
+            c.status || '',
+            it.item?.name || '',
+            it.hsnCode || (it.item as any)?.hsnCode || (it.item as any)?.skuHsn || '',
+            it.quantity || 0,
+            it.rate || 0,
+            it.discount || 0,
+            it.taxRate || 0,
+            it.total || 0,
+            ...trailer,
+          ])
+        }
+      }
+
+      const today = new Date().toISOString().slice(0, 10)
+      const filename = `Delivery_Challans_${(partyName || 'all').replace(/[^a-z0-9]+/gi, '_')}_${today}.xlsx`
+      await bulkDownloadExcel({
+        filename,
+        sheets: [{
+          name: 'Delivery Challans',
+          meta: [['Generated', new Date().toLocaleString()]],
+          headers,
+          rows,
+        }],
+      })
+      toast.success(`Exported ${matching.length} challan${matching.length === 1 ? '' : 's'} to Excel`)
+    } catch (error) {
+      console.error('Bulk Excel error:', error)
+      toast.error('Failed to bulk-download Excel')
     } finally {
       setBulkDownloading(false)
     }
@@ -478,14 +559,42 @@ const DeliveryChallan = () => {
 
   const totals = calculateTotals()
 
-  // Filter challans by search term
+  const getDateRange = (): { start: Date | null; end: Date | null } => {
+    if (dateFilter === 'all') return { start: null, end: null }
+    if (dateFilter === 'custom') {
+      const start = customStart ? new Date(customStart) : null
+      const end = customEnd ? new Date(customEnd) : null
+      if (start) start.setHours(0, 0, 0, 0)
+      if (end) end.setHours(23, 59, 59, 999)
+      return { start, end }
+    }
+    const end = new Date()
+    end.setHours(23, 59, 59, 999)
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    if (dateFilter === '7d') start.setDate(start.getDate() - 6)
+    else if (dateFilter === '1m') start.setDate(start.getDate() - 29)
+    else if (dateFilter === '1q') start.setMonth(start.getMonth() - 3)
+    else if (dateFilter === '1y') start.setDate(start.getDate() - 364)
+    return { start, end }
+  }
+
+  const { start: dateStart, end: dateEnd } = getDateRange()
+
+  // Filter challans by search term and date range
   const filteredChallans = challans.filter((challan) => {
-    if (!searchTerm) return true
-    const term = searchTerm.toLowerCase()
-    return (
-      challan.challanNumber.toLowerCase().includes(term) ||
-      (challan.customer?.name || '').toLowerCase().includes(term)
-    )
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase()
+      const matches = challan.challanNumber.toLowerCase().includes(term) ||
+        (challan.customer?.name || '').toLowerCase().includes(term)
+      if (!matches) return false
+    }
+    if (dateStart || dateEnd) {
+      const d = new Date(challan.challanDate)
+      if (dateStart && d < dateStart) return false
+      if (dateEnd && d > dateEnd) return false
+    }
+    return true
   })
 
   return (
@@ -509,42 +618,55 @@ const DeliveryChallan = () => {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
-        {searchTerm.trim() && filteredChallans.length > 0 && (() => {
-          const rangeStart = getBulkRangeStart(bulkRange)
-          const bulkFiltered = rangeStart
-            ? filteredChallans.filter(c => new Date(c.challanDate) >= rangeStart)
-            : filteredChallans
-          return (
-            <>
-              <select
-                className="input w-auto"
-                value={bulkRange}
-                onChange={(e) => setBulkRange(e.target.value as BulkRange)}
-              >
-                {BULK_RANGE_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => handleBulkDownloadPdfs(bulkFiltered)}
-                disabled={bulkDownloading || bulkFiltered.length === 0}
-                className="btn btn-primary text-sm"
-              >
-                {bulkDownloading ? 'Downloading…' : `Download All (${bulkFiltered.length})`}
-              </button>
-            </>
-          )
-        })()}
+        <select
+          className="input w-auto"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}
+        >
+          <option value="all">All Dates</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="1m">Last Month</option>
+          <option value="1q">Last Quarter</option>
+          <option value="1y">Last Year</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        {dateFilter === 'custom' && (
+          <>
+            <DateInput
+              className="input w-auto"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+            />
+            <span className="text-gray-500 dark:text-gray-400">to</span>
+            <DateInput
+              className="input w-auto"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+            />
+          </>
+        )}
+        {dateFilter !== 'all' && (
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            {filteredChallans.length} {filteredChallans.length === 1 ? 'challan' : 'challans'}
+          </span>
+        )}
+        {filteredChallans.length > 0 && (
+          <BulkDownloadMenu
+            count={filteredChallans.length}
+            busy={bulkDownloading}
+            onPdfs={() => handleBulkDownloadPdfs(filteredChallans)}
+            onExcel={() => handleBulkDownloadExcel(filteredChallans)}
+          />
+        )}
       </div>
 
       {/* Challans Table */}
       <div className="card">
         {filteredChallans.length === 0 ? (
-          searchTerm ? (
+          searchTerm || dateFilter !== 'all' ? (
             <EmptyState
               icon={SearchIcon}
-              title="No challans match your search"
+              title="No challans match your filters"
               description={`Nothing matched "${searchTerm}".`}
             />
           ) : (

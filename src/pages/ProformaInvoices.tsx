@@ -5,8 +5,9 @@ import SearchableSelect from '../components/SearchableSelect'
 import { ProformaInvoice, ProformaInvoiceStatus } from '../types'
 import { getInvoicePDFBytes } from '../utils/generateInvoicePDF'
 import DownloadMenu from '../components/DownloadMenu'
+import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import { DispatchOpts, TableData } from '../utils/downloadHelpers'
-import { bulkDownloadPdfs, buildZipFilename, getBulkRangeStart, BULK_RANGE_OPTIONS, BulkRange } from '../utils/bulkDownloadPdfs'
+import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename } from '../utils/bulkDownloadPdfs'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
 import { sharePdf, ShareTarget } from '../utils/sharePdf'
 import ShareMenu from '../components/ShareMenu'
@@ -74,9 +75,11 @@ const ProformaInvoices = () => {
   const [parties, setParties] = useState<Party[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [dateFilter, setDateFilter] = useState<'all' | '7d' | '1m' | '1q' | '1y' | 'custom'>('all')
+  const [customStart, setCustomStart] = useState('')
+  const [customEnd, setCustomEnd] = useState('')
   const [proformaInvoiceItems, setProformaInvoiceItems] = useState<ProformaInvoiceFormItem[]>([])
   const [bulkDownloading, setBulkDownloading] = useState(false)
-  const [bulkRange, setBulkRange] = useState<BulkRange>('all')
   const toast = useToast()
   const confirm = useConfirm()
   const { company } = useStore()
@@ -213,6 +216,86 @@ const ProformaInvoices = () => {
     } catch (error) {
       console.error('Bulk PDF download error:', error)
       toast.error('Failed to bulk-download PDFs')
+    } finally {
+      setBulkDownloading(false)
+    }
+  }
+
+  const handleBulkDownloadExcel = async (matching: ProformaInvoice[]) => {
+    if (matching.length === 0) {
+      toast.info('No proforma invoices to download')
+      return
+    }
+    const partyName = matching[0]?.customer?.name || searchQuery || 'all'
+
+    setBulkDownloading(true)
+    try {
+      const headers = [
+        'Proforma #', 'Date', 'Expiry', 'Customer', 'GSTIN',
+        'Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount',
+        'Subtotal', 'Tax', 'Total', 'Status',
+      ]
+      const rows: (string | number)[][] = []
+      for (const p of matching) {
+        let items: any[] = (p as any).items || []
+        if (!items.length) {
+          const res = await window.electronAPI.proformaInvoice.getById(p.id)
+          if (res.success && res.data) items = (res.data as any).items || []
+        }
+        const dateStr = p.invoiceDate ? new Date(p.invoiceDate).toLocaleDateString('en-GB') : ''
+        const expiryStr = p.dueDate ? new Date(p.dueDate).toLocaleDateString('en-GB') : ''
+        const trailer: (string | number)[] = [
+          p.subtotal || 0,
+          p.taxAmount || 0,
+          p.totalAmount || 0,
+          p.status || '',
+        ]
+        if (items.length === 0) {
+          rows.push([
+            p.invoiceNumber || '',
+            dateStr,
+            expiryStr,
+            p.customer?.name || '',
+            p.customer?.taxId || '',
+            '', '', 0, 0, 0, 0, 0,
+            ...trailer,
+          ])
+          continue
+        }
+        for (const it of items) {
+          rows.push([
+            p.invoiceNumber || '',
+            dateStr,
+            expiryStr,
+            p.customer?.name || '',
+            p.customer?.taxId || '',
+            it.item?.name || '',
+            it.hsnCode || it.item?.hsnCode || it.item?.skuHsn || '',
+            it.quantity || 0,
+            it.rate || 0,
+            it.discount || 0,
+            it.taxRate || 0,
+            it.total || 0,
+            ...trailer,
+          ])
+        }
+      }
+
+      const today = new Date().toISOString().slice(0, 10)
+      const filename = `ProformaInvoices_${(partyName || 'all').replace(/[^a-z0-9]+/gi, '_')}_${today}.xlsx`
+      await bulkDownloadExcel({
+        filename,
+        sheets: [{
+          name: 'Proforma Invoices',
+          meta: [['Generated', new Date().toLocaleString()]],
+          headers,
+          rows,
+        }],
+      })
+      toast.success(`Exported ${matching.length} proforma invoice${matching.length === 1 ? '' : 's'} to Excel`)
+    } catch (error) {
+      console.error('Bulk Excel error:', error)
+      toast.error('Failed to bulk-download Excel')
     } finally {
       setBulkDownloading(false)
     }
@@ -448,12 +531,41 @@ const ProformaInvoices = () => {
 
   const totals = calculateTotals()
 
+  const getDateRange = (): { start: Date | null; end: Date | null } => {
+    if (dateFilter === 'all') return { start: null, end: null }
+    if (dateFilter === 'custom') {
+      const start = customStart ? new Date(customStart) : null
+      const end = customEnd ? new Date(customEnd) : null
+      if (start) start.setHours(0, 0, 0, 0)
+      if (end) end.setHours(23, 59, 59, 999)
+      return { start, end }
+    }
+    const end = new Date()
+    end.setHours(23, 59, 59, 999)
+    const start = new Date()
+    start.setHours(0, 0, 0, 0)
+    if (dateFilter === '7d') start.setDate(start.getDate() - 6)
+    else if (dateFilter === '1m') start.setDate(start.getDate() - 29)
+    else if (dateFilter === '1q') start.setMonth(start.getMonth() - 3)
+    else if (dateFilter === '1y') start.setDate(start.getDate() - 364)
+    return { start, end }
+  }
+
+  const { start: dateStart, end: dateEnd } = getDateRange()
+
   const filteredProformaInvoices = proformaInvoices.filter((proformaInvoice) => {
-    if (!searchQuery.trim()) return true
-    const query = searchQuery.toLowerCase()
-    const matchesNumber = proformaInvoice.invoiceNumber?.toLowerCase().includes(query)
-    const matchesParty = proformaInvoice.customer?.name?.toLowerCase().includes(query)
-    return matchesNumber || matchesParty
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase()
+      const matchesNumber = proformaInvoice.invoiceNumber?.toLowerCase().includes(query)
+      const matchesParty = proformaInvoice.customer?.name?.toLowerCase().includes(query)
+      if (!matchesNumber && !matchesParty) return false
+    }
+    if (dateStart || dateEnd) {
+      const d = new Date(proformaInvoice.invoiceDate)
+      if (dateStart && d < dateStart) return false
+      if (dateEnd && d > dateEnd) return false
+    }
+    return true
   })
 
   const { sortedItems: sortedProformaInvoices, sortKey, sortDir, toggleSort } = useSortable(filteredProformaInvoices, [
@@ -482,44 +594,57 @@ const ProformaInvoices = () => {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
         />
-        {searchQuery.trim() && filteredProformaInvoices.length > 0 && (() => {
-          const rangeStart = getBulkRangeStart(bulkRange)
-          const bulkFiltered = rangeStart
-            ? filteredProformaInvoices.filter(p => new Date(p.invoiceDate) >= rangeStart)
-            : filteredProformaInvoices
-          return (
-            <>
-              <select
-                className="input w-auto"
-                value={bulkRange}
-                onChange={(e) => setBulkRange(e.target.value as BulkRange)}
-              >
-                {BULK_RANGE_OPTIONS.map(o => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => handleBulkDownloadPdfs(bulkFiltered)}
-                disabled={bulkDownloading || bulkFiltered.length === 0}
-                className="btn btn-primary text-sm"
-              >
-                {bulkDownloading ? 'Downloading…' : `Download All (${bulkFiltered.length})`}
-              </button>
-            </>
-          )
-        })()}
+        <select
+          className="input w-auto"
+          value={dateFilter}
+          onChange={(e) => setDateFilter(e.target.value as typeof dateFilter)}
+        >
+          <option value="all">All Dates</option>
+          <option value="7d">Last 7 Days</option>
+          <option value="1m">Last Month</option>
+          <option value="1q">Last Quarter</option>
+          <option value="1y">Last Year</option>
+          <option value="custom">Custom Range</option>
+        </select>
+        {dateFilter === 'custom' && (
+          <>
+            <DateInput
+              className="input w-auto"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+            />
+            <span className="text-gray-500 dark:text-gray-400">to</span>
+            <DateInput
+              className="input w-auto"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+            />
+          </>
+        )}
+        {dateFilter !== 'all' && (
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            {filteredProformaInvoices.length} {filteredProformaInvoices.length === 1 ? 'proforma' : 'proformas'}
+          </span>
+        )}
+        {filteredProformaInvoices.length > 0 && (
+          <BulkDownloadMenu
+            count={filteredProformaInvoices.length}
+            busy={bulkDownloading}
+            onPdfs={() => handleBulkDownloadPdfs(filteredProformaInvoices)}
+            onExcel={() => handleBulkDownloadExcel(filteredProformaInvoices)}
+          />
+        )}
       </div>
 
       <div className="card">
         {loading ? (
           <TableSkeleton rows={6} columns={7} />
         ) : filteredProformaInvoices.length === 0 ? (
-          searchQuery.trim() ? (
+          searchQuery.trim() || dateFilter !== 'all' ? (
             <EmptyState
               icon={SearchIcon}
-              title="No proforma invoices match your search"
-              description={`Nothing matched "${searchQuery}".`}
+              title="No proforma invoices match your filters"
+              description={searchQuery.trim() ? `Nothing matched "${searchQuery}".` : 'No proforma invoices in this date range.'}
             />
           ) : (
             <EmptyState
