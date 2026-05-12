@@ -1,0 +1,179 @@
+import { ipcMain } from 'electron'
+import { getPrisma } from '../database'
+
+interface CreatePreviousInvoiceInput {
+  invoiceNumber: string
+  invoiceDate: string
+  partyName: string
+  totalAmount: number
+  notes?: string | null
+  fileData: Uint8Array | Buffer | ArrayBuffer
+  fileMimeType: string
+  fileName: string
+}
+
+interface UpdatePreviousInvoiceInput {
+  invoiceNumber?: string
+  invoiceDate?: string
+  partyName?: string
+  totalAmount?: number
+  notes?: string | null
+}
+
+// Renderer can send file bytes as Uint8Array, Buffer (Node side), or ArrayBuffer.
+// Prisma's Bytes column wants Buffer/Uint8Array — normalize here.
+const toBuffer = (data: Uint8Array | Buffer | ArrayBuffer): Buffer => {
+  if (Buffer.isBuffer(data)) return data
+  if (data instanceof Uint8Array) return Buffer.from(data)
+  return Buffer.from(new Uint8Array(data))
+}
+
+export const setupPreviousInvoiceHandlers = () => {
+  const prisma = getPrisma()
+
+  // List: omit fileData so we don't ship megabytes per row to the renderer.
+  // The file is fetched on demand by getFile (or getById if metadata-only isn't enough).
+  ipcMain.handle('previousInvoice:getAll', async () => {
+    try {
+      const rows = await prisma.previousInvoice.findMany({
+        select: {
+          id: true,
+          invoiceNumber: true,
+          invoiceDate: true,
+          partyName: true,
+          totalAmount: true,
+          notes: true,
+          fileMimeType: true,
+          fileName: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+        orderBy: { invoiceDate: 'desc' },
+      })
+      return { success: true, data: rows }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch previous invoices',
+      }
+    }
+  })
+
+  ipcMain.handle('previousInvoice:getById', async (_, id: string) => {
+    try {
+      const row = await prisma.previousInvoice.findUnique({ where: { id } })
+      return { success: true, data: row }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch previous invoice',
+      }
+    }
+  })
+
+  // Returns the file bytes only — used by the download / view actions.
+  // Returned as a plain Uint8Array which Electron's structured-clone IPC
+  // serializes efficiently (no JSON base64 overhead).
+  ipcMain.handle('previousInvoice:getFile', async (_, id: string) => {
+    try {
+      const row = await prisma.previousInvoice.findUnique({
+        where: { id },
+        select: { fileData: true, fileMimeType: true, fileName: true },
+      })
+      if (!row) return { success: false, error: 'Not found' }
+      return {
+        success: true,
+        data: {
+          fileData: new Uint8Array(row.fileData as Buffer),
+          fileMimeType: row.fileMimeType,
+          fileName: row.fileName,
+        },
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to fetch file',
+      }
+    }
+  })
+
+  ipcMain.handle('previousInvoice:create', async (_, data: CreatePreviousInvoiceInput) => {
+    try {
+      const row = await prisma.previousInvoice.create({
+        data: {
+          invoiceNumber: data.invoiceNumber,
+          invoiceDate: new Date(data.invoiceDate),
+          partyName: data.partyName,
+          totalAmount: data.totalAmount,
+          notes: data.notes ?? null,
+          fileData: toBuffer(data.fileData),
+          fileMimeType: data.fileMimeType,
+          fileName: data.fileName,
+        },
+        select: {
+          id: true,
+          invoiceNumber: true,
+          invoiceDate: true,
+          partyName: true,
+          totalAmount: true,
+          notes: true,
+          fileMimeType: true,
+          fileName: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      })
+      return { success: true, data: row }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to create previous invoice',
+      }
+    }
+  })
+
+  ipcMain.handle('previousInvoice:update', async (_, id: string, data: UpdatePreviousInvoiceInput) => {
+    try {
+      const patch: any = {}
+      if (data.invoiceNumber !== undefined) patch.invoiceNumber = data.invoiceNumber
+      if (data.invoiceDate !== undefined) patch.invoiceDate = new Date(data.invoiceDate)
+      if (data.partyName !== undefined) patch.partyName = data.partyName
+      if (data.totalAmount !== undefined) patch.totalAmount = data.totalAmount
+      if (data.notes !== undefined) patch.notes = data.notes
+      const row = await prisma.previousInvoice.update({
+        where: { id },
+        data: patch,
+        select: {
+          id: true,
+          invoiceNumber: true,
+          invoiceDate: true,
+          partyName: true,
+          totalAmount: true,
+          notes: true,
+          fileMimeType: true,
+          fileName: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      })
+      return { success: true, data: row }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update previous invoice',
+      }
+    }
+  })
+
+  ipcMain.handle('previousInvoice:delete', async (_, id: string) => {
+    try {
+      await prisma.previousInvoice.delete({ where: { id } })
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete previous invoice',
+      }
+    }
+  })
+}

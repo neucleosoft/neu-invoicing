@@ -25,6 +25,7 @@ import { setupSettingsHandlers } from './handlers/settings'
 import { setupGstHandlers } from './handlers/gst'
 import { setupChallanHandlers } from './handlers/challan'
 import { setupCreditNoteHandlers } from './handlers/creditNote'
+import { setupPreviousInvoiceHandlers } from './handlers/previousInvoice'
 import { setupCashBankHandlers } from './handlers/cashBank'
 import { setupShareHandlers } from './handlers/share'
 
@@ -127,6 +128,7 @@ app.whenReady().then(async () => {
   setupGstHandlers()
   setupChallanHandlers()
   setupCreditNoteHandlers()
+  setupPreviousInvoiceHandlers()
   setupCashBankHandlers()
   setupShareHandlers()
 
