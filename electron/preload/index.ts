@@ -248,6 +248,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("creditNote:generateNoteNumber", type),
   },
 
+  // Previous Invoices (uploaded archive of pre-app invoices)
+  previousInvoice: {
+    getAll: () => ipcRenderer.invoke("previousInvoice:getAll"),
+    getById: (id: string) => ipcRenderer.invoke("previousInvoice:getById", id),
+    getFile: (id: string) => ipcRenderer.invoke("previousInvoice:getFile", id),
+    create: (data: any) => ipcRenderer.invoke("previousInvoice:create", data),
+    update: (id: string, data: any) =>
+      ipcRenderer.invoke("previousInvoice:update", id, data),
+    delete: (id: string) => ipcRenderer.invoke("previousInvoice:delete", id),
+  },
+
   // Cash & Bank
   cashBank: {
     getAll: () => ipcRenderer.invoke("cashBank:getAll"),

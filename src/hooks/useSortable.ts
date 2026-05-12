@@ -7,9 +7,13 @@ export interface SortableColumn<T> {
   accessor: (row: T) => string | number | null | undefined
 }
 
-export function useSortable<T>(items: T[], columns: SortableColumn<T>[]) {
-  const [sortKey, setSortKey] = useState<string | null>(null)
-  const [sortDir, setSortDir] = useState<SortDir>(null)
+export function useSortable<T>(
+  items: T[],
+  columns: SortableColumn<T>[],
+  initialSort?: { key: string; dir: 'asc' | 'desc' },
+) {
+  const [sortKey, setSortKey] = useState<string | null>(initialSort?.key ?? null)
+  const [sortDir, setSortDir] = useState<SortDir>(initialSort?.dir ?? null)
 
   const toggleSort = (key: string) => {
     if (sortKey !== key) {

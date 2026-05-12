@@ -718,6 +718,14 @@ declare global {
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
         generateNoteNumber: (type: string) => Promise<{ success: boolean; data?: string; error?: string }>
       }
+      previousInvoice: {
+        getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getById: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        getFile: (id: string) => Promise<{ success: boolean; data?: { fileData: Uint8Array; fileMimeType: string; fileName: string }; error?: string }>
+        create: (data: any) => Promise<{ success: boolean; data?: any; error?: string }>
+        update: (id: string, data: any) => Promise<{ success: boolean; data?: any; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+      }
       cashBank: {
         getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>
         getById: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>

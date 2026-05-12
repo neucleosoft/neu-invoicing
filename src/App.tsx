@@ -12,6 +12,7 @@ import Suppliers from './pages/Suppliers'
 import Items from './pages/Items'
 import SupplierItems from './pages/SupplierItems'
 import Sales from './pages/Sales'
+import PreviousInvoices from './pages/PreviousInvoices'
 import Quotations from './pages/Quotations'
 import ProformaInvoices from './pages/ProformaInvoices'
 import Purchase from './pages/Purchase'
@@ -213,6 +214,7 @@ function App() {
             <Route path="supplier-items" element={<SupplierItems />} />
             <Route path="sales" element={<Navigate to="/invoices" replace />} />
             <Route path="invoices" element={<Sales />} />
+            <Route path="previous-invoices" element={<PreviousInvoices />} />
             <Route path="quotations" element={<Quotations />} />
             <Route path="proforma-invoices" element={<ProformaInvoices />} />
             <Route path="purchase" element={<Purchase />} />
