@@ -27,6 +27,7 @@
   "license": "MIT",
   "dependencies": {
     "@prisma/client": "^5.20.0",
+    "@types/pdf-parse": "^1.1.5",
     "@types/react-datepicker": "^6.2.0",
     "axios": "^1.7.7",
     "cmdk": "^1.1.1",
@@ -39,7 +40,7 @@
     "jspdf-autotable": "^5.0.2",
     "jszip": "^3.10.1",
     "lucide-react": "^1.8.0",
-    "pdf-parse": "^2.4.5",
+    "pdf-parse": "^1.1.4",
     "pdfjs-dist": "^5.7.284",
     "pdfmake": "^0.2.10",
     "prisma": "^5.20.0",

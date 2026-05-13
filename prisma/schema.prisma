@@ -669,6 +669,13 @@ model GstCache {
 // SQLite → Drive backup with no extra plumbing.
 model PreviousInvoice {
   id             String   @id @default(cuid())
+  // Sequential, app-assigned counter independent of invoiceNumber. Lets the UI
+  // count and sort archive rows even when invoice numbers collide across
+  // fiscal years (e.g. "146" in 24-25 and "146" in 25-26 are different rows
+  // with different serial numbers). Nullable so the column add is migration-
+  // safe; ensureTablesExist() backfills any null rows on next launch, and the
+  // handler always assigns a value on create.
+  serialNumber   Int?     @unique
   invoiceNumber  String
   invoiceDate    DateTime
   partyName      String
@@ -677,6 +684,27 @@ model PreviousInvoice {
   fileData       Bytes // raw file bytes (PDF / image / spreadsheet)
   fileMimeType   String
   fileName       String
+  items          PreviousInvoiceItem[]
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
+}
+
+// Structured line items extracted from the uploaded invoice. Populated at
+// upload time by the extractor so Excel/CSV downloads (and any future
+// reporting) can read pre-parsed rows without re-cracking the PDF on every
+// request. Cascade on delete: removing the parent PreviousInvoice wipes its
+// items too, no orphans.
+model PreviousInvoiceItem {
+  id                String          @id @default(cuid())
+  previousInvoiceId String
+  previousInvoice   PreviousInvoice @relation(fields: [previousInvoiceId], references: [id], onDelete: Cascade)
+  name              String
+  hsnCode           String?
+  quantity          Float
+  unit              String?
+  rate              Float
+  discount          Float           @default(0)
+  taxRate           Float           @default(0)
+  amount            Float
+  createdAt         DateTime        @default(now())
 }

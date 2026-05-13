@@ -1,6 +1,17 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 
+interface PreviousInvoiceItemInput {
+  name: string
+  hsnCode?: string | null
+  quantity: number
+  unit?: string | null
+  rate: number
+  discount?: number
+  taxRate?: number
+  amount: number
+}
+
 interface CreatePreviousInvoiceInput {
   invoiceNumber: string
   invoiceDate: string
@@ -10,6 +21,7 @@ interface CreatePreviousInvoiceInput {
   fileData: Uint8Array | Buffer | ArrayBuffer
   fileMimeType: string
   fileName: string
+  items?: PreviousInvoiceItemInput[]
 }
 
 interface UpdatePreviousInvoiceInput {
@@ -18,6 +30,7 @@ interface UpdatePreviousInvoiceInput {
   partyName?: string
   totalAmount?: number
   notes?: string | null
+  items?: PreviousInvoiceItemInput[]
 }
 
 // Renderer can send file bytes as Uint8Array, Buffer (Node side), or ArrayBuffer.
@@ -27,6 +40,19 @@ const toBuffer = (data: Uint8Array | Buffer | ArrayBuffer): Buffer => {
   if (data instanceof Uint8Array) return Buffer.from(data)
   return Buffer.from(new Uint8Array(data))
 }
+
+// Coerce optional/missing fields on each item to their defaults so the Prisma
+// nested-create call gets clean shapes regardless of what the caller omits.
+const normalizeItem = (i: PreviousInvoiceItemInput) => ({
+  name: i.name,
+  hsnCode: i.hsnCode ?? null,
+  quantity: i.quantity,
+  unit: i.unit ?? null,
+  rate: i.rate,
+  discount: i.discount ?? 0,
+  taxRate: i.taxRate ?? 0,
+  amount: i.amount,
+})
 
 export const setupPreviousInvoiceHandlers = () => {
   const prisma = getPrisma()
@@ -38,6 +64,7 @@ export const setupPreviousInvoiceHandlers = () => {
       const rows = await prisma.previousInvoice.findMany({
         select: {
           id: true,
+          serialNumber: true,
           invoiceNumber: true,
           invoiceDate: true,
           partyName: true,
@@ -61,7 +88,10 @@ export const setupPreviousInvoiceHandlers = () => {
 
   ipcMain.handle('previousInvoice:getById', async (_, id: string) => {
     try {
-      const row = await prisma.previousInvoice.findUnique({ where: { id } })
+      const row = await prisma.previousInvoice.findUnique({
+        where: { id },
+        include: { items: true },
+      })
       return { success: true, data: row }
     } catch (error) {
       return {
@@ -99,19 +129,34 @@ export const setupPreviousInvoiceHandlers = () => {
 
   ipcMain.handle('previousInvoice:create', async (_, data: CreatePreviousInvoiceInput) => {
     try {
+      const invoiceDate = new Date(data.invoiceDate)
+      if (isNaN(invoiceDate.getTime())) {
+        return { success: false, error: 'Invalid invoice date' }
+      }
+      // Sequential, app-assigned counter independent of invoiceNumber. Safe to
+      // aggregate-then-create without a transaction because this is a single-
+      // user offline app — no concurrent inserts.
+      const agg = await prisma.previousInvoice.aggregate({ _max: { serialNumber: true } })
+      const nextSerial = (agg._max.serialNumber ?? 0) + 1
+      const itemsCreate = data.items?.length
+        ? { create: data.items.map(normalizeItem) }
+        : undefined
       const row = await prisma.previousInvoice.create({
         data: {
+          serialNumber: nextSerial,
           invoiceNumber: data.invoiceNumber,
-          invoiceDate: new Date(data.invoiceDate),
+          invoiceDate,
           partyName: data.partyName,
           totalAmount: data.totalAmount,
           notes: data.notes ?? null,
           fileData: toBuffer(data.fileData),
           fileMimeType: data.fileMimeType,
           fileName: data.fileName,
+          items: itemsCreate,
         },
         select: {
           id: true,
+          serialNumber: true,
           invoiceNumber: true,
           invoiceDate: true,
           partyName: true,
@@ -136,15 +181,30 @@ export const setupPreviousInvoiceHandlers = () => {
     try {
       const patch: any = {}
       if (data.invoiceNumber !== undefined) patch.invoiceNumber = data.invoiceNumber
-      if (data.invoiceDate !== undefined) patch.invoiceDate = new Date(data.invoiceDate)
+      if (data.invoiceDate !== undefined) {
+        const invoiceDate = new Date(data.invoiceDate)
+        if (isNaN(invoiceDate.getTime())) {
+          return { success: false, error: 'Invalid invoice date' }
+        }
+        patch.invoiceDate = invoiceDate
+      }
       if (data.partyName !== undefined) patch.partyName = data.partyName
       if (data.totalAmount !== undefined) patch.totalAmount = data.totalAmount
       if (data.notes !== undefined) patch.notes = data.notes
+      // Replace-all strategy for items: Prisma wraps deleteMany + create in a
+      // transaction, so a partial failure doesn't leave stale rows behind.
+      if (data.items !== undefined) {
+        patch.items = {
+          deleteMany: {},
+          create: data.items.map(normalizeItem),
+        }
+      }
       const row = await prisma.previousInvoice.update({
         where: { id },
         data: patch,
         select: {
           id: true,
+          serialNumber: true,
           invoiceNumber: true,
           invoiceDate: true,
           partyName: true,

@@ -12,11 +12,12 @@ import { useSortable } from '../hooks/useSortable'
 import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import DownloadMenu from '../components/DownloadMenu'
 import type { DispatchOpts, TableData } from '../utils/downloadHelpers'
-import { parsePreviousInvoicePdf } from '../utils/parsePreviousInvoicePdf'
 import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename } from '../utils/bulkDownloadPdfs'
+import { renderPdfFirstPage } from '../utils/pdfRender'
 
 interface PreviousInvoice {
   id: string
+  serialNumber?: number | null
   invoiceNumber: string
   invoiceDate: string
   partyName: string
@@ -26,6 +27,19 @@ interface PreviousInvoice {
   fileName: string
   createdAt: string
   updatedAt: string
+}
+
+// Editable shape for the inline items table in the upload/edit modal. Strings
+// for optional text fields so empty inputs round-trip without null/'' churn.
+interface EditableItem {
+  name: string
+  hsnCode: string
+  quantity: number
+  unit: string
+  rate: number
+  discount: number
+  taxRate: number
+  amount: number
 }
 
 const ACCEPTED_TYPES = [
@@ -47,27 +61,24 @@ const formatFileSize = (mime: string) => {
   return mime
 }
 
-// OCR providers want an image, not a PDF. For PDF uploads, render page 1 to PNG
-// in the renderer (Chromium canvas — no native deps) and send that to the
-// extraction handler. Mirrors the helper in Purchase.tsx.
-async function pdfFirstPageToPng(pdfBytes: Uint8Array): Promise<Uint8Array> {
-  const pdfjsLib = await import('pdfjs-dist')
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-  ).toString()
-  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) }).promise
-  const page = await doc.getPage(1)
-  const viewport = page.getViewport({ scale: 2 })
-  const canvas = document.createElement('canvas')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Could not get 2D canvas context')
-  await page.render({ canvasContext: ctx, viewport, canvas }).promise
-  const blob: Blob | null = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
-  if (!blob) throw new Error('canvas.toBlob returned null')
-  return new Uint8Array(await blob.arrayBuffer())
+// Claude Vision can return billDate in several shapes — Indian "DD/MM/YYYY",
+// ISO "YYYY-MM-DD", written-out "11 May 2026", or sometimes the literal string
+// "Invalid Date" when extraction failed. Normalize to "YYYY-MM-DD" for the
+// <DateInput>, or return null if the value can't be salvaged so the form
+// keeps its current date instead of poisoning the create call.
+const normalizeExtractedDate = (s: string | undefined | null): string | null => {
+  if (!s) return null
+  const trimmed = String(s).trim()
+  if (!trimmed || /invalid/i.test(trimmed)) return null
+  const dm = trimmed.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
+  if (dm) {
+    const [, d, m, y] = dm
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed
+  const dt = new Date(trimmed)
+  if (isNaN(dt.getTime())) return null
+  return dt.toISOString().split('T')[0]
 }
 
 const PreviousInvoices = () => {
@@ -92,6 +103,9 @@ const PreviousInvoices = () => {
     totalAmount: 0,
     notes: '',
   })
+  // Editable line items. Pre-populated by the PDF parser on upload; the user
+  // can fix any parser mistakes (or add rows for non-PDF uploads) before save.
+  const [formItems, setFormItems] = useState<EditableItem[]>([])
   const fileInputRef = useRef<HTMLInputElement | null>(null)
   const toast = useToast()
   const confirm = useConfirm()
@@ -124,10 +138,11 @@ const PreviousInvoices = () => {
       totalAmount: 0,
       notes: '',
     })
+    setFormItems([])
     setShowModal(true)
   }
 
-  const openEdit = (row: PreviousInvoice) => {
+  const openEdit = async (row: PreviousInvoice) => {
     setEditingId(row.id)
     setPickedFile(null)
     setFormData({
@@ -137,8 +152,49 @@ const PreviousInvoices = () => {
       totalAmount: row.totalAmount,
       notes: row.notes || '',
     })
+    // Fetch full row so we can show existing line items for editing. Open the
+    // modal first so the UI feels instant; items populate in the background.
+    setFormItems([])
     setShowModal(true)
+    try {
+      const result = await window.electronAPI.previousInvoice.getById(row.id)
+      if (result.success && result.data?.items) {
+        setFormItems(
+          (result.data.items as Array<Record<string, any>>).map(it => ({
+            name: it.name ?? '',
+            hsnCode: it.hsnCode ?? '',
+            quantity: typeof it.quantity === 'number' ? it.quantity : 0,
+            unit: it.unit ?? '',
+            rate: typeof it.rate === 'number' ? it.rate : 0,
+            discount: typeof it.discount === 'number' ? it.discount : 0,
+            taxRate: typeof it.taxRate === 'number' ? it.taxRate : 0,
+            amount: typeof it.amount === 'number' ? it.amount : 0,
+          })),
+        )
+      }
+    } catch {
+      // Non-fatal — modal still works for metadata-only edits.
+    }
   }
+
+  const blankItem = (): EditableItem => ({
+    name: '',
+    hsnCode: '',
+    quantity: 1,
+    unit: '',
+    rate: 0,
+    discount: 0,
+    taxRate: 0,
+    amount: 0,
+  })
+
+  const addItem = () => setFormItems(prev => [...prev, blankItem()])
+
+  const removeItem = (idx: number) =>
+    setFormItems(prev => prev.filter((_, i) => i !== idx))
+
+  const updateItem = (idx: number, patch: Partial<EditableItem>) =>
+    setFormItems(prev => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
 
   const handleFilePick = async (file: File) => {
     if (!ACCEPTED_TYPES.includes(file.type) && file.type !== '') {
@@ -149,17 +205,21 @@ const PreviousInvoices = () => {
     const mime = file.type || 'application/octet-stream'
     setPickedFile({ bytes: buf, mime, name: file.name })
 
-    // Auto-extract for PDF / image only — Excel/CSV stay manual.
+    // Claude Vision (same path Purchase uses) — returns metadata AND
+    // structured line items in one shot, works for any invoice template
+    // without regex fragility. Excel/CSV uploads skip extraction; user fills
+    // the form manually.
     const isExtractable = mime === 'application/pdf' || mime.startsWith('image/')
     if (!isExtractable) return
 
     setExtracting(true)
     try {
+      // OCR providers reject PDFs — rasterise page 1 to PNG first.
       let extractBytes: Uint8Array = buf
       let extractMime = mime
       if (mime === 'application/pdf') {
         try {
-          extractBytes = await pdfFirstPageToPng(buf)
+          extractBytes = await renderPdfFirstPage(buf)
           extractMime = 'image/png'
         } catch (err) {
           toast.error(`Couldn't read PDF for extraction: ${err instanceof Error ? err.message : 'unknown'}`)
@@ -171,19 +231,37 @@ const PreviousInvoices = () => {
         mimeType: extractMime,
       } as any)
       if (!result.success || !result.data) {
-        // Soft-fail — keep the file, let the user fill the form manually.
         toast.info('Auto-fill unavailable. Enter details manually.')
         return
       }
       const ex = result.data
+      const normalizedDate = normalizeExtractedDate(ex.billDate)
       setFormData((prev) => ({
         invoiceNumber: ex.billNumber || prev.invoiceNumber,
-        invoiceDate: ex.billDate || prev.invoiceDate,
+        invoiceDate: normalizedDate || prev.invoiceDate,
         partyName: ex.supplierName || prev.partyName,
         totalAmount: ex.totalAmount && ex.totalAmount > 0 ? ex.totalAmount : prev.totalAmount,
         notes: prev.notes,
       }))
-      toast.success('Auto-filled from file — review and edit before saving')
+      if (ex.items && ex.items.length > 0) {
+        setFormItems(
+          ex.items.map((it: any) => ({
+            name: it.name ?? '',
+            hsnCode: it.hsnCode ?? '',
+            quantity: typeof it.quantity === 'number' ? it.quantity : 0,
+            unit: '',
+            rate: typeof it.rate === 'number' ? it.rate : 0,
+            discount: 0,
+            taxRate: typeof it.taxRate === 'number' ? it.taxRate : 0,
+            amount: typeof it.total === 'number'
+              ? it.total
+              : (it.quantity || 0) * (it.rate || 0),
+          })),
+        )
+        toast.success(`Extracted ${ex.items.length} item${ex.items.length === 1 ? '' : 's'} — review before saving`)
+      } else {
+        toast.success('Auto-filled from file — add line items manually if needed')
+      }
     } finally {
       setExtracting(false)
     }
@@ -194,8 +272,8 @@ const PreviousInvoices = () => {
       toast.error('Invoice number is required')
       return
     }
-    if (!formData.invoiceDate) {
-      toast.error('Invoice date is required')
+    if (!formData.invoiceDate || isNaN(new Date(formData.invoiceDate).getTime())) {
+      toast.error('Invoice date is required and must be a valid date')
       return
     }
     if (!formData.partyName.trim()) {
@@ -207,6 +285,21 @@ const PreviousInvoices = () => {
       return
     }
 
+    // Build the items payload — drop blank rows so parser-generated placeholders
+    // don't pollute the DB. A row counts as real if it has any non-empty value.
+    const itemsPayload = formItems
+      .filter(it => it.name.trim() !== '' || it.quantity > 0 || it.rate > 0 || it.amount > 0)
+      .map(it => ({
+        name: it.name.trim(),
+        hsnCode: it.hsnCode.trim() || null,
+        quantity: it.quantity,
+        unit: it.unit.trim() || null,
+        rate: it.rate,
+        discount: it.discount,
+        taxRate: it.taxRate,
+        amount: it.amount,
+      }))
+
     setSaving(true)
     try {
       if (editingId) {
@@ -216,6 +309,7 @@ const PreviousInvoices = () => {
           partyName: formData.partyName.trim(),
           totalAmount: formData.totalAmount,
           notes: formData.notes.trim() || null,
+          items: itemsPayload,
         })
         if (!result.success) {
           toast.error(result.error || 'Failed to update')
@@ -236,6 +330,7 @@ const PreviousInvoices = () => {
           fileData: pickedFile.bytes,
           fileMimeType: pickedFile.mime,
           fileName: pickedFile.name,
+          items: itemsPayload,
         })
         if (!result.success) {
           toast.error(result.error || 'Failed to upload')
@@ -268,9 +363,9 @@ const PreviousInvoices = () => {
   }
 
   // Build DispatchOpts so DownloadMenu can offer PDF / PNG / JPEG / Excel / CSV / Print
-  // for a stored previous-invoice file. The PDF blob is the source of truth — images
-  // are rasterised from it, and Excel/CSV use just the top-level metadata we have
-  // (no line items are stored for previous invoices).
+  // for a stored previous-invoice file. The PDF blob is the source of truth for
+  // PDF/PNG/JPEG/Print; the Excel/CSV path reads structured items from the DB
+  // (populated at upload time by the extractor).
   const buildDownloadOpts = (row: PreviousInvoice): DispatchOpts => {
     let cached: { bytes: Uint8Array; filename: string } | null = null
     const getPdf = async () => {
@@ -283,41 +378,18 @@ const PreviousInvoices = () => {
       return cached
     }
     const getTable = async (): Promise<TableData> => {
-      const { bytes, filename } = await getPdf()
+      const { filename } = await getPdf()
       const baseName = filename.replace(/\.[^./\\]+$/, '')
 
-      // Try to parse line items + GSTIN from the stored PDF so the Excel/CSV
-      // mirrors the Sales export. If parsing fails (e.g. anomaly layout), fall
-      // back to a single-row metadata sheet using just the DB fields.
-      try {
-        const parsed = await parsePreviousInvoicePdf(bytes)
-        const subtotal = parsed.items.reduce((s, it) => s + it.qty * it.rate, 0)
-        const tax = parsed.taxAmount || (subtotal * (parsed.taxRate / 100))
-        const meta: Array<[string, string | number]> = [
-          ['Invoice', parsed.invoiceNumber || row.invoiceNumber],
-          ['Date', parsed.invoiceDate || new Date(row.invoiceDate).toLocaleDateString('en-GB')],
-          ['Customer', parsed.partyName || row.partyName],
-          ['GSTIN', parsed.partyGstin || ''],
-        ]
-        const metaSuffix: Array<[string, string | number]> = [
-          ['Subtotal', subtotal],
-          ['Tax', tax],
-          ['Total', row.totalAmount || parsed.totalAmount],
-        ]
-        const headers = ['Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount']
-        const rows: (string | number)[][] = parsed.items.map(it => [
-          it.name,
-          it.hsn,
-          it.qty,
-          it.rate,
-          0,
-          it.taxRate,
-          it.qty * it.rate,
-        ])
-        if (rows.length === 0) rows.push(['', '', 0, 0, 0, 0, 0])
-        return { baseName, meta, metaSuffix, headers, rows }
-      } catch (err) {
-        console.warn('parsePreviousInvoicePdf failed, falling back to metadata-only:', err)
+      // Fetch full row (including items) from the DB. Items were extracted at
+      // upload time and stored in PreviousInvoiceItem — no PDF re-parsing.
+      const result = await window.electronAPI.previousInvoice.getById(row.id)
+      const items: Array<Record<string, any>> = (result.success && result.data?.items) || []
+
+      if (items.length === 0) {
+        // No items stored (e.g. rows uploaded before items were captured, or
+        // ones where the extractor returned none). Fall back to a single
+        // metadata row so the Excel/CSV is at least useful.
         return {
           baseName,
           headers: ['Invoice No.', 'Invoice Date', 'Party', 'Total Amount', 'File'],
@@ -330,6 +402,33 @@ const PreviousInvoices = () => {
           ]],
         }
       }
+
+      const subtotal = items.reduce((s, it) => s + (it.quantity || 0) * (it.rate || 0), 0)
+      const tax = items.reduce((s, it) => {
+        const taxable = (it.quantity || 0) * (it.rate || 0)
+        return s + taxable * ((it.taxRate || 0) / 100)
+      }, 0)
+      const meta: Array<[string, string | number]> = [
+        ['Invoice', row.invoiceNumber],
+        ['Date', new Date(row.invoiceDate).toLocaleDateString('en-GB')],
+        ['Customer', row.partyName],
+      ]
+      const metaSuffix: Array<[string, string | number]> = [
+        ['Subtotal', subtotal],
+        ['Tax', tax],
+        ['Total', row.totalAmount],
+      ]
+      const headers = ['Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount']
+      const rowsOut: (string | number)[][] = items.map(it => [
+        it.name ?? '',
+        it.hsnCode ?? '',
+        it.quantity ?? 0,
+        it.rate ?? 0,
+        it.discount ?? 0,
+        it.taxRate ?? 0,
+        it.amount ?? (it.quantity || 0) * (it.rate || 0),
+      ])
+      return { baseName, meta, metaSuffix, headers, rows: rowsOut }
     }
     return { getPdf, getTable }
   }
@@ -454,6 +553,10 @@ const PreviousInvoices = () => {
   const { sortedItems, sortKey, sortDir, toggleSort } = useSortable(
     filteredRows,
     [
+      // Assigned at upload time, unique and monotonic — the trustworthy
+      // identity column. Same invoiceNumber across fiscal years can collide,
+      // serialNumber never does, so it's the safe default sort.
+      { key: 'serialNumber', accessor: r => r.serialNumber ?? 0 },
       // Treat invoice numbers as a single numeric sequence regardless of prefix:
       // "146" → 146, "NS/SL/25-26/146" → 146.
       { key: 'invoiceNumber', accessor: r => parseInt(r.invoiceNumber.match(/\d+$/)?.[0] ?? '0', 10) },
@@ -461,7 +564,7 @@ const PreviousInvoices = () => {
       { key: 'partyName', accessor: r => r.partyName },
       { key: 'totalAmount', accessor: r => r.totalAmount },
     ],
-    { key: 'invoiceNumber', dir: 'desc' },
+    { key: 'serialNumber', dir: 'desc' },
   )
 
   return (
@@ -547,6 +650,7 @@ const PreviousInvoices = () => {
             <table className="table">
               <thead>
                 <tr>
+                  <SortHeader label="#" sortKey="serialNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Invoice #" sortKey="invoiceNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Date" sortKey="invoiceDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Party" sortKey="partyName" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
@@ -558,6 +662,7 @@ const PreviousInvoices = () => {
               <tbody>
                 {sortedItems.map(row => (
                   <tr key={row.id} className="border-t">
+                    <td className="table-cell text-sm text-gray-500 dark:text-gray-400">{row.serialNumber ?? '—'}</td>
                     <td className="table-cell font-medium">
                       <button
                         type="button"
@@ -611,7 +716,7 @@ const PreviousInvoices = () => {
       {/* Upload / Edit modal */}
       {showModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-lg bg-white dark:bg-gray-800 rounded-xl shadow-2xl">
+          <div className="w-full max-w-3xl bg-white dark:bg-gray-800 rounded-xl shadow-2xl">
             <div className="px-6 py-4 border-b dark:border-gray-700">
               <h2 className="text-xl font-bold">{editingId ? 'Edit Previous Invoice' : 'Upload Previous Invoice'}</h2>
               {!editingId && (
@@ -707,6 +812,83 @@ const PreviousInvoices = () => {
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                 />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="label mb-0">Line Items</label>
+                  <button
+                    type="button"
+                    onClick={addItem}
+                    className="text-sm text-primary-600 hover:underline dark:text-primary-300"
+                  >
+                    + Add Row
+                  </button>
+                </div>
+                {formItems.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400 italic">
+                    No line items. Click "+ Add Row" to add manually, or upload a PDF for auto-extraction.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="grid grid-cols-[1fr_70px_60px_80px_60px_90px_32px] gap-2 text-xs text-gray-500 dark:text-gray-400 px-1">
+                      <span>Item</span>
+                      <span>HSN</span>
+                      <span>Qty</span>
+                      <span>Rate</span>
+                      <span>Tax %</span>
+                      <span>Amount</span>
+                      <span></span>
+                    </div>
+                    {formItems.map((item, idx) => (
+                      <div
+                        key={idx}
+                        className="grid grid-cols-[1fr_70px_60px_80px_60px_90px_32px] gap-2 items-center"
+                      >
+                        <input
+                          type="text"
+                          className="input"
+                          value={item.name}
+                          onChange={(e) => updateItem(idx, { name: e.target.value })}
+                        />
+                        <input
+                          type="text"
+                          className="input"
+                          value={item.hsnCode}
+                          onChange={(e) => updateItem(idx, { hsnCode: e.target.value })}
+                        />
+                        <NumberInput
+                          className="input"
+                          value={item.quantity}
+                          onChange={(v) => updateItem(idx, { quantity: v })}
+                        />
+                        <NumberInput
+                          className="input"
+                          value={item.rate}
+                          onChange={(v) => updateItem(idx, { rate: v })}
+                        />
+                        <NumberInput
+                          className="input"
+                          value={item.taxRate}
+                          onChange={(v) => updateItem(idx, { taxRate: v })}
+                        />
+                        <NumberInput
+                          className="input"
+                          value={item.amount}
+                          onChange={(v) => updateItem(idx, { amount: v })}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => removeItem(idx)}
+                          className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400"
+                          title="Remove row"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
 

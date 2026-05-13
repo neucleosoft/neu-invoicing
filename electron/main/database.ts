@@ -114,6 +114,32 @@ export const ensureTablesExist = (dbUrl: string) => {
   console.log(`Baselined ${baselined}/${migrations.length} migrations as applied`)
 }
 
+// One-time backfill: rows imported before the serialNumber column existed
+// (or created in a window where the handler skipped the assignment) get
+// sequential numbers in createdAt order. Cheap no-op when nothing's missing.
+// Non-fatal — log and continue on failure.
+const backfillPreviousInvoiceSerialNumbers = async () => {
+  try {
+    const orphans = await prisma.previousInvoice.findMany({
+      where: { serialNumber: null },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    })
+    if (orphans.length === 0) return
+    const agg = await prisma.previousInvoice.aggregate({ _max: { serialNumber: true } })
+    let next = (agg._max.serialNumber ?? 0) + 1
+    for (const row of orphans) {
+      await prisma.previousInvoice.update({
+        where: { id: row.id },
+        data: { serialNumber: next++ },
+      })
+    }
+    console.log(`Backfilled serialNumber for ${orphans.length} previous invoice row(s)`)
+  } catch (err) {
+    console.warn('Failed to backfill previous invoice serial numbers:', err)
+  }
+}
+
 export const setupDatabase = async () => {
   const userDataPath = app.getPath('userData')
   const dbPath = path.join(userDataPath, 'neuinvoicing.db')
@@ -145,6 +171,8 @@ export const setupDatabase = async () => {
     console.error('Database connection error:', error)
     throw error
   }
+
+  await backfillPreviousInvoiceSerialNumbers()
 }
 
 export const getPrisma = () => {

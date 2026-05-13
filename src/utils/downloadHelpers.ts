@@ -6,6 +6,8 @@
 // raw bytes + filename + (for tabular formats) the source TableData. DownloadMenu
 // shows that artifact in a preview modal, then saveArtifact(a) persists it.
 
+import { renderPdfFirstPage } from './pdfRender'
+
 export type DownloadFormat = 'pdf' | 'png' | 'jpeg' | 'excel' | 'csv' | 'print'
 
 export interface TableData {
@@ -47,47 +49,6 @@ export const downloadBytes = (bytes: Uint8Array, filename: string, mime: string)
   a.download = filename
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 60_000)
-}
-
-// Render the first page of a PDF to a PNG/JPEG via pdfjs + Chromium canvas.
-// Lazy-loads pdfjs-dist so the bundle isn't pulled in unless the user picks
-// an image format.
-const renderPdfFirstPage = async (
-  pdfBytes: Uint8Array,
-  format: 'png' | 'jpeg',
-  scale = 2,
-): Promise<Uint8Array> => {
-  const pdfjsLib = await import('pdfjs-dist')
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-  ).toString()
-
-  // pdfjs detaches the input buffer when transferring to its worker — pass a
-  // copy so the caller's bytes survive.
-  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) }).promise
-  const page = await doc.getPage(1)
-  const viewport = page.getViewport({ scale })
-
-  const canvas = document.createElement('canvas')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Could not get 2D canvas context')
-
-  // White background — JPEGs don't support transparency; PNG looks cleaner with it too.
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-  await page.render({ canvasContext: ctx, viewport, canvas }).promise
-
-  const mime = format === 'png' ? 'image/png' : 'image/jpeg'
-  const blob: Blob | null = await new Promise((resolve) =>
-    canvas.toBlob(resolve, mime, format === 'jpeg' ? 0.92 : undefined),
-  )
-  if (!blob) throw new Error('canvas.toBlob returned null')
-  const arrayBuffer = await blob.arrayBuffer()
-  return new Uint8Array(arrayBuffer)
 }
 
 // Open the PDF in a new window and trigger the print dialog. Works in
