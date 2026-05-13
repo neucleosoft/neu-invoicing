@@ -60,6 +60,12 @@ invoices database/
 learning_pdf/
 party-captures/
 
+# One-off migration scripts (contain hardcoded company-specific data)
+scripts/.convert-cache/
+scripts/convert-old-to-new-style.mjs
+scripts/import-previous-invoices.mjs
+scripts/reset-from-old-import.mjs
+
 # Scraping tools (not part of the app)
 platform-tools/
 *.zip

@@ -14,6 +14,7 @@ import {
   BarChart3,
   Receipt,
   ScrollText,
+  Archive,
   Settings as SettingsIcon,
   Moon,
   Sun,
@@ -41,6 +42,7 @@ const navigationGroups: { label?: string; items: { name: string; path: string; i
     label: 'Sales',
     items: [
       { name: 'Invoices', path: '/invoices', icon: Wallet },
+      { name: 'Previous Invoices', path: '/previous-invoices', icon: Archive },
       { name: 'Quotations', path: '/quotations', icon: FileText },
       { name: 'Proforma Invoices', path: '/proforma-invoices', icon: FileText },
       { name: 'Challans', path: '/delivery-challan', icon: Truck },

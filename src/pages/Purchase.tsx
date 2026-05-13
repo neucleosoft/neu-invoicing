@@ -24,6 +24,7 @@ import DownloadMenu from '../components/DownloadMenu'
 import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import { DispatchOpts, TableData } from '../utils/downloadHelpers'
 import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename } from '../utils/bulkDownloadPdfs'
+import { renderPdfFirstPage } from '../utils/pdfRender'
 
 interface Item {
   id: string
@@ -44,43 +45,6 @@ interface BillItem {
   amount: number
   // Underscore prefix signals: not persisted, only for UI hints during extraction
   _extractedName?: string
-}
-
-// Render the first page of a PDF to a PNG byte array using pdfjs-dist + Chromium's native canvas.
-// Lives in the renderer (not the backend) because: (a) Chromium has canvas built-in — no native
-// node dep; (b) most OpenRouter OCR providers reject PDFs and only accept image MIME types.
-// Lazy-loaded so the pdfjs bundle isn't pulled in unless the user actually uploads a PDF.
-async function pdfFirstPageToPng(pdfBytes: Uint8Array): Promise<Uint8Array<ArrayBuffer>> {
-  const pdfjsLib = await import('pdfjs-dist')
-  // `new URL(..., import.meta.url)` is the Vite-recommended way to reference a worker file.
-  // Avoids the `?url` import-suffix syntax which needs a separate type declaration.
-  pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-    'pdfjs-dist/build/pdf.worker.min.mjs',
-    import.meta.url,
-  ).toString()
-
-  // pdfjs transfers the input buffer to its worker (the buffer becomes detached on the main
-  // thread). Pass a fresh copy so the caller's `pdfBytes` survives and stays usable for things
-  // like saving the original PDF as the bill's attachment.
-  const doc = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBytes) }).promise
-  const page = await doc.getPage(1)
-  // Scale 2× for better OCR fidelity — small text on bills is hard to read at native scale.
-  const viewport = page.getViewport({ scale: 2 })
-
-  const canvas = document.createElement('canvas')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Could not get 2D canvas context')
-
-  await page.render({ canvasContext: ctx, viewport, canvas }).promise
-
-  const blob: Blob | null = await new Promise((resolve) =>
-    canvas.toBlob(resolve, 'image/png')
-  )
-  if (!blob) throw new Error('canvas.toBlob returned null')
-  const arrayBuffer = await blob.arrayBuffer()
-  return new Uint8Array(arrayBuffer)
 }
 
 const normalizeBill = (bill: any): PurchaseBill => ({
@@ -603,7 +567,7 @@ const Purchase = () => {
       let extractMimeType = file.type
       if (file.type === 'application/pdf') {
         try {
-          extractBytes = await pdfFirstPageToPng(originalBytes)
+          extractBytes = await renderPdfFirstPage(originalBytes)
           extractMimeType = 'image/png'
         } catch (err) {
           toast.error(`Failed to read PDF: ${err instanceof Error ? err.message : 'unknown'}`)
