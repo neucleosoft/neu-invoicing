@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { FileText, Download } from 'lucide-react'
+import { FileText } from 'lucide-react'
 import DateInput from '../components/DateInput'
 import SearchableSelect from '../components/SearchableSelect'
+import DownloadMenu from '../components/DownloadMenu'
+import { DispatchOpts, TableData } from '../utils/downloadHelpers'
 import { useToast } from '../components/ToastContext'
 import { formatCurrency } from '../utils/currency'
 import { loadCompanyForPDF } from '../utils/loadCompanyForPDF'
@@ -11,7 +13,6 @@ import {
   StatementData,
   StatementLine,
 } from '../utils/pdfmakeStatement'
-import { openPdfInWindow } from '../utils/openPdfInWindow'
 
 interface CustomerOption {
   id: string
@@ -107,17 +108,45 @@ const CustomerStatement = () => {
     }
   }
 
-  const downloadPDF = async () => {
-    if (!statement) return
-    try {
-      const company = await loadCompanyForPDF()
-      const data = { ...statement, company }
-      const bytes = await getStatementPDFBytes(data)
-      openPdfInWindow(bytes, buildStatementFilename(data))
-    } catch (err) {
-      console.error(err)
-      toast.error('Failed to generate PDF.')
+  const buildDownloadOpts = async (): Promise<DispatchOpts> => {
+    if (!statement) throw new Error('No statement to download')
+    const company = await loadCompanyForPDF()
+    const data = { ...statement, company }
+    let cached: { bytes: Uint8Array; filename: string } | null = null
+    const getPdf = async () => {
+      if (!cached) {
+        const bytes = await getStatementPDFBytes(data)
+        cached = { bytes, filename: buildStatementFilename(data) }
+      }
+      return cached
     }
+    const getTable = async (): Promise<TableData> => {
+      const { filename } = await getPdf()
+      const meta: Array<[string, string | number]> = [
+        ['Customer', statement.customer.name || ''],
+        ['GSTIN', statement.customer.taxId || ''],
+        ['From', formatDate(statement.fromDate)],
+        ['To', formatDate(statement.toDate)],
+      ]
+      const metaSuffix: Array<[string, string | number]> = [
+        ['Opening Balance', statement.openingBalance],
+        ['Total Charges', statement.totalDebit],
+        ['Total Receipts', statement.totalCredit],
+        ['Closing Balance', statement.closingBalance],
+      ]
+      const headers = ['Date', 'Type', 'Number', 'Particulars', 'Charges', 'Receipts', 'Balance']
+      const rows: (string | number)[][] = statement.lines.map((line) => [
+        formatDate(line.date),
+        TYPE_LABEL[line.type],
+        line.number,
+        line.particulars,
+        line.debit || 0,
+        line.credit || 0,
+        line.balance,
+      ])
+      return { baseName: filename.replace(/\.pdf$/i, ''), meta, metaSuffix, headers, rows }
+    }
+    return { getPdf, getTable }
   }
 
   return (
@@ -186,12 +215,7 @@ const CustomerStatement = () => {
                 {formatDate(statement.fromDate)} — {formatDate(statement.toDate)}
               </p>
             </div>
-            <button
-              onClick={downloadPDF}
-              className="btn bg-emerald-600 hover:bg-emerald-700 text-white inline-flex items-center gap-2"
-            >
-              <Download className="h-4 w-4" /> Download PDF
-            </button>
+            <DownloadMenu variant="button" label="Download" getOpts={buildDownloadOpts} />
           </div>
 
           {/* Summary cards */}
