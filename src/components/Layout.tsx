@@ -52,7 +52,7 @@ const navigationGroups: { label?: string; items: { name: string; path: string; i
     label: 'Purchase & Payments',
     items: [
       { name: 'Purchase Orders', path: '/purchase-orders', icon: ClipboardList },
-      { name: 'Purchase', path: '/purchase', icon: ShoppingCart },
+      { name: 'Purchase Bills', path: '/purchase', icon: ShoppingCart },
       { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText },
       { name: 'Payments', path: '/payments', icon: CreditCard },
       { name: 'Cash & Bank', path: '/cash-bank', icon: Landmark },

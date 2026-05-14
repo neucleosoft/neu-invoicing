@@ -65,6 +65,10 @@ scripts/.convert-cache/
 scripts/convert-old-to-new-style.mjs
 scripts/import-previous-invoices.mjs
 scripts/reset-from-old-import.mjs
+scripts/_inspect-purchase-bills.mjs
+scripts/_list-pending.mjs
+scripts/import-from-jsonl.mjs
+scripts/import-purchase-bills.mjs
 
 # Scraping tools (not part of the app)
 platform-tools/
@@ -78,3 +82,4 @@ learning_pdf.md
 # Local-only originals of pre-blur README screenshots
 docs/screenshots/.originals/
 engineering_notes.pdf
+/
