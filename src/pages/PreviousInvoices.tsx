@@ -11,6 +11,8 @@ import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
 import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import DownloadMenu from '../components/DownloadMenu'
+import ShareMenu from '../components/ShareMenu'
+import { sharePdf, type ShareTarget } from '../utils/sharePdf'
 import type { DispatchOpts, TableData } from '../utils/downloadHelpers'
 import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename } from '../utils/bulkDownloadPdfs'
 import { renderPdfFirstPage } from '../utils/pdfRender'
@@ -579,6 +581,32 @@ const PreviousInvoices = () => {
     return anyUpdated
   }
 
+  const handleShare = async (row: PreviousInvoice, target: ShareTarget) => {
+    // PreviousInvoice has no payment-party record, so we can't prefill the
+    // recipient — share the stored PDF (or whatever original was uploaded)
+    // by bytes only. Non-PDF uploads (xlsx/csv/images) are still shareable
+    // as raw files; sharePdf forwards bytes verbatim and the OS handler picks
+    // it up by filename extension.
+    try {
+      const result = await window.electronAPI.previousInvoice.getFile(row.id)
+      if (!result.success || !result.data) {
+        toast.error(result.error || 'Failed to load file for sharing')
+        return
+      }
+      const subject = `Invoice ${row.invoiceNumber}${row.partyName ? ` — ${row.partyName}` : ''}`
+      await sharePdf(
+        new Uint8Array(result.data.fileData),
+        result.data.fileName,
+        target,
+        toast,
+        { subject, partyName: row.partyName },
+      )
+    } catch (error) {
+      console.error('Error sharing previous invoice:', error)
+      toast.error('Failed to share invoice')
+    }
+  }
+
   const handleView = async (row: PreviousInvoice) => {
     const result = await window.electronAPI.previousInvoice.getFile(row.id)
     if (!result.success || !result.data) {
@@ -888,6 +916,10 @@ const PreviousInvoices = () => {
                           Edit
                         </button>
                         <DownloadMenu getOpts={() => buildDownloadOpts(row)} />
+                        <ShareMenu
+                          onShare={(target) => handleShare(row, target)}
+                          partyName={row.partyName}
+                        />
                         <button
                           type="button"
                           onClick={() => handleDelete(row)}
