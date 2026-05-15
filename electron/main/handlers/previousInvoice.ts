@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
+import { extractFromPdfText } from '../lib/parseInvoicePdf'
 
 interface PreviousInvoiceItemInput {
   name: string
@@ -16,6 +17,7 @@ interface CreatePreviousInvoiceInput {
   invoiceNumber: string
   invoiceDate: string
   partyName: string
+  partyGstin?: string | null
   totalAmount: number
   notes?: string | null
   fileData: Uint8Array | Buffer | ArrayBuffer
@@ -28,6 +30,7 @@ interface UpdatePreviousInvoiceInput {
   invoiceNumber?: string
   invoiceDate?: string
   partyName?: string
+  partyGstin?: string | null
   totalAmount?: number
   notes?: string | null
   items?: PreviousInvoiceItemInput[]
@@ -68,6 +71,7 @@ export const setupPreviousInvoiceHandlers = () => {
           invoiceNumber: true,
           invoiceDate: true,
           partyName: true,
+          partyGstin: true,
           totalAmount: true,
           notes: true,
           fileMimeType: true,
@@ -147,6 +151,7 @@ export const setupPreviousInvoiceHandlers = () => {
           invoiceNumber: data.invoiceNumber,
           invoiceDate,
           partyName: data.partyName,
+          partyGstin: data.partyGstin ?? null,
           totalAmount: data.totalAmount,
           notes: data.notes ?? null,
           fileData: toBuffer(data.fileData),
@@ -160,6 +165,7 @@ export const setupPreviousInvoiceHandlers = () => {
           invoiceNumber: true,
           invoiceDate: true,
           partyName: true,
+          partyGstin: true,
           totalAmount: true,
           notes: true,
           fileMimeType: true,
@@ -189,6 +195,7 @@ export const setupPreviousInvoiceHandlers = () => {
         patch.invoiceDate = invoiceDate
       }
       if (data.partyName !== undefined) patch.partyName = data.partyName
+      if (data.partyGstin !== undefined) patch.partyGstin = data.partyGstin
       if (data.totalAmount !== undefined) patch.totalAmount = data.totalAmount
       if (data.notes !== undefined) patch.notes = data.notes
       // Replace-all strategy for items: Prisma wraps deleteMany + create in a
@@ -208,6 +215,7 @@ export const setupPreviousInvoiceHandlers = () => {
           invoiceNumber: true,
           invoiceDate: true,
           partyName: true,
+          partyGstin: true,
           totalAmount: true,
           notes: true,
           fileMimeType: true,
@@ -224,6 +232,33 @@ export const setupPreviousInvoiceHandlers = () => {
       }
     }
   })
+
+  // Text-based extraction for digital PDFs (app-generated and most modern
+  // invoice templates). The renderer tries this BEFORE the OCR fallback —
+  // deterministic, free, and ~60× faster. Returns null if the PDF has no
+  // usable text layer (scanned images), in which case the caller should fall
+  // back to OCR via purchase:extractFromImage.
+  ipcMain.handle(
+    'previousInvoice:extractFromPdfText',
+    async (_, args: { fileBytes: Uint8Array | Buffer | ArrayBuffer }) => {
+      try {
+        const bytes =
+          args.fileBytes instanceof Uint8Array
+            ? args.fileBytes
+            : Buffer.isBuffer(args.fileBytes)
+              ? new Uint8Array(args.fileBytes)
+              : new Uint8Array(args.fileBytes as ArrayBuffer)
+        const parsed = await extractFromPdfText(bytes)
+        if (!parsed) return { success: false, error: 'NO_TEXT_LAYER' }
+        return { success: true, data: parsed }
+      } catch (error) {
+        return {
+          success: false,
+          error: error instanceof Error ? error.message : 'Failed to extract from PDF text',
+        }
+      }
+    },
+  )
 
   ipcMain.handle('previousInvoice:delete', async (_, id: string) => {
     try {

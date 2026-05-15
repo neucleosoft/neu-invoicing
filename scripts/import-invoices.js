@@ -638,4 +638,20 @@ async function main() {
   await prisma.$disconnect();
 }
 
-main().catch(err => { console.error('Fatal:', err); process.exit(1); });
+// Run main() only when invoked directly. When required from another script
+// (e.g. rescan-previous-invoices.js) we just expose the parser helpers.
+if (require.main === module) {
+  main().catch(err => { console.error('Fatal:', err); process.exit(1); });
+}
+
+module.exports = {
+  extractPdfText,
+  parseInvoiceText,
+  parseNum,
+  parseDateDMY,
+  stateCodeFromGstin,
+  stateNameFromCode,
+  stateCodeFromName,
+  normalizeItemName,
+  STATE_CODES,
+};
