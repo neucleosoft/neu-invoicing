@@ -679,6 +679,7 @@ model PreviousInvoice {
   invoiceNumber  String
   invoiceDate    DateTime
   partyName      String
+  partyGstin     String?
   totalAmount    Float
   notes          String?
   fileData       Bytes // raw file bytes (PDF / image / spreadsheet)

@@ -69,6 +69,7 @@ scripts/_inspect-purchase-bills.mjs
 scripts/_list-pending.mjs
 scripts/import-from-jsonl.mjs
 scripts/import-purchase-bills.mjs
+scripts/rescan-previous-invoices.js
 
 # Scraping tools (not part of the app)
 platform-tools/

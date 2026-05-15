@@ -34,7 +34,7 @@ export default defineConfig({
           build: {
             outDir: 'dist-electron/main',
             rollupOptions: {
-              external: ['prisma', '@prisma/client', 'electron-store', 'googleapis']
+              external: ['prisma', '@prisma/client', 'electron-store', 'googleapis', 'pdf-parse']
             }
           },
           define: {

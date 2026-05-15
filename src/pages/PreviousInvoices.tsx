@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Archive, Search as SearchIcon, Upload, Trash2, Eye, Sparkles } from 'lucide-react'
+import { Archive, Search as SearchIcon, Upload, Trash2, Sparkles } from 'lucide-react'
 import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import DateInput from '../components/DateInput'
@@ -11,6 +11,8 @@ import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
 import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import DownloadMenu from '../components/DownloadMenu'
+import ShareMenu from '../components/ShareMenu'
+import { sharePdf, type ShareTarget } from '../utils/sharePdf'
 import type { DispatchOpts, TableData } from '../utils/downloadHelpers'
 import { bulkDownloadPdfs, bulkDownloadExcel, buildZipFilename } from '../utils/bulkDownloadPdfs'
 import { renderPdfFirstPage } from '../utils/pdfRender'
@@ -21,6 +23,7 @@ interface PreviousInvoice {
   invoiceNumber: string
   invoiceDate: string
   partyName: string
+  partyGstin?: string | null
   totalAmount: number
   notes?: string | null
   fileMimeType: string
@@ -100,6 +103,7 @@ const PreviousInvoices = () => {
     invoiceNumber: '',
     invoiceDate: new Date().toISOString().split('T')[0],
     partyName: '',
+    partyGstin: '',
     totalAmount: 0,
     notes: '',
   })
@@ -111,18 +115,29 @@ const PreviousInvoices = () => {
   const confirm = useConfirm()
 
   useEffect(() => {
-    loadRows()
+    ;(async () => {
+      const initial = await loadRows()
+      // Silently backfill anything missing for Excel exports (GSTIN / items)
+      // after the page is rendered. Reload only if something actually changed.
+      const updated = await backfillForExcel(initial)
+      if (updated) await loadRows()
+    })()
+    // Run once per mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const loadRows = async () => {
+  const loadRows = async (): Promise<PreviousInvoice[]> => {
     setLoading(true)
     try {
       const result = await window.electronAPI.previousInvoice.getAll()
       if (result.success && result.data) {
-        setRows(result.data as PreviousInvoice[])
+        const list = result.data as PreviousInvoice[]
+        setRows(list)
+        return list
       } else if (result.error) {
         toast.error(result.error)
       }
+      return []
     } finally {
       setLoading(false)
     }
@@ -135,6 +150,7 @@ const PreviousInvoices = () => {
       invoiceNumber: '',
       invoiceDate: new Date().toISOString().split('T')[0],
       partyName: '',
+      partyGstin: '',
       totalAmount: 0,
       notes: '',
     })
@@ -149,6 +165,7 @@ const PreviousInvoices = () => {
       invoiceNumber: row.invoiceNumber,
       invoiceDate: new Date(row.invoiceDate).toISOString().split('T')[0],
       partyName: row.partyName,
+      partyGstin: row.partyGstin || '',
       totalAmount: row.totalAmount,
       notes: row.notes || '',
     })
@@ -214,32 +231,62 @@ const PreviousInvoices = () => {
 
     setExtracting(true)
     try {
-      // OCR providers reject PDFs — rasterise page 1 to PNG first.
-      let extractBytes: Uint8Array = buf
-      let extractMime = mime
+      // For PDFs with a text layer (app-generated and most digital PDFs), try
+      // deterministic text-extraction first — same regex parser used by the
+      // backfill script, no API cost, no token-limit truncation, no vision-
+      // model misreads of 15-char GSTINs. OCR is the fallback for scanned /
+      // image PDFs and direct image uploads.
+      let ex: any = null
+      let textTried = false
+      let textError: string | null = null
       if (mime === 'application/pdf') {
-        try {
-          extractBytes = await renderPdfFirstPage(buf)
-          extractMime = 'image/png'
-        } catch (err) {
-          toast.error(`Couldn't read PDF for extraction: ${err instanceof Error ? err.message : 'unknown'}`)
-          return
+        textTried = true
+        const textResult = await (window.electronAPI as any).previousInvoice.extractFromPdfText({
+          fileBytes: new Uint8Array(buf),
+        })
+        if (textResult.success && textResult.data) {
+          ex = textResult.data
+        } else if (textResult.error && textResult.error !== 'NO_TEXT_LAYER') {
+          textError = textResult.error
         }
       }
-      const result = await window.electronAPI.purchase.extractFromImage({
-        fileBytes: new Uint8Array(extractBytes),
-        mimeType: extractMime,
-      } as any)
-      if (!result.success || !result.data) {
-        toast.info('Auto-fill unavailable. Enter details manually.')
-        return
+
+      // Fall back to OCR if text extraction didn't yield usable data (scanned
+      // PDF, image upload, or text-parse error).
+      if (!ex) {
+        let extractBytes: Uint8Array = buf
+        let extractMime = mime
+        if (mime === 'application/pdf') {
+          try {
+            extractBytes = await renderPdfFirstPage(buf)
+            extractMime = 'image/png'
+          } catch (err) {
+            toast.error(`Couldn't read PDF for extraction: ${err instanceof Error ? err.message : 'unknown'}`)
+            return
+          }
+        }
+        const result = await window.electronAPI.purchase.extractFromImage({
+          fileBytes: new Uint8Array(extractBytes),
+          mimeType: extractMime,
+        } as any)
+        if (!result.success || !result.data) {
+          // Surface the actual error instead of a generic "unavailable" — the
+          // user needs to know whether it's a config problem (missing API key),
+          // a rate limit, or a model issue they can retry.
+          const ocrError = result.error || 'unknown error'
+          const prefix = textTried ? 'Auto-fill failed (text + OCR). ' : 'Auto-fill failed (OCR). '
+          const detail = textError ? ` Text parser error: ${textError}.` : ''
+          toast.error(`${prefix}OCR error: ${ocrError}.${detail} Enter details manually.`)
+          return
+        }
+        ex = result.data
       }
-      const ex = result.data
       const normalizedDate = normalizeExtractedDate(ex.billDate)
       setFormData((prev) => ({
         invoiceNumber: ex.billNumber || prev.invoiceNumber,
         invoiceDate: normalizedDate || prev.invoiceDate,
         partyName: ex.supplierName || prev.partyName,
+        partyGstin: ex.supplierGstin || prev.partyGstin,
         totalAmount: ex.totalAmount && ex.totalAmount > 0 ? ex.totalAmount : prev.totalAmount,
         notes: prev.notes,
       }))
@@ -267,7 +314,8 @@ const PreviousInvoices = () => {
     }
   }
 
-  const handleSave = async () => {
+  const handleSave = async (e?: React.FormEvent) => {
+    e?.preventDefault()
     if (!formData.invoiceNumber.trim()) {
       toast.error('Invoice number is required')
       return
@@ -300,6 +348,24 @@ const PreviousInvoices = () => {
         amount: it.amount,
       }))
 
+    // On create: if OCR failed / file was Excel-CSV / user skipped items,
+    // synthesize a single fallback row carrying the invoice total. Guarantees
+    // every imported invoice lands in the DB with at least one line item so
+    // Excel/CSV downloads and reporting never show empty data. User can
+    // replace it later via Edit (and on edit we respect zero-items intent).
+    if (!editingId && itemsPayload.length === 0) {
+      itemsPayload.push({
+        name: `Invoice ${formData.invoiceNumber.trim() || 'imported'}`,
+        hsnCode: null,
+        quantity: 1,
+        unit: null,
+        rate: formData.totalAmount,
+        discount: 0,
+        taxRate: 0,
+        amount: formData.totalAmount,
+      })
+    }
+
     setSaving(true)
     try {
       if (editingId) {
@@ -307,6 +373,7 @@ const PreviousInvoices = () => {
           invoiceNumber: formData.invoiceNumber.trim(),
           invoiceDate: formData.invoiceDate,
           partyName: formData.partyName.trim(),
+          partyGstin: formData.partyGstin.trim() || null,
           totalAmount: formData.totalAmount,
           notes: formData.notes.trim() || null,
           items: itemsPayload,
@@ -325,6 +392,7 @@ const PreviousInvoices = () => {
           invoiceNumber: formData.invoiceNumber.trim(),
           invoiceDate: formData.invoiceDate,
           partyName: formData.partyName.trim(),
+          partyGstin: formData.partyGstin.trim() || null,
           totalAmount: formData.totalAmount,
           notes: formData.notes.trim() || null,
           fileData: pickedFile.bytes,
@@ -386,51 +454,157 @@ const PreviousInvoices = () => {
       const result = await window.electronAPI.previousInvoice.getById(row.id)
       const items: Array<Record<string, any>> = (result.success && result.data?.items) || []
 
-      if (items.length === 0) {
-        // No items stored (e.g. rows uploaded before items were captured, or
-        // ones where the extractor returned none). Fall back to a single
-        // metadata row so the Excel/CSV is at least useful.
-        return {
-          baseName,
-          headers: ['Invoice No.', 'Invoice Date', 'Party', 'Total Amount', 'File'],
-          rows: [[
-            row.invoiceNumber,
-            new Date(row.invoiceDate).toLocaleDateString('en-GB'),
-            row.partyName,
-            row.totalAmount,
-            filename,
-          ]],
-        }
-      }
-
-      const subtotal = items.reduce((s, it) => s + (it.quantity || 0) * (it.rate || 0), 0)
-      const tax = items.reduce((s, it) => {
-        const taxable = (it.quantity || 0) * (it.rate || 0)
-        return s + taxable * ((it.taxRate || 0) / 100)
-      }, 0)
+      const noItems = items.length === 0
+      // When no items are captured (legacy upload / failed OCR), fall back to
+      // a single row carrying the invoice total in the Amount column. The
+      // alternative — a row of all blanks — looks broken in the saved Excel.
+      const subtotal = noItems
+        ? row.totalAmount
+        : items.reduce((s, it) => s + (it.quantity || 0) * (it.rate || 0), 0)
+      const tax = noItems
+        ? 0
+        : items.reduce((s, it) => {
+            const taxable = (it.quantity || 0) * (it.rate || 0)
+            return s + taxable * ((it.taxRate || 0) / 100)
+          }, 0)
+      // Header shape matches Sales (src/pages/Sales.tsx buildInvoiceTableData)
+      // so a merged export lines up. Status has no source on PreviousInvoice
+      // (no payment state tracked) — left blank rather than dropped.
       const meta: Array<[string, string | number]> = [
         ['Invoice', row.invoiceNumber],
         ['Date', new Date(row.invoiceDate).toLocaleDateString('en-GB')],
         ['Customer', row.partyName],
+        ['GSTIN', row.partyGstin || ''],
       ]
       const metaSuffix: Array<[string, string | number]> = [
         ['Subtotal', subtotal],
         ['Tax', tax],
         ['Total', row.totalAmount],
+        ['Status', ''],
       ]
       const headers = ['Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount']
-      const rowsOut: (string | number)[][] = items.map(it => [
-        it.name ?? '',
-        it.hsnCode ?? '',
-        it.quantity ?? 0,
-        it.rate ?? 0,
-        it.discount ?? 0,
-        it.taxRate ?? 0,
-        it.amount ?? (it.quantity || 0) * (it.rate || 0),
-      ])
+      const rowsOut: (string | number)[][] = noItems
+        ? [['(no line items)', '', 1, row.totalAmount, 0, 0, row.totalAmount]]
+        : items.map(it => [
+            it.name ?? '',
+            it.hsnCode ?? '',
+            it.quantity ?? 0,
+            it.rate ?? 0,
+            it.discount ?? 0,
+            it.taxRate ?? 0,
+            it.amount ?? (it.quantity || 0) * (it.rate || 0),
+          ])
       return { baseName, meta, metaSuffix, headers, rows: rowsOut }
     }
     return { getPdf, getTable }
+  }
+
+  // Silently walk every previous invoice and backfill missing data needed by
+  // the Excel export — GSTIN if blank, line items if empty or only the
+  // "Invoice <number>" fallback. User-edited items are preserved. Runs once
+  // per page mount in the background; rows that already have data are
+  // skipped, so once the DB is fully backfilled the loop becomes a no-op.
+  const backfillForExcel = async (current: PreviousInvoice[]): Promise<boolean> => {
+    let anyUpdated = false
+    for (const r of current) {
+      const isExtractable =
+        r.fileMimeType === 'application/pdf' || r.fileMimeType.startsWith('image/')
+      if (!isExtractable) continue
+      try {
+        const detail = await window.electronAPI.previousInvoice.getById(r.id)
+        if (!detail.success || !detail.data) continue
+        const existing = detail.data as any
+        const existingItems: any[] = existing.items || []
+        const hasGstin = !!(existing.partyGstin && String(existing.partyGstin).trim())
+        const isFallbackOnly =
+          existingItems.length === 1 &&
+          typeof existingItems[0].name === 'string' &&
+          existingItems[0].name.startsWith('Invoice ')
+        const itemsEmpty = existingItems.length === 0 || isFallbackOnly
+        if (hasGstin && !itemsEmpty) continue
+
+        const fileRes = await window.electronAPI.previousInvoice.getFile(r.id)
+        if (!fileRes.success || !fileRes.data) continue
+        const mime = fileRes.data.fileMimeType
+        let data: any = null
+
+        // Try deterministic text extraction first for PDFs.
+        if (mime === 'application/pdf') {
+          const textRes = await (window.electronAPI as any).previousInvoice.extractFromPdfText({
+            fileBytes: new Uint8Array(fileRes.data.fileData),
+          })
+          if (textRes.success && textRes.data) data = textRes.data
+        }
+
+        // Fall back to OCR if text extraction didn't yield data.
+        if (!data) {
+          let extractBytes: Uint8Array = fileRes.data.fileData
+          let extractMime = mime
+          if (extractMime === 'application/pdf') {
+            try {
+              extractBytes = await renderPdfFirstPage(extractBytes)
+              extractMime = 'image/png'
+            } catch {
+              continue
+            }
+          }
+          const ex = await window.electronAPI.purchase.extractFromImage({
+            fileBytes: new Uint8Array(extractBytes),
+            mimeType: extractMime,
+          } as any)
+          if (!ex.success || !ex.data) continue
+          data = ex.data
+        }
+        const patch: any = {}
+        if (!hasGstin && data.supplierGstin) patch.partyGstin = data.supplierGstin
+        if (itemsEmpty && Array.isArray(data.items) && data.items.length > 0) {
+          patch.items = data.items.map((it: any) => ({
+            name: it.name ?? '',
+            hsnCode: it.hsnCode ?? null,
+            quantity: typeof it.quantity === 'number' ? it.quantity : 0,
+            unit: null,
+            rate: typeof it.rate === 'number' ? it.rate : 0,
+            discount: typeof it.discount === 'number' ? it.discount : 0,
+            taxRate: typeof it.taxRate === 'number' ? it.taxRate : 0,
+            amount: typeof it.total === 'number'
+              ? it.total
+              : (it.quantity || 0) * (it.rate || 0),
+          }))
+        }
+        if (Object.keys(patch).length === 0) continue
+        const save = await window.electronAPI.previousInvoice.update(r.id, patch)
+        if (save.success) anyUpdated = true
+      } catch {
+        // Skip this row, continue.
+      }
+    }
+    return anyUpdated
+  }
+
+  const handleShare = async (row: PreviousInvoice, target: ShareTarget) => {
+    // PreviousInvoice has no payment-party record, so we can't prefill the
+    // recipient — share the stored PDF (or whatever original was uploaded)
+    // by bytes only. Non-PDF uploads (xlsx/csv/images) are still shareable
+    // as raw files; sharePdf forwards bytes verbatim and the OS handler picks
+    // it up by filename extension.
+    try {
+      const result = await window.electronAPI.previousInvoice.getFile(row.id)
+      if (!result.success || !result.data) {
+        toast.error(result.error || 'Failed to load file for sharing')
+        return
+      }
+      const subject = `Invoice ${row.invoiceNumber}${row.partyName ? ` — ${row.partyName}` : ''}`
+      await sharePdf(
+        new Uint8Array(result.data.fileData),
+        result.data.fileName,
+        target,
+        toast,
+        { subject, partyName: row.partyName },
+      )
+    } catch (error) {
+      console.error('Error sharing previous invoice:', error)
+      toast.error('Failed to share invoice')
+    }
   }
 
   const handleView = async (row: PreviousInvoice) => {
@@ -483,16 +657,55 @@ const PreviousInvoices = () => {
     }
     setBulkDownloading(true)
     try {
-      const headers = ['Invoice #', 'Date', 'Party', 'Total', 'File', 'File Type', 'Notes']
-      const rows: (string | number)[][] = matching.map(r => ([
-        r.invoiceNumber,
-        new Date(r.invoiceDate).toLocaleDateString('en-GB'),
-        r.partyName,
-        r.totalAmount,
-        r.fileName,
-        formatFileSize(r.fileMimeType),
-        r.notes || '',
-      ]))
+      // Mirror the Sales bulk shape: one row per line item, document-level
+      // fields repeated on each row. Status/Paid/Balance are omitted because
+      // PreviousInvoice doesn't track payment state.
+      const headers = [
+        'Invoice #', 'Date', 'Customer', 'GSTIN',
+        'Item', 'HSN/SAC', 'Qty', 'Rate', 'Discount', 'Tax %', 'Amount',
+        'Subtotal', 'Tax', 'Total',
+      ]
+      const rows: (string | number)[][] = []
+      for (const r of matching) {
+        const dateStr = new Date(r.invoiceDate).toLocaleDateString('en-GB')
+        const gstin = r.partyGstin || ''
+        // Items were captured at upload time into PreviousInvoiceItem.
+        const detail = await window.electronAPI.previousInvoice.getById(r.id)
+        const items: Array<Record<string, any>> = (detail.success && detail.data?.items) || []
+        const subtotal = items.reduce((s, it) => s + (it.quantity || 0) * (it.rate || 0), 0)
+        const tax = items.reduce((s, it) => {
+          const taxable = (it.quantity || 0) * (it.rate || 0)
+          return s + taxable * ((it.taxRate || 0) / 100)
+        }, 0)
+        const invoiceTrailer: (string | number)[] = [subtotal, tax, r.totalAmount]
+        if (items.length === 0) {
+          // No items captured — surface the invoice total in the Amount column
+          // so the row carries useful data. Subtotal/Tax mirror the fallback
+          // used by single-invoice download.
+          rows.push([
+            r.invoiceNumber, dateStr, r.partyName, gstin,
+            '(no line items)', '', 1, r.totalAmount, 0, 0, r.totalAmount,
+            r.totalAmount, 0, r.totalAmount,
+          ])
+          continue
+        }
+        for (const it of items) {
+          rows.push([
+            r.invoiceNumber,
+            dateStr,
+            r.partyName,
+            gstin,
+            it.name ?? '',
+            it.hsnCode ?? '',
+            it.quantity ?? 0,
+            it.rate ?? 0,
+            it.discount ?? 0,
+            it.taxRate ?? 0,
+            it.amount ?? (it.quantity || 0) * (it.rate || 0),
+            ...invoiceTrailer,
+          ])
+        }
+      }
       const today = new Date().toISOString().slice(0, 10)
       const filename = `Previous_Invoices_${today}.xlsx`
       await bulkDownloadExcel({
@@ -655,7 +868,7 @@ const PreviousInvoices = () => {
                   <SortHeader label="Date" sortKey="invoiceDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Party" sortKey="partyName" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Amount" sortKey="totalAmount" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
-                  <th className="table-header sticky top-0 z-10">File</th>
+                  <th className="table-header sticky top-0 z-10">Status</th>
                   <th className="table-header sticky top-0 z-10">Actions</th>
                 </tr>
               </thead>
@@ -671,37 +884,48 @@ const PreviousInvoices = () => {
                       >
                         {row.invoiceNumber}
                       </button>
+                      <span
+                        className="ml-2 inline-block px-1.5 py-0.5 text-xs rounded bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+                        title={row.fileName}
+                      >
+                        {formatFileSize(row.fileMimeType)}
+                      </span>
                     </td>
                     <td className="table-cell">{new Date(row.invoiceDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{row.partyName}</td>
                     <td className="table-cell">{formatCurrency(row.totalAmount)}</td>
-                    <td className="table-cell text-sm">
-                      <div className="truncate max-w-[220px]" title={row.fileName}>{row.fileName}</div>
-                      <div className="text-xs text-gray-500 dark:text-gray-400">{formatFileSize(row.fileMimeType)}</div>
+                    <td className="table-cell">
+                      <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
+                        Archived
+                      </span>
                     </td>
                     <td className="table-cell">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center space-x-2">
                         <button
                           type="button"
                           onClick={() => handleView(row)}
-                          title="Open file"
-                          className="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300"
+                          className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
                         >
-                          <Eye className="w-4 h-4" />
+                          View
                         </button>
-                        <span
-                          className="inline-flex items-center justify-center p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300"
-                          title="Download as PDF / image / Excel / CSV / Print"
+                        <button
+                          type="button"
+                          onClick={() => openEdit(row)}
+                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
                         >
-                          <DownloadMenu getOpts={() => buildDownloadOpts(row)} />
-                        </span>
+                          Edit
+                        </button>
+                        <DownloadMenu getOpts={() => buildDownloadOpts(row)} />
+                        <ShareMenu
+                          onShare={(target) => handleShare(row, target)}
+                          partyName={row.partyName}
+                        />
                         <button
                           type="button"
                           onClick={() => handleDelete(row)}
-                          title="Delete"
-                          className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400"
+                          className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
                         >
-                          <Trash2 className="w-4 h-4" />
+                          Delete
                         </button>
                       </div>
                     </td>
@@ -713,202 +937,258 @@ const PreviousInvoices = () => {
         )}
       </div>
 
-      {/* Upload / Edit modal */}
+      {/* Upload / Edit modal — laid out to match Purchase Bills */}
       {showModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-3xl bg-white dark:bg-gray-800 rounded-xl shadow-2xl">
-            <div className="px-6 py-4 border-b dark:border-gray-700">
-              <h2 className="text-xl font-bold">{editingId ? 'Edit Previous Invoice' : 'Upload Previous Invoice'}</h2>
-              {!editingId && (
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  PDF, image, Excel or CSV. All fields required.
-                </p>
-              )}
-            </div>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-6xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold">
+                  {editingId ? 'Edit Previous Invoice' : 'Upload Previous Invoice'}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setShowModal(false)}
+                  className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl"
+                >
+                  ×
+                </button>
+              </div>
 
-            <div className="px-6 py-4 space-y-4">
-              {!editingId && (
-                <div>
-                  <label className="label">File *</label>
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept={ACCEPT_ATTR}
-                    className="hidden"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0]
-                      if (f) handleFilePick(f)
-                      e.target.value = ''
-                    }}
-                  />
-                  <div className="flex items-center gap-3">
+              <form onSubmit={handleSave} className="space-y-6">
+                {/* AI Extract from File */}
+                {!editingId && (
+                  <div className="flex items-center justify-between gap-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <div>
+                      <p className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                        Have a PDF, image, Excel or CSV of the invoice?
+                      </p>
+                      <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
+                        We'll store the file and auto-fill the form. Review before saving.
+                      </p>
+                      {pickedFile && (
+                        <p className="text-xs text-green-700 dark:text-green-300 mt-1 font-medium">
+                          ✓ {pickedFile.name} ({(pickedFile.bytes.byteLength / 1024).toFixed(1)} KB)
+                        </p>
+                      )}
+                    </div>
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept={ACCEPT_ATTR}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0]
+                        if (f) handleFilePick(f)
+                        e.target.value = ''
+                      }}
+                      style={{ display: 'none' }}
+                    />
                     <button
                       type="button"
                       onClick={() => fileInputRef.current?.click()}
-                      className="btn btn-secondary inline-flex items-center gap-2"
+                      disabled={extracting}
+                      className="btn btn-primary gap-2 flex items-center"
                     >
-                      <Upload className="w-4 h-4" />
-                      {pickedFile ? 'Replace file' : 'Choose file'}
+                      {extracting ? (
+                        <>
+                          <Sparkles className="w-4 h-4 animate-pulse" />
+                          Extracting…
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="w-4 h-4" />
+                          {pickedFile ? 'Replace File' : 'Choose File'}
+                        </>
+                      )}
                     </button>
-                    {pickedFile && (
-                      <span className="text-sm text-gray-600 dark:text-gray-300 truncate">
-                        {pickedFile.name}
-                      </span>
-                    )}
-                    {extracting && (
-                      <span className="inline-flex items-center gap-1.5 text-sm text-primary-600 dark:text-primary-400">
-                        <Sparkles className="w-4 h-4 animate-pulse" />
-                        Extracting…
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="label">Invoice Number *</label>
-                  <input
-                    type="text"
-                    className="input"
-                    value={formData.invoiceNumber}
-                    onChange={(e) => setFormData({ ...formData, invoiceNumber: e.target.value })}
-                  />
-                </div>
-                <div>
-                  <label className="label">Date *</label>
-                  <DateInput
-                    className="input"
-                    value={formData.invoiceDate}
-                    onChange={(e) => setFormData({ ...formData, invoiceDate: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="label">Party Name *</label>
-                <input
-                  type="text"
-                  className="input"
-                  value={formData.partyName}
-                  onChange={(e) => setFormData({ ...formData, partyName: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <label className="label">Total Amount *</label>
-                <NumberInput
-                  className="input"
-                  value={formData.totalAmount}
-                  onChange={(v) => setFormData({ ...formData, totalAmount: v })}
-                />
-              </div>
-
-              <div>
-                <label className="label">Notes</label>
-                <textarea
-                  className="input"
-                  rows={3}
-                  value={formData.notes}
-                  onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                />
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="label mb-0">Line Items</label>
-                  <button
-                    type="button"
-                    onClick={addItem}
-                    className="text-sm text-primary-600 hover:underline dark:text-primary-300"
-                  >
-                    + Add Row
-                  </button>
-                </div>
-                {formItems.length === 0 ? (
-                  <p className="text-sm text-gray-500 dark:text-gray-400 italic">
-                    No line items. Click "+ Add Row" to add manually, or upload a PDF for auto-extraction.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    <div className="grid grid-cols-[1fr_70px_60px_80px_60px_90px_32px] gap-2 text-xs text-gray-500 dark:text-gray-400 px-1">
-                      <span>Item</span>
-                      <span>HSN</span>
-                      <span>Qty</span>
-                      <span>Rate</span>
-                      <span>Tax %</span>
-                      <span>Amount</span>
-                      <span></span>
-                    </div>
-                    {formItems.map((item, idx) => (
-                      <div
-                        key={idx}
-                        className="grid grid-cols-[1fr_70px_60px_80px_60px_90px_32px] gap-2 items-center"
-                      >
-                        <input
-                          type="text"
-                          className="input"
-                          value={item.name}
-                          onChange={(e) => updateItem(idx, { name: e.target.value })}
-                        />
-                        <input
-                          type="text"
-                          className="input"
-                          value={item.hsnCode}
-                          onChange={(e) => updateItem(idx, { hsnCode: e.target.value })}
-                        />
-                        <NumberInput
-                          className="input"
-                          value={item.quantity}
-                          onChange={(v) => updateItem(idx, { quantity: v })}
-                        />
-                        <NumberInput
-                          className="input"
-                          value={item.rate}
-                          onChange={(v) => updateItem(idx, { rate: v })}
-                        />
-                        <NumberInput
-                          className="input"
-                          value={item.taxRate}
-                          onChange={(v) => updateItem(idx, { taxRate: v })}
-                        />
-                        <NumberInput
-                          className="input"
-                          value={item.amount}
-                          onChange={(v) => updateItem(idx, { amount: v })}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => removeItem(idx)}
-                          className="p-1.5 rounded hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400"
-                          title="Remove row"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
                   </div>
                 )}
-              </div>
-            </div>
 
-            <div className="px-6 py-4 border-t dark:border-gray-700 flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setShowModal(false)}
-                disabled={saving}
-                className="btn btn-secondary"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSave}
-                disabled={saving || extracting}
-                className="btn btn-primary"
-              >
-                {saving ? 'Saving…' : extracting ? 'Extracting…' : editingId ? 'Save Changes' : 'Upload'}
-              </button>
+                {/* Basic Info */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Supplier / Party *</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={formData.partyName}
+                      onChange={(e) => setFormData({ ...formData, partyName: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Bill Date *</label>
+                    <DateInput
+                      className="input"
+                      value={formData.invoiceDate}
+                      onChange={(e) => setFormData({ ...formData, invoiceDate: e.target.value })}
+                      required
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Supplier GSTIN</label>
+                    <input
+                      type="text"
+                      className="input uppercase"
+                      placeholder="15-character GSTIN"
+                      maxLength={15}
+                      value={formData.partyGstin}
+                      onChange={(e) => setFormData({ ...formData, partyGstin: e.target.value.toUpperCase() })}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="label">Invoice Number *</label>
+                    <input
+                      type="text"
+                      className="input"
+                      value={formData.invoiceNumber}
+                      onChange={(e) => setFormData({ ...formData, invoiceNumber: e.target.value })}
+                      placeholder="As printed on the bill"
+                      required
+                    />
+                  </div>
+
+                  <div className="col-span-2">
+                    <label className="label">Total Amount *</label>
+                    <NumberInput
+                      className="input"
+                      value={formData.totalAmount}
+                      onChange={(v) => setFormData({ ...formData, totalAmount: v })}
+                    />
+                  </div>
+                </div>
+
+                {/* Items Section */}
+                <div>
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="text-lg font-semibold">Bill Items</h3>
+                    <button type="button" onClick={addItem} className="btn btn-secondary text-sm">
+                      + Add Item
+                    </button>
+                  </div>
+
+                  {formItems.length === 0 ? (
+                    <div className="text-center py-8 bg-gray-50 dark:bg-gray-900/40 rounded-lg border-2 border-dashed">
+                      <p className="text-gray-500 dark:text-gray-400 mb-2">No items added yet</p>
+                      <button
+                        type="button"
+                        onClick={addItem}
+                        className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                      >
+                        Click "+ Add Item" to add your first item
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {formItems.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg"
+                        >
+                          <div className="flex-1">
+                            <label className="label text-xs">Item</label>
+                            <input
+                              type="text"
+                              className="input"
+                              value={item.name}
+                              onChange={(e) => updateItem(idx, { name: e.target.value })}
+                            />
+                          </div>
+                          <div className="w-28">
+                            <label className="label text-xs">HSN/SAC</label>
+                            <input
+                              type="text"
+                              className="input"
+                              value={item.hsnCode}
+                              onChange={(e) => updateItem(idx, { hsnCode: e.target.value })}
+                            />
+                          </div>
+                          <div className="w-20">
+                            <label className="label text-xs">Qty</label>
+                            <NumberInput
+                              className="input"
+                              value={item.quantity}
+                              onChange={(v) => updateItem(idx, { quantity: v })}
+                            />
+                          </div>
+                          <div className="w-28">
+                            <label className="label text-xs">Rate</label>
+                            <NumberInput
+                              className="input"
+                              value={item.rate}
+                              onChange={(v) => updateItem(idx, { rate: v })}
+                            />
+                          </div>
+                          <div className="w-20">
+                            <label className="label text-xs">Tax %</label>
+                            <NumberInput
+                              className="input"
+                              value={item.taxRate}
+                              onChange={(v) => updateItem(idx, { taxRate: v })}
+                            />
+                          </div>
+                          <div className="w-32">
+                            <label className="label text-xs">Total</label>
+                            <NumberInput
+                              className="input"
+                              value={item.amount}
+                              onChange={(v) => updateItem(idx, { amount: v })}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeItem(idx)}
+                            className="btn btn-secondary text-red-600 dark:text-red-400 px-3"
+                            title="Remove item"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="label">Notes</label>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    value={formData.notes}
+                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
+                    placeholder="Internal notes..."
+                  />
+                </div>
+
+                {/* Actions */}
+                <div className="flex justify-end gap-3 pt-4 border-t">
+                  <button
+                    type="button"
+                    onClick={() => setShowModal(false)}
+                    disabled={saving}
+                    className="btn btn-secondary"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={saving || extracting}
+                    className="btn btn-primary"
+                  >
+                    {saving
+                      ? 'Saving…'
+                      : extracting
+                      ? 'Extracting…'
+                      : editingId
+                      ? 'Update Previous Invoice'
+                      : 'Create Previous Invoice'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         </div>
