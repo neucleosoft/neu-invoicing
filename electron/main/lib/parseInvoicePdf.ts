@@ -7,7 +7,7 @@
 // NEUCLEO SOFT / Neu Invoicing PDF templates). Keep behaviour in sync if you
 // change the JS copy.
 
-import { PDFParse } from 'pdf-parse'
+import pdfParse from 'pdf-parse'
 
 export interface ParsedInvoiceItem {
   name: string
@@ -67,15 +67,9 @@ const normalizeItemName = (name: string): string => {
   )
 }
 
-// Extract raw text from PDF bytes using pdf-parse v2 PDFParse class. Internally
-// uses pdfjs-dist; works in Electron main process with no native deps.
 export const extractTextFromPdfBytes = async (bytes: Uint8Array): Promise<string> => {
-  // PDFParse transfers the TypedArray to its worker — pass a fresh copy so the
-  // caller's bytes remain usable (the upload flow stores the original PDF as
-  // fileData).
-  const parser = new PDFParse({ data: new Uint8Array(bytes) })
-  const result = await parser.getText()
-  return result.pages.map((p) => p.text).join('\n')
+  const result = await pdfParse(Buffer.from(bytes))
+  return result.text
 }
 
 // Internal mutable shape during parsing; converted to ParsedInvoice at the end.

@@ -115,29 +115,18 @@ const PreviousInvoices = () => {
   const confirm = useConfirm()
 
   useEffect(() => {
-    ;(async () => {
-      const initial = await loadRows()
-      // Silently backfill anything missing for Excel exports (GSTIN / items)
-      // after the page is rendered. Reload only if something actually changed.
-      const updated = await backfillForExcel(initial)
-      if (updated) await loadRows()
-    })()
-    // Run once per mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadRows()
   }, [])
 
-  const loadRows = async (): Promise<PreviousInvoice[]> => {
+  const loadRows = async () => {
     setLoading(true)
     try {
       const result = await window.electronAPI.previousInvoice.getAll()
       if (result.success && result.data) {
-        const list = result.data as PreviousInvoice[]
-        setRows(list)
-        return list
+        setRows(result.data as PreviousInvoice[])
       } else if (result.error) {
         toast.error(result.error)
       }
-      return []
     } finally {
       setLoading(false)
     }
@@ -241,7 +230,7 @@ const PreviousInvoices = () => {
       let textError: string | null = null
       if (mime === 'application/pdf') {
         textTried = true
-        const textResult = await (window.electronAPI as any).previousInvoice.extractFromPdfText({
+        const textResult = await window.electronAPI.previousInvoice.extractFromPdfText({
           fileBytes: new Uint8Array(buf),
         })
         if (textResult.success && textResult.data) {
@@ -347,24 +336,6 @@ const PreviousInvoices = () => {
         taxRate: it.taxRate,
         amount: it.amount,
       }))
-
-    // On create: if OCR failed / file was Excel-CSV / user skipped items,
-    // synthesize a single fallback row carrying the invoice total. Guarantees
-    // every imported invoice lands in the DB with at least one line item so
-    // Excel/CSV downloads and reporting never show empty data. User can
-    // replace it later via Edit (and on edit we respect zero-items intent).
-    if (!editingId && itemsPayload.length === 0) {
-      itemsPayload.push({
-        name: `Invoice ${formData.invoiceNumber.trim() || 'imported'}`,
-        hsnCode: null,
-        quantity: 1,
-        unit: null,
-        rate: formData.totalAmount,
-        discount: 0,
-        taxRate: 0,
-        amount: formData.totalAmount,
-      })
-    }
 
     setSaving(true)
     try {
@@ -497,88 +468,6 @@ const PreviousInvoices = () => {
       return { baseName, meta, metaSuffix, headers, rows: rowsOut }
     }
     return { getPdf, getTable }
-  }
-
-  // Silently walk every previous invoice and backfill missing data needed by
-  // the Excel export — GSTIN if blank, line items if empty or only the
-  // "Invoice <number>" fallback. User-edited items are preserved. Runs once
-  // per page mount in the background; rows that already have data are
-  // skipped, so once the DB is fully backfilled the loop becomes a no-op.
-  const backfillForExcel = async (current: PreviousInvoice[]): Promise<boolean> => {
-    let anyUpdated = false
-    for (const r of current) {
-      const isExtractable =
-        r.fileMimeType === 'application/pdf' || r.fileMimeType.startsWith('image/')
-      if (!isExtractable) continue
-      try {
-        const detail = await window.electronAPI.previousInvoice.getById(r.id)
-        if (!detail.success || !detail.data) continue
-        const existing = detail.data as any
-        const existingItems: any[] = existing.items || []
-        const hasGstin = !!(existing.partyGstin && String(existing.partyGstin).trim())
-        const isFallbackOnly =
-          existingItems.length === 1 &&
-          typeof existingItems[0].name === 'string' &&
-          existingItems[0].name.startsWith('Invoice ')
-        const itemsEmpty = existingItems.length === 0 || isFallbackOnly
-        if (hasGstin && !itemsEmpty) continue
-
-        const fileRes = await window.electronAPI.previousInvoice.getFile(r.id)
-        if (!fileRes.success || !fileRes.data) continue
-        const mime = fileRes.data.fileMimeType
-        let data: any = null
-
-        // Try deterministic text extraction first for PDFs.
-        if (mime === 'application/pdf') {
-          const textRes = await (window.electronAPI as any).previousInvoice.extractFromPdfText({
-            fileBytes: new Uint8Array(fileRes.data.fileData),
-          })
-          if (textRes.success && textRes.data) data = textRes.data
-        }
-
-        // Fall back to OCR if text extraction didn't yield data.
-        if (!data) {
-          let extractBytes: Uint8Array = fileRes.data.fileData
-          let extractMime = mime
-          if (extractMime === 'application/pdf') {
-            try {
-              extractBytes = await renderPdfFirstPage(extractBytes)
-              extractMime = 'image/png'
-            } catch {
-              continue
-            }
-          }
-          const ex = await window.electronAPI.purchase.extractFromImage({
-            fileBytes: new Uint8Array(extractBytes),
-            mimeType: extractMime,
-          } as any)
-          if (!ex.success || !ex.data) continue
-          data = ex.data
-        }
-        const patch: any = {}
-        if (!hasGstin && data.supplierGstin) patch.partyGstin = data.supplierGstin
-        if (itemsEmpty && Array.isArray(data.items) && data.items.length > 0) {
-          patch.items = data.items.map((it: any) => ({
-            name: it.name ?? '',
-            hsnCode: it.hsnCode ?? null,
-            quantity: typeof it.quantity === 'number' ? it.quantity : 0,
-            unit: null,
-            rate: typeof it.rate === 'number' ? it.rate : 0,
-            discount: typeof it.discount === 'number' ? it.discount : 0,
-            taxRate: typeof it.taxRate === 'number' ? it.taxRate : 0,
-            amount: typeof it.total === 'number'
-              ? it.total
-              : (it.quantity || 0) * (it.rate || 0),
-          }))
-        }
-        if (Object.keys(patch).length === 0) continue
-        const save = await window.electronAPI.previousInvoice.update(r.id, patch)
-        if (save.success) anyUpdated = true
-      } catch {
-        // Skip this row, continue.
-      }
-    }
-    return anyUpdated
   }
 
   const handleShare = async (row: PreviousInvoice, target: ShareTarget) => {
