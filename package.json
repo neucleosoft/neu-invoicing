@@ -1,129 +1,21 @@
 {
-  "name": "neu-invoicing",
+  "name": "neu-invoicing-monorepo",
   "version": "1.0.0",
-  "description": "Desktop invoicing software with Google Drive integration",
-  "main": "dist-electron/main/index.js",
-  "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build && electron-builder",
-    "build:win": "npm run build -- --win",
-    "build:mac": "npm run build -- --mac",
-    "build:linux": "npm run build -- --linux",
-    "preview": "vite preview",
-    "electron:dev": "dotenv -- vite",
-    "electron:build": "vite build && electron-builder",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio",
-    "import:invoices": "node scripts/import-invoices.js"
-  },
-  "keywords": [
-    "invoicing",
-    "inventory",
-    "electron",
-    "google-drive"
+  "private": true,
+  "packageManager": "npm@11.10.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
   ],
-  "author": "Neu Invoicing",
-  "license": "MIT",
-  "dependencies": {
-    "@prisma/client": "^5.20.0",
-    "@types/pdf-parse": "^1.1.5",
-    "@types/react-datepicker": "^6.2.0",
-    "axios": "^1.7.7",
-    "cmdk": "^1.1.1",
-    "date-fns": "^3.6.0",
-    "dotenv": "^17.3.1",
-    "electron-store": "^8.2.0",
-    "exceljs": "^3.4.0",
-    "googleapis": "^171.4.0",
-    "jspdf": "^4.2.1",
-    "jspdf-autotable": "^5.0.2",
-    "jszip": "^3.10.1",
-    "lucide-react": "^1.8.0",
-    "pdf-parse": "^1.1.4",
-    "pdfjs-dist": "^5.7.284",
-    "pdfmake": "^0.2.10",
-    "prisma": "^5.20.0",
-    "react": "^18.3.1",
-    "react-datepicker": "^9.1.0",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.2",
-    "recharts": "^2.12.7",
-    "zustand": "^4.5.5"
+  "scripts": {
+    "dev": "turbo run electron:dev",
+    "build": "turbo run build",
+    "build:win": "turbo run build:win",
+    "prisma:generate": "turbo run prisma:generate",
+    "prisma:migrate": "turbo run prisma:migrate",
+    "prisma:studio": "turbo run prisma:studio"
   },
   "devDependencies": {
-    "@types/node": "^20.16.5",
-    "@types/react": "^18.3.5",
-    "@types/react-dom": "^18.3.0",
-    "@vitejs/plugin-react": "^4.3.1",
-    "autoprefixer": "^10.4.20",
-    "concurrently": "^8.2.2",
-    "dotenv-cli": "^11.0.0",
-    "electron": "^41.3.0",
-    "electron-builder": "^26.8.1",
-    "esbuild": "^0.28.0",
-    "postcss": "^8.4.45",
-    "puppeteer": "^24.31.0",
-    "tailwindcss": "^3.4.11",
-    "typescript": "^5.5.4",
-    "vite": "^8.0.10",
-    "vite-plugin-electron": "^0.28.7",
-    "vite-plugin-electron-renderer": "^0.14.5",
-    "wait-on": "^7.2.0"
-  },
-  "build": {
-    "appId": "com.neuinvoicing.app",
-    "productName": "Neu Invoicing",
-    "forceCodeSigning": false,
-    "directories": {
-      "output": "release"
-    },
-    "asarUnpack": [
-      "node_modules/prisma/**/*",
-      "node_modules/.prisma/**/*",
-      "node_modules/@prisma/**/*",
-      "prisma/**/*"
-    ],
-    "files": [
-      "dist/**/*",
-      "dist-electron/**/*",
-      "node_modules/**/*",
-      "package.json",
-      "prisma/**/*",
-      {
-        "from": "node_modules/.prisma/client/",
-        "to": "node_modules/.prisma/client/"
-      }
-    ],
-    "extraResources": [
-      "prisma/**/*",
-      "node_modules/.prisma/**/*",
-      "node_modules/@prisma/client/**/*"
-    ],
-    "win": {
-      "target": [
-        "nsis"
-      ],
-      "signAndEditExecutable": false
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true
-    },
-    "mac": {
-      "target": [
-        "dmg"
-      ],
-      "icon": "resources/icon.icns"
-    },
-    "linux": {
-      "target": [
-        "AppImage"
-      ],
-      "icon": "resources/icon.png"
-    }
+    "turbo": "^2.9.14"
   }
 }
