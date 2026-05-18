@@ -51,6 +51,10 @@ vite.config.js
 vite.config.d.ts
 tsconfig.node.tsbuildinfo
 
+# Turborepo cache + logs (per-machine, never commit)
+.turbo
+**/.turbo
+
 # Sensitive files
 sbox_live_key.csv
 *.csv
