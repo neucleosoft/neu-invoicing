@@ -30,7 +30,7 @@ import { setupCashBankHandlers } from './handlers/cashBank'
 import { setupShareHandlers } from './handlers/share'
 
 protocol.registerSchemesAsPrivileged([
-  { scheme: 'local-resource', privileges: { bypassCSP: true, stream: true, supportFetchAPI: true } }
+  { scheme: 'local-resource', privileges: { bypassCSP: true, stream: true, supportFetchAPI: true, corsEnabled: true } }
 ])
 
 let mainWindow: BrowserWindow | null = null
