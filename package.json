@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run electron:dev",
+    "dev": "turbo run dev",
     "build": "turbo run build",
     "build:win": "turbo run build:win",
     "prisma:generate": "turbo run prisma:generate",
