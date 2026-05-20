@@ -4,9 +4,36 @@ import { useStore } from '../store/useStore'
 
 const Login = () => {
   const [loading, setLoading] = useState(false)
+  const [offlineLoading, setOfflineLoading] = useState(false)
   const [error, setError] = useState('')
   const navigate = useNavigate()
   const { setAuthStatus, setCompany } = useStore()
+
+  // Skip Google sign-in: use the app offline. Cloud backup stays disabled
+  // until the user later connects Google from Settings (Phase 2).
+  const handleUseOffline = async () => {
+    setOfflineLoading(true)
+    setError('')
+    try {
+      const result = await window.electronAPI.auth.enterOfflineMode()
+      if (!result.success) {
+        setError(result.error || 'Could not start offline mode')
+        return
+      }
+      setAuthStatus({ isAuthenticated: false, user: null, offlineMode: true })
+      const companyResult = await window.electronAPI.company.get()
+      if (companyResult.success && companyResult.data) {
+        setCompany(companyResult.data)
+        navigate('/')
+      } else {
+        navigate('/onboarding')
+      }
+    } catch (err) {
+      setError('Failed to start in offline mode')
+    } finally {
+      setOfflineLoading(false)
+    }
+  }
 
   const handleGoogleSignIn = async () => {
     setLoading(true)
@@ -88,6 +115,23 @@ const Login = () => {
               {loading ? 'Signing in...' : 'Sign in with Google'}
             </span>
           </button>
+
+          <div className="flex items-center gap-3 my-2">
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+            <span className="text-xs uppercase tracking-wider text-gray-400 dark:text-gray-500">or</span>
+            <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+          </div>
+
+          <button
+            onClick={handleUseOffline}
+            disabled={loading || offlineLoading}
+            className="w-full px-6 py-2.5 text-sm font-medium text-gray-700 dark:text-gray-300 bg-transparent border border-gray-300 dark:border-gray-700 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {offlineLoading ? 'Starting…' : 'Use offline (set up Google later)'}
+          </button>
+          <p className="text-xs text-center text-gray-500 dark:text-gray-400 -mt-1">
+            Skip cloud backup for now — you can connect Google anytime from Settings.
+          </p>
 
           {error && (
             <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">

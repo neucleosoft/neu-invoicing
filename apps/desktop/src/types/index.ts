@@ -469,6 +469,9 @@ export interface AuthStatus {
     name?: string
     picture?: string
   } | null
+  // True when the user chose to skip Google sign-in and use the app offline.
+  // Mutually exclusive with `isAuthenticated` (signing in clears the flag).
+  offlineMode?: boolean
 }
 
 // GST Report Types
@@ -579,6 +582,8 @@ declare global {
         signInWithGoogle: () => Promise<any>
         signOut: () => Promise<any>
         getAuthStatus: () => Promise<AuthStatus>
+        enterOfflineMode: () => Promise<{ success: boolean; error?: string }>
+        exitOfflineMode: () => Promise<{ success: boolean; error?: string }>
         onAuthInvalidated: (callback: () => void) => () => void
       }
       sync: {

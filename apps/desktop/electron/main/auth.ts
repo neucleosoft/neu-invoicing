@@ -32,6 +32,16 @@ const SCOPES = [
   'https://www.googleapis.com/auth/userinfo.email'
 ]
 
+// "Skip sign-in" mode. Set when the user chooses to use the app without
+// connecting Google. Cleared automatically when they sign in later.
+const OFFLINE_MODE_KEY = 'offline_mode'
+
+const isOfflineMode = (): boolean => Boolean(store.get(OFFLINE_MODE_KEY))
+const setOfflineMode = (on: boolean) => {
+  if (on) store.set(OFFLINE_MODE_KEY, true)
+  else store.delete(OFFLINE_MODE_KEY)
+}
+
 export const setupAuthHandlers = () => {
   // Sign in with Google
   ipcMain.handle('auth:signInWithGoogle', async () => {
@@ -67,8 +77,9 @@ export const setupAuthHandlers = () => {
               const { tokens } = await oauth2Client.getToken(code)
               oauth2Client.setCredentials(tokens)
 
-              // Store tokens securely
+              // Store tokens securely; signing in cancels any prior offline mode.
               store.set('google_tokens', tokens)
+              setOfflineMode(false)
 
               // Get user info
               const oauth2 = google.oauth2({ version: 'v2', auth: oauth2Client })
@@ -107,6 +118,7 @@ export const setupAuthHandlers = () => {
       store.delete('google_tokens')
       store.delete('user_info')
       store.delete('demo_mode')
+      setOfflineMode(false)
       oauth2Client.setCredentials({})
 
       return { success: true }
@@ -127,13 +139,43 @@ export const setupAuthHandlers = () => {
       oauth2Client.setCredentials(tokens)
       return {
         isAuthenticated: true,
-        user: userInfo
+        user: userInfo,
+        offlineMode: false,
       }
     }
 
     return {
       isAuthenticated: false,
-      user: null
+      user: null,
+      offlineMode: isOfflineMode(),
+    }
+  })
+
+  // Enter offline mode — user opted to use the app without connecting Google.
+  // The login screen still shows; this just unlocks the rest of the app.
+  ipcMain.handle('auth:enterOfflineMode', async () => {
+    try {
+      setOfflineMode(true)
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to enter offline mode'
+      }
+    }
+  })
+
+  // Exit offline mode — used when the user is about to sign in to Google so
+  // the auth gate falls back to "needs sign-in" if the OAuth flow is cancelled.
+  ipcMain.handle('auth:exitOfflineMode', async () => {
+    try {
+      setOfflineMode(false)
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to exit offline mode'
+      }
     }
   })
 }
