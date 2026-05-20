@@ -98,6 +98,10 @@ const handleSyncError = (error: unknown, label: string): { success: boolean; err
   return { success: false, error: friendly }
 }
 
+// Offline-mode safety. Without Google tokens any sync call to Drive would
+// throw; these guards keep skip-sign-in callers from crashing.
+const isSignedIn = (): boolean => Boolean(store.get('google_tokens'))
+
 export const setupSyncHandlers = () => {
   // Get sync status
   ipcMain.handle('sync:getSyncStatus', async () => {
@@ -107,6 +111,7 @@ export const setupSyncHandlers = () => {
   // Read-only: ask Drive whether a backup file exists and return its metadata.
   // Used on startup to decide whether to prompt the user to restore.
   ipcMain.handle('sync:checkCloudBackup', async () => {
+    if (!isSignedIn()) return { exists: false }
     return await checkCloudBackup()
   })
 
@@ -114,22 +119,28 @@ export const setupSyncHandlers = () => {
   // conflict, firstSync) so the renderer can decide direction or surface a
   // conflict dialog without the main process making UI decisions.
   ipcMain.handle('sync:syncState', async () => {
+    if (!isSignedIn()) return { cloudExists: false, localChanged: false, cloudChanged: false, isConflict: false, firstSync: false }
     return await syncState()
   })
 
   // Explicit upload — caller has already chosen direction.
   ipcMain.handle('sync:upload', async () => {
+    if (!isSignedIn()) return { success: false, error: 'OFFLINE' }
     return await syncUpload()
   })
 
   // Explicit download — caller has already confirmed destructive replace of local.
   ipcMain.handle('sync:download', async () => {
+    if (!isSignedIn()) return { success: false, error: 'OFFLINE' }
     return await syncDownload()
   })
 
   // Combined status for Settings → Backup: latest cloud backup metadata,
   // this device's last upload, and the current schedule.
   ipcMain.handle('sync:getBackupInfo', async () => {
+    if (!isSignedIn()) {
+      return { cloudBackup: null, thisDeviceLastUpload: null, backupFrequency: getBackupFrequency() }
+    }
     return await getBackupInfo()
   })
 

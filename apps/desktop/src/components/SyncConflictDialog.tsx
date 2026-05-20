@@ -7,6 +7,9 @@ interface SyncConflictDialogProps {
   onUpload: () => void
   onDownload: () => void
   onCancel: () => void
+  // 'conflict' (default) — both sides have unsynced changes (existing flow).
+  // 'firstConnect'      — user just connected Google and a cloud backup already exists.
+  mode?: 'conflict' | 'firstConnect'
 }
 
 const formatDate = (iso?: string): string => {
@@ -28,8 +31,21 @@ export default function SyncConflictDialog({
   onUpload,
   onDownload,
   onCancel,
+  mode = 'conflict',
 }: SyncConflictDialogProps) {
   if (!open) return null
+
+  const isFirstConnect = mode === 'firstConnect'
+  const title = isFirstConnect ? 'Existing backup found' : 'Sync conflict'
+  const subtitle = isFirstConnect
+    ? "Your Google Drive already has a backup for this account. Choose which version to keep — the other will be replaced."
+    : 'Both this device and the cloud have unsynced changes. Choose which version to keep — the other will be replaced.'
+  const uploadLabel = isFirstConnect
+    ? 'Keep my local data (overwrite cloud)'
+    : "Upload local (cloud's changes are lost)"
+  const downloadLabel = isFirstConnect
+    ? 'Use cloud data (overwrite local) ⚠️'
+    : 'Download cloud (local changes are lost)'
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[9999] p-4">
@@ -38,10 +54,10 @@ export default function SyncConflictDialog({
           <AlertTriangle className="w-6 h-6 text-amber-600 dark:text-amber-400" />
         </div>
         <h3 className="text-lg font-semibold text-center text-gray-900 dark:text-gray-100 mb-2">
-          Sync conflict
+          {title}
         </h3>
         <p className="text-sm text-center text-gray-600 dark:text-gray-400 mb-4">
-          Both this device and the cloud have unsynced changes. Choose which version to keep — the other will be replaced.
+          {subtitle}
         </p>
         {cloudModifiedTime && (
           <div className="bg-gray-50 dark:bg-gray-900/50 rounded-lg p-3 mb-6">
@@ -57,14 +73,14 @@ export default function SyncConflictDialog({
             disabled={isWorking}
             className="w-full px-4 py-2.5 text-sm font-medium rounded-lg text-white bg-primary-600 hover:bg-primary-700 disabled:bg-primary-400 disabled:cursor-wait"
           >
-            Upload local (cloud's changes are lost)
+            {uploadLabel}
           </button>
           <button
             onClick={onDownload}
             disabled={isWorking}
             className="w-full px-4 py-2.5 text-sm font-medium rounded-lg text-white bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 disabled:cursor-wait"
           >
-            Download cloud (local changes are lost)
+            {downloadLabel}
           </button>
           <button
             onClick={onCancel}

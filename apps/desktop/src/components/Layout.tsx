@@ -31,6 +31,7 @@ import { useStore } from '../store/useStore'
 import CommandPalette from './CommandPalette'
 import SyncConflictDialog from './SyncConflictDialog'
 import { useManualBackup } from '../hooks/useManualBackup'
+import { useConnectGoogle } from '../hooks/useConnectGoogle'
 
 const navigationGroups: { label?: string; items: { name: string; path: string; icon: typeof LayoutDashboard }[] }[] = [
   {
@@ -148,6 +149,7 @@ const Layout = () => {
   }
 
   const { triggerBackup, isWorking: isBackingUp, conflictDialogProps } = useManualBackup()
+  const { connect: connectGoogle, isConnecting, dialog: connectDialog } = useConnectGoogle()
 
   const collapsed = !sidebarOpen
 
@@ -299,61 +301,84 @@ const Layout = () => {
             )
           })()}
 
-          {/* Sync Status */}
-          <button
-            onClick={triggerBackup}
-            disabled={isBackingUp}
-            className={`${collapsed ? 'w-full flex justify-center' : 'w-full flex items-center justify-between'} px-3 py-2 text-sm rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors mb-3 disabled:opacity-60`}
-            title={syncStatus?.status === 'error'
-              ? `Sync error — click to retry\n\n${syncStatus?.lastError || 'Unknown error'}`
-              : 'Sync now'}
-          >
-            <span className="flex items-center gap-2">
-              <SyncBadge />
-              {!collapsed && (
-                <span className="text-gray-700 dark:text-gray-200">
-                  {syncStatus?.status === 'syncing' ? 'Syncing…' : syncStatus?.status === 'error' ? 'Sync error' : 'Synced'}
+          {/* Sync Status — hidden in offline mode (no Google = no sync). */}
+          {authStatus?.isAuthenticated && (
+            <>
+              <button
+                onClick={triggerBackup}
+                disabled={isBackingUp}
+                className={`${collapsed ? 'w-full flex justify-center' : 'w-full flex items-center justify-between'} px-3 py-2 text-sm rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors mb-3 disabled:opacity-60`}
+                title={syncStatus?.status === 'error'
+                  ? `Sync error — click to retry\n\n${syncStatus?.lastError || 'Unknown error'}`
+                  : 'Sync now'}
+              >
+                <span className="flex items-center gap-2">
+                  <SyncBadge />
+                  {!collapsed && (
+                    <span className="text-gray-700 dark:text-gray-200">
+                      {syncStatus?.status === 'syncing' ? 'Syncing…' : syncStatus?.status === 'error' ? 'Sync error' : 'Synced'}
+                    </span>
+                  )}
                 </span>
-              )}
-            </span>
-            {!collapsed && syncStatus?.lastSync && (
-              <span className="text-xs text-gray-500 dark:text-gray-400">
-                {new Date(syncStatus.lastSync).toLocaleTimeString()}
-              </span>
-            )}
-          </button>
-          {!collapsed && syncStatus?.status === 'error' && syncStatus?.lastError && (
-            <div className="mb-3 -mt-1 px-3 py-2 text-xs rounded-lg bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200 dark:border-red-900/50">
-              {syncStatus.lastError}
-            </div>
-          )}
-
-          {/* User Info */}
-          <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
-            <div className="flex items-center gap-2 min-w-0">
-              {authStatus?.user?.picture && (
-                <img
-                  src={authStatus.user.picture}
-                  alt="User"
-                  className="w-8 h-8 rounded-full shrink-0"
-                />
-              )}
-              {!collapsed && (
-                <div className="text-sm min-w-0">
-                  <p className="font-medium text-gray-900 dark:text-gray-100 truncate">{authStatus?.user?.name}</p>
+                {!collapsed && syncStatus?.lastSync && (
+                  <span className="text-xs text-gray-500 dark:text-gray-400">
+                    {new Date(syncStatus.lastSync).toLocaleTimeString()}
+                  </span>
+                )}
+              </button>
+              {!collapsed && syncStatus?.status === 'error' && syncStatus?.lastError && (
+                <div className="mb-3 -mt-1 px-3 py-2 text-xs rounded-lg bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200 dark:border-red-900/50">
+                  {syncStatus.lastError}
                 </div>
               )}
+            </>
+          )}
+
+          {/* Offline indicator — clickable: turns on cloud backup via Google sign-in. */}
+          {authStatus?.offlineMode && (
+            <button
+              onClick={connectGoogle}
+              disabled={isConnecting}
+              className={`${collapsed ? 'w-full flex justify-center' : 'w-full flex items-center gap-2 px-3 py-2'} text-xs rounded-lg bg-gray-100 hover:bg-gray-200 dark:bg-gray-700/50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 transition-colors disabled:opacity-60 disabled:cursor-wait`}
+              title="Connect Google to enable cloud backup"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isConnecting ? 'bg-primary-500 animate-pulse' : 'bg-gray-400 dark:bg-gray-500'}`} />
+              {!collapsed && (
+                <span className="truncate text-left flex-1">
+                  {isConnecting ? 'Connecting…' : 'Connect Google for backup'}
+                </span>
+              )}
+            </button>
+          )}
+
+          {/* User Info — only when actually signed in with Google. */}
+          {authStatus?.isAuthenticated && (
+            <div className={`flex items-center ${collapsed ? 'justify-center' : 'justify-between'}`}>
+              <div className="flex items-center gap-2 min-w-0">
+                {authStatus?.user?.picture && (
+                  <img
+                    src={authStatus.user.picture}
+                    alt="User"
+                    className="w-8 h-8 rounded-full shrink-0"
+                  />
+                )}
+                {!collapsed && (
+                  <div className="text-sm min-w-0">
+                    <p className="font-medium text-gray-900 dark:text-gray-100 truncate">{authStatus?.user?.name}</p>
+                  </div>
+                )}
+              </div>
+              {!collapsed && (
+                <button
+                  onClick={handleSignOut}
+                  className="p-1.5 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              )}
             </div>
-            {!collapsed && (
-              <button
-                onClick={handleSignOut}
-                className="p-1.5 text-sm text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300 rounded hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
-                title="Sign Out"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </aside>
 
@@ -366,6 +391,7 @@ const Layout = () => {
 
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onSyncNow={triggerBackup} />
       <SyncConflictDialog {...conflictDialogProps} />
+      {connectDialog}
     </div>
   )
 }

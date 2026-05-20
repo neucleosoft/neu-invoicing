@@ -78,6 +78,14 @@ function App() {
           window.electronAPI.sync.onSyncStatusChange((s) => {
             setSyncStatus(s)
           })
+        } else if (status.offlineMode) {
+          // Skip-sign-in mode: no Google tokens, so don't touch Drive at all.
+          // Just load the local company (if any) and let the app open.
+          setBootStage('workspace')
+          const companyResult = await window.electronAPI.company.get()
+          if (companyResult.success && companyResult.data) {
+            setCompany(companyResult.data)
+          }
         }
       } catch (error) {
         console.error('Error checking auth:', error)
@@ -158,7 +166,9 @@ function App() {
     )
   }
 
-  if (!authStatus.isAuthenticated) {
+  // Gate the rest of the app: only Login is reachable until the user either
+  // signs in with Google OR explicitly chooses to use the app offline.
+  if (!authStatus.isAuthenticated && !authStatus.offlineMode) {
     return (
       <ToastProvider><ConfirmProvider>
         <Router>

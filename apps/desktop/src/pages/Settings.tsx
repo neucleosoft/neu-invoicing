@@ -6,6 +6,7 @@ import { AlertTriangle } from 'lucide-react'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import { useManualBackup } from '../hooks/useManualBackup'
+import { useConnectGoogle } from '../hooks/useConnectGoogle'
 import SyncConflictDialog from '../components/SyncConflictDialog'
 import {
   PO_SPECIAL_INSTRUCTIONS_DEFAULT,
@@ -16,8 +17,9 @@ import {
 type SettingsTab = 'company' | 'templates' | 'tax' | 'po' | 'backup'
 
 const Settings = () => {
-  const { company, setCompany } = useStore()
+  const { company, setCompany, authStatus } = useStore()
   const { triggerBackup, isWorking: isBackingUp, conflictDialogProps } = useManualBackup()
+  const { connect: connectGoogle, isConnecting, dialog: connectDialog } = useConnectGoogle()
   const confirm = useConfirm()
   const [activeTab, setActiveTab] = useState<SettingsTab>('company')
   const [backupInfo, setBackupInfo] = useState<{
@@ -662,6 +664,22 @@ const Settings = () => {
             <>
               <h2 className="text-2xl font-bold mb-6">Data & Backup</h2>
               <div className="space-y-6">
+                {authStatus?.offlineMode ? (
+                  <div className="bg-primary-50 dark:bg-primary-900/20 p-5 rounded-lg border border-primary-200 dark:border-primary-800">
+                    <h3 className="font-semibold mb-2 text-primary-900 dark:text-primary-100">Cloud backup is off</h3>
+                    <p className="text-sm text-gray-700 dark:text-gray-300 mb-4">
+                      You're using the app offline. Connect your Google account to back up your data to your own Google Drive. We never see your data — it goes into a hidden folder only this app can access.
+                    </p>
+                    <button
+                      className="btn btn-primary"
+                      onClick={connectGoogle}
+                      disabled={isConnecting}
+                    >
+                      {isConnecting ? 'Connecting…' : 'Connect Google for cloud backup'}
+                    </button>
+                  </div>
+                ) : (
+                  <>
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Google Drive Backup</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -731,6 +749,8 @@ const Settings = () => {
                   </div>
                 </div>
                 <SyncConflictDialog {...conflictDialogProps} />
+                  </>
+                )}
 
                 <div className="bg-yellow-50 dark:bg-yellow-900/20 p-4 rounded-lg border border-yellow-200 dark:border-yellow-800">
                   <h3 className="font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Local Database</h3>
@@ -740,6 +760,7 @@ const Settings = () => {
                   </p>
                 </div>
               </div>
+              {connectDialog}
             </>
           )}
         </div>
