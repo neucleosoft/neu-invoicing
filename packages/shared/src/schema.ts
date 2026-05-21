@@ -5,8 +5,8 @@ import {
   real,
   blob,
 } from "drizzle-orm/sqlite-core";
+import cuid from "cuid";
 
-const cuid = () => crypto.randomUUID();
 const now = () => new Date();
 
 // =============================================================
