@@ -24,6 +24,7 @@ import DeliveryChallan from './pages/DeliveryChallan'
 import CreditNotes from './pages/CreditNotes'
 import CashBank from './pages/CashBank'
 import CustomerStatement from './pages/CustomerStatement'
+import CustomerLedger from './pages/CustomerLedger'
 import Settings from './pages/Settings'
 import RestoreBackupDialog from './components/RestoreBackupDialog'
 
@@ -234,6 +235,7 @@ function App() {
             <Route path="credit-notes" element={<CreditNotes />} />
             <Route path="cash-bank" element={<CashBank />} />
             <Route path="statement" element={<CustomerStatement />} />
+            <Route path="ledger" element={<CustomerLedger />} />
             <Route path="reports" element={<Reports />} />
             <Route path="gst-reports" element={<GSTReports />} />
             <Route path="settings" element={<Settings />} />

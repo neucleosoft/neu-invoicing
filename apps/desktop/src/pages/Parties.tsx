@@ -510,6 +510,14 @@ const Parties = ({ mode = 'ALL' }: PartiesProps) => {
                           Catalog
                         </button>
                       )}
+                      {party.type === 'CUSTOMER' && (
+                        <button
+                          onClick={() => navigate('/ledger', { state: { customer: party } })}
+                          className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 mr-3"
+                        >
+                          Ledger
+                        </button>
+                      )}
                       <button onClick={() => handleEdit(party)} className="text-primary-600 hover:text-primary-700 mr-3">
                         Edit
                       </button>

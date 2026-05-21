@@ -1,6 +1,81 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 
+// Recompute an invoice/bill payment status from its total and amount paid.
+const computeStatus = (total: number, paid: number): 'PAID' | 'PARTIAL' | 'DRAFT' => {
+  if (total - paid <= 0) return 'PAID'
+  if (paid > 0) return 'PARTIAL'
+  return 'DRAFT'
+}
+
+// Apply a payment's effect: reduce the party's balance and credit the linked
+// invoice/bill. Used when a payment is (re-)applied.
+const applyPayment = async (tx: any, p: any) => {
+  if (p.type === 'PAYMENT_IN') {
+    if (p.customerId) {
+      await tx.customer.update({ where: { id: p.customerId }, data: { currentBalance: { decrement: p.amount } } })
+    }
+    if (p.salesInvoiceId) {
+      const inv = await tx.salesInvoice.findUnique({ where: { id: p.salesInvoiceId } })
+      if (inv) {
+        const paid = inv.amountPaid + p.amount
+        await tx.salesInvoice.update({
+          where: { id: p.salesInvoiceId },
+          data: { amountPaid: paid, balanceDue: inv.totalAmount - paid, status: computeStatus(inv.totalAmount, paid) },
+        })
+      }
+    }
+  } else {
+    if (p.supplierId) {
+      await tx.supplier.update({ where: { id: p.supplierId }, data: { currentBalance: { decrement: p.amount } } })
+    }
+    if (p.purchaseBillId) {
+      const bill = await tx.purchaseBill.findUnique({ where: { id: p.purchaseBillId } })
+      if (bill) {
+        const paid = bill.amountPaid + p.amount
+        await tx.purchaseBill.update({
+          where: { id: p.purchaseBillId },
+          data: { amountPaid: paid, balanceDue: bill.totalAmount - paid, status: computeStatus(bill.totalAmount, paid) },
+        })
+      }
+    }
+  }
+}
+
+// Reverse a payment's effect — the exact inverse of applyPayment. Used when a
+// payment is deleted or before an update re-applies the new values.
+const reversePayment = async (tx: any, p: any) => {
+  if (p.type === 'PAYMENT_IN') {
+    if (p.customerId) {
+      await tx.customer.update({ where: { id: p.customerId }, data: { currentBalance: { increment: p.amount } } })
+    }
+    if (p.salesInvoiceId) {
+      const inv = await tx.salesInvoice.findUnique({ where: { id: p.salesInvoiceId } })
+      if (inv) {
+        const paid = inv.amountPaid - p.amount
+        await tx.salesInvoice.update({
+          where: { id: p.salesInvoiceId },
+          data: { amountPaid: paid, balanceDue: inv.totalAmount - paid, status: computeStatus(inv.totalAmount, paid) },
+        })
+      }
+    }
+  } else {
+    if (p.supplierId) {
+      await tx.supplier.update({ where: { id: p.supplierId }, data: { currentBalance: { increment: p.amount } } })
+    }
+    if (p.purchaseBillId) {
+      const bill = await tx.purchaseBill.findUnique({ where: { id: p.purchaseBillId } })
+      if (bill) {
+        const paid = bill.amountPaid - p.amount
+        await tx.purchaseBill.update({
+          where: { id: p.purchaseBillId },
+          data: { amountPaid: paid, balanceDue: bill.totalAmount - paid, status: computeStatus(bill.totalAmount, paid) },
+        })
+      }
+    }
+  }
+}
+
 export const setupPaymentHandlers = () => {
   const prisma = getPrisma()
 
@@ -164,6 +239,63 @@ export const setupPaymentHandlers = () => {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to fetch payments'
+      }
+    }
+  })
+
+  // Update a payment — reverse the original effect, then apply the new values.
+  ipcMain.handle('payment:update', async (_, id: string, data) => {
+    try {
+      const existing = await prisma.paymentTransaction.findUnique({ where: { id } })
+      if (!existing) return { success: false, error: 'Payment not found' }
+      if (!data.amount || data.amount <= 0) {
+        return { success: false, error: 'A positive amount is required' }
+      }
+
+      const updated = await prisma.$transaction(async (tx: any) => {
+        await reversePayment(tx, existing)
+
+        const row = await tx.paymentTransaction.update({
+          where: { id },
+          data: {
+            customerId: existing.type === 'PAYMENT_IN' ? data.customerId ?? existing.customerId : existing.customerId,
+            supplierId: existing.type === 'PAYMENT_OUT' ? data.supplierId ?? existing.supplierId : existing.supplierId,
+            amount: data.amount,
+            paymentMode: data.paymentMode || existing.paymentMode,
+            paymentDate: data.paymentDate ? new Date(data.paymentDate) : existing.paymentDate,
+            notes: data.notes ?? existing.notes,
+          },
+        })
+
+        await applyPayment(tx, row)
+        return row
+      })
+
+      return { success: true, data: updated }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to update payment'
+      }
+    }
+  })
+
+  // Delete a payment — reverse its effect on balances and the linked invoice/bill.
+  ipcMain.handle('payment:delete', async (_, id: string) => {
+    try {
+      const existing = await prisma.paymentTransaction.findUnique({ where: { id } })
+      if (!existing) return { success: false, error: 'Payment not found' }
+
+      await prisma.$transaction(async (tx: any) => {
+        await reversePayment(tx, existing)
+        await tx.paymentTransaction.delete({ where: { id } })
+      })
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to delete payment'
       }
     }
   })

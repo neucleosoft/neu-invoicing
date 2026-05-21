@@ -165,6 +165,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     recordPaymentOut: (data: any) =>
       ipcRenderer.invoke("payment:recordPaymentOut", data),
     getAll: (type?: string) => ipcRenderer.invoke("payment:getAll", type),
+    update: (id: string, data: any) =>
+      ipcRenderer.invoke("payment:update", id, data),
+    delete: (id: string) => ipcRenderer.invoke("payment:delete", id),
   },
 
   // Dashboard

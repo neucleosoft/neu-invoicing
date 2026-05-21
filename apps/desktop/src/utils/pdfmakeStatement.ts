@@ -1,6 +1,6 @@
 import pdfMake from 'pdfmake/build/pdfmake'
 import pdfFonts from 'pdfmake/build/vfs_fonts'
-import { fmtNum, fmtRs, formatDate, LOGO_BASE64 } from './pdfHelpers'
+import { fmtNum, fmtRs, formatDate } from './pdfHelpers'
 
 ;(pdfMake as any).vfs = (pdfFonts as any).pdfMake?.vfs || pdfFonts
 
@@ -8,6 +8,11 @@ type Content = any
 type TableCell = any
 
 const GREEN = '#C6E0B4'
+
+// Balances with no minus sign — a negative balance means the customer is in
+// credit (an advance), so it's shown as a positive amount tagged "(Advance)".
+const fmtBalanceRs = (n: number): string => (n < 0 ? `${fmtRs(Math.abs(n))} (Advance)` : fmtRs(n))
+const fmtBalanceNum = (n: number): string => (n < 0 ? `${fmtNum(Math.abs(n))} (Advance)` : fmtNum(n))
 
 export interface StatementLine {
   date: string
@@ -42,15 +47,18 @@ export interface StatementData {
   totalDebit: number
   totalCredit: number
   closingBalance: number
+  // Document heading + filename prefix. Defaults to "CUSTOMER STATEMENT".
+  title?: string
 }
 
 const sanitizeFilePart = (s: string) => s.replace(/[^a-z0-9]/gi, '_')
 
 export function buildStatementFilename(data: StatementData) {
+  const prefix = data.title ? sanitizeFilePart(data.title).toLowerCase() : 'statement'
   const partyPart = sanitizeFilePart(data.customer.name)
   const fromPart = data.fromDate.slice(0, 10).replace(/-/g, '')
   const toPart = data.toDate.slice(0, 10).replace(/-/g, '')
-  return `statement_${partyPart}_${fromPart}_${toPart}.pdf`
+  return `${prefix}_${partyPart}_${fromPart}_${toPart}.pdf`
 }
 
 export function downloadStatementPDF(data: StatementData) {
@@ -70,12 +78,14 @@ export function getStatementPDFBytes(data: StatementData): Promise<Uint8Array> {
 }
 
 function buildDocDefinition(data: StatementData): any {
-  const logo = data.company?.logoBase64 || LOGO_BASE64
+  // Only embed a logo when the company actually has a valid one. (The old
+  // LOGO_BASE64 fallback constant is corrupt and makes pdfmake throw.)
+  const logo = data.company?.logoBase64 || ''
   return {
     pageSize: 'A4',
     pageMargins: [20, 16, 20, 16],
     content: [
-      buildTitle(),
+      buildTitle(data.title),
       buildHeader(data, logo),
       buildPartyAndPeriod(data),
       buildOpeningRow(data.openingBalance),
@@ -86,9 +96,9 @@ function buildDocDefinition(data: StatementData): any {
   }
 }
 
-function buildTitle(): Content {
+function buildTitle(title?: string): Content {
   return {
-    text: 'CUSTOMER STATEMENT',
+    text: title || 'CUSTOMER STATEMENT',
     bold: true,
     fontSize: 14,
     alignment: 'center',
@@ -118,11 +128,14 @@ function buildHeader(data: StatementData, logo: string): Content {
   if (company?.email)
     companyStack.push({ text: [{ text: 'Email: ', bold: true }, company.email], fontSize: 9 })
 
+  const columns: Content[] = []
+  if (logo) {
+    columns.push({ image: logo, width: 50, height: 50, margin: [0, 0, 8, 0] })
+  }
+  columns.push({ stack: companyStack, width: '*' })
+
   return {
-    columns: [
-      { image: logo, width: 50, height: 50, margin: [0, 0, 8, 0] },
-      { stack: companyStack, width: '*' },
-    ],
+    columns,
     margin: [0, 0, 0, 8],
   }
 }
@@ -192,7 +205,7 @@ function buildOpeningRow(openingBalance: number): Content {
             fillColor: GREEN,
           },
           {
-            text: fmtRs(openingBalance),
+            text: fmtBalanceRs(openingBalance),
             bold: true,
             fontSize: 9,
             alignment: 'right',
@@ -234,7 +247,7 @@ function buildTable(data: StatementData): Content {
     { text: line.particulars, fontSize: 9 },
     { text: line.debit ? fmtNum(line.debit) : '-', alignment: 'right', fontSize: 9 },
     { text: line.credit ? fmtNum(line.credit) : '-', alignment: 'right', fontSize: 9 },
-    { text: fmtNum(line.balance), alignment: 'right', fontSize: 9 },
+    { text: fmtBalanceNum(line.balance), alignment: 'right', fontSize: 9 },
   ])
 
   // Totals row
@@ -313,7 +326,7 @@ function buildSummary(data: StatementData): Content {
             margin: [0, 4, 4, 4],
           },
           {
-            text: fmtRs(data.closingBalance),
+            text: fmtBalanceRs(data.closingBalance),
             bold: true,
             fontSize: 11,
             alignment: 'right',
