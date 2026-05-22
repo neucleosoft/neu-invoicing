@@ -1,14 +1,13 @@
-// Builds a customer's ledger directly from the raw transaction lists
-// (sales / payments / credit-debit notes) — deliberately NOT using
-// customer:getStatement. Everything is assembled in the renderer.
-import type { Customer } from '../types'
+// Builds a supplier's ledger directly from the raw transaction lists — purchase
+// bills and payments-out. Assembled in the renderer.
+import type { Supplier } from '../types'
 import type { StatementData, StatementLine } from './pdfmakeStatement'
 import { getStatementPDFBytes, buildStatementFilename } from './pdfmakeStatement'
 import { loadCompanyForPDF } from './loadCompanyForPDF'
 import type { DispatchOpts, TableData } from './downloadHelpers'
 
-export interface LedgerData {
-  customer: Customer
+export interface SupplierLedgerData {
+  supplier: Supplier
   openingBalance: number
   rows: StatementLine[]
   totalDebit: number
@@ -26,67 +25,47 @@ const toIso = (d: unknown): string => {
   return isNaN(dt.getTime()) ? todayIso() : dt.toISOString()
 }
 
-// Assemble the ledger for one customer from the raw IPC list endpoints.
-export async function buildCustomerLedger(customer: Customer): Promise<LedgerData> {
+// Assemble the ledger for one supplier from the raw IPC lists.
+export async function buildSupplierLedger(supplier: Supplier): Promise<SupplierLedgerData> {
   const api = window.electronAPI
-  const [salesRes, payRes, noteRes] = await Promise.all([
-    api.sales.getAll(),
-    api.payment.getAll('PAYMENT_IN'),
-    api.creditNote.getAll(),
-  ])
-
-  const cid = customer.id
+  const sid = supplier.id
   type Raw = Omit<StatementLine, 'balance'>
   const raw: Raw[] = []
 
-  // Invoices → Debit
-  const sales = (((salesRes as any)?.data ?? []) as any[])
-  for (const inv of sales) {
-    const invCid = inv.customerId || inv.customer?.id
-    if (invCid !== cid) continue
+  const [billRes, payRes] = await Promise.all([
+    api.purchase.getAll(),
+    api.payment.getAll('PAYMENT_OUT'),
+  ])
+
+  // Purchase bills → Debit (what you owe the supplier goes up)
+  for (const bill of (((billRes as any)?.data ?? []) as any[])) {
+    if ((bill.supplierId || bill.supplier?.id) !== sid) continue
     raw.push({
-      date: toIso(inv.invoiceDate),
+      date: toIso(bill.billDate),
       type: 'INVOICE',
-      number: inv.invoiceNumber || '',
-      particulars: `Invoice ${inv.invoiceNumber || ''}`.trim(),
-      debit: inv.totalAmount || 0,
+      number: bill.billNumber || '',
+      particulars: `Purchase Bill ${bill.billNumber || ''}`.trim(),
+      debit: bill.totalAmount || 0,
       credit: 0,
     })
   }
 
-  // Payments received → Credit
-  const payments = (((payRes as any)?.data ?? []) as any[])
-  for (const p of payments) {
-    if (p.customerId !== cid) continue
+  // Payments made → Credit
+  for (const p of (((payRes as any)?.data ?? []) as any[])) {
+    if (p.supplierId !== sid) continue
     raw.push({
       date: toIso(p.paymentDate),
       type: 'PAYMENT',
       number: String(p.id || '').slice(-8).toUpperCase(),
-      particulars: `Payment received${p.paymentMode ? ` (${p.paymentMode})` : ''}`,
+      particulars: `Payment made${p.paymentMode ? ` (${p.paymentMode})` : ''}`,
       debit: 0,
       credit: p.amount || 0,
     })
   }
 
-  // Credit notes → Credit, Debit notes → Debit (active only)
-  const notes = (((noteRes as any)?.data ?? []) as any[])
-  for (const n of notes) {
-    if (n.customerId !== cid) continue
-    if (n.status && n.status !== 'ACTIVE') continue
-    const isCredit = n.type === 'CREDIT_NOTE'
-    raw.push({
-      date: toIso(n.noteDate),
-      type: isCredit ? 'CREDIT_NOTE' : 'DEBIT_NOTE',
-      number: n.noteNumber || '',
-      particulars: `${isCredit ? 'Credit' : 'Debit'} Note ${n.noteNumber || ''}`.trim(),
-      debit: isCredit ? 0 : n.totalAmount || 0,
-      credit: isCredit ? n.totalAmount || 0 : 0,
-    })
-  }
-
   raw.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
-  const openingBalance = customer.openingBalance || 0
+  const openingBalance = supplier.openingBalance || 0
   let bal = openingBalance
   const rows: StatementLine[] = raw.map((r) => {
     bal += r.debit - r.credit
@@ -96,7 +75,7 @@ export async function buildCustomerLedger(customer: Customer): Promise<LedgerDat
   const totalCredit = rows.reduce((s, r) => s + r.credit, 0)
 
   return {
-    customer,
+    supplier,
     openingBalance,
     rows,
     totalDebit,
@@ -106,14 +85,14 @@ export async function buildCustomerLedger(customer: Customer): Promise<LedgerDat
 }
 
 // Shape the ledger into what the statement PDF generator expects.
-function toStatementData(ledger: LedgerData, company: unknown): StatementData {
+function toStatementData(ledger: SupplierLedgerData, company: unknown): StatementData {
   return {
     customer: {
-      name: ledger.customer.name,
-      email: ledger.customer.email,
-      phone: ledger.customer.phone,
-      billingAddress: ledger.customer.billingAddress,
-      taxId: ledger.customer.taxId,
+      name: ledger.supplier.name,
+      email: ledger.supplier.email,
+      phone: ledger.supplier.phone,
+      billingAddress: ledger.supplier.billingAddress,
+      taxId: ledger.supplier.taxId,
     },
     company,
     fromDate: ledger.rows.length ? ledger.rows[0].date : todayIso(),
@@ -123,12 +102,14 @@ function toStatementData(ledger: LedgerData, company: unknown): StatementData {
     totalDebit: ledger.totalDebit,
     totalCredit: ledger.totalCredit,
     closingBalance: ledger.closingBalance,
-    title: 'CUSTOMER LEDGER',
+    title: 'SUPPLIER LEDGER',
   } as StatementData
 }
 
 // PDF bytes for the ledger — used by the Share menu.
-export async function getLedgerPdf(ledger: LedgerData): Promise<{ bytes: Uint8Array; filename: string }> {
+export async function getSupplierLedgerPdf(
+  ledger: SupplierLedgerData,
+): Promise<{ bytes: Uint8Array; filename: string }> {
   const company = await loadCompanyForPDF()
   const data = toStatementData(ledger, company)
   const bytes = await getStatementPDFBytes(data)
@@ -136,10 +117,10 @@ export async function getLedgerPdf(ledger: LedgerData): Promise<{ bytes: Uint8Ar
 }
 
 // Lazy PDF + table providers for the Download menu.
-export function buildLedgerDownloadOpts(ledger: LedgerData): DispatchOpts {
+export function buildSupplierLedgerDownloadOpts(ledger: SupplierLedgerData): DispatchOpts {
   let cached: { bytes: Uint8Array; filename: string } | null = null
   const getPdf = async () => {
-    if (!cached) cached = await getLedgerPdf(ledger)
+    if (!cached) cached = await getSupplierLedgerPdf(ledger)
     return cached
   }
   const getTable = async (): Promise<TableData> => {
@@ -148,8 +129,8 @@ export function buildLedgerDownloadOpts(ledger: LedgerData): DispatchOpts {
     return {
       baseName: filename.replace(/\.pdf$/i, ''),
       meta: [
-        ['Customer', ledger.customer.name],
-        ['GSTIN', ledger.customer.taxId || ''],
+        ['Supplier', ledger.supplier.name],
+        ['GSTIN', ledger.supplier.taxId || ''],
       ],
       metaSuffix: [
         ['Opening Balance', ledger.openingBalance],
@@ -158,13 +139,7 @@ export function buildLedgerDownloadOpts(ledger: LedgerData): DispatchOpts {
         ['Closing Balance', ledger.closingBalance],
       ],
       headers: ['Date', 'Particulars', 'Debit', 'Credit', 'Balance'],
-      rows: ledger.rows.map((r) => [
-        fmt(r.date),
-        r.particulars,
-        r.debit,
-        r.credit,
-        r.balance,
-      ]),
+      rows: ledger.rows.map((r) => [fmt(r.date), r.particulars, r.debit, r.credit, r.balance]),
     }
   }
   return { getPdf, getTable }

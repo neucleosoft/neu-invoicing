@@ -8,41 +8,41 @@ import { TableSkeleton } from '../components/Skeleton'
 import { formatCurrency } from '../utils/currency'
 import { sharePdf, type ShareTarget } from '../utils/sharePdf'
 import {
-  buildCustomerLedger,
-  buildCustomerLedgerDownloadOpts,
-  getCustomerLedgerPdf,
-  type CustomerLedgerData,
-} from '../utils/customerLedger'
-import type { Customer } from '../types'
+  buildSupplierLedger,
+  buildSupplierLedgerDownloadOpts,
+  getSupplierLedgerPdf,
+  type SupplierLedgerData,
+} from '../utils/supplierLedger'
+import type { Supplier } from '../types'
 
 const fmtDate = (iso: string): string =>
   new Date(iso).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
 
-// Show a balance without a minus sign. A negative balance means the customer has
+// Show a balance without a minus sign. A negative balance means the supplier has
 // been paid more than billed, i.e. they're in credit — label it "Advance".
 const renderBalance = (amount: number): string =>
   amount < 0 ? `${formatCurrency(Math.abs(amount))} (Advance)` : formatCurrency(amount)
 
-// A customer's ledger — every invoice, payment received and credit/debit note
-// with a running balance. Reached from the Customers list ("Ledger" action).
-const CustomerLedger = () => {
+// A supplier's ledger — every purchase bill and payment made with a running
+// balance. Reached from the Suppliers list ("Ledger" action).
+const SupplierLedger = () => {
   const location = useLocation()
   const navigate = useNavigate()
   const toast = useToast()
-  const state = location.state as { party?: Customer } | null
-  const customer = state?.party
+  const state = location.state as { party?: Supplier } | null
+  const supplier = state?.party
 
-  const [ledger, setLedger] = useState<CustomerLedgerData | null>(null)
+  const [ledger, setLedger] = useState<SupplierLedgerData | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!customer) {
+    if (!supplier) {
       setLoading(false)
       return
     }
     let cancelled = false
     setLoading(true)
-    buildCustomerLedger(customer)
+    buildSupplierLedger(supplier)
       .then((d) => {
         if (!cancelled) setLedger(d)
       })
@@ -56,34 +56,34 @@ const CustomerLedger = () => {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [customer?.id])
+  }, [supplier?.id])
 
   const handleShare = async (target: ShareTarget) => {
     if (!ledger) return
     try {
-      const { bytes, filename } = await getCustomerLedgerPdf(ledger)
+      const { bytes, filename } = await getSupplierLedgerPdf(ledger)
       await sharePdf(bytes, filename, target, toast, {
-        subject: `Account ledger — ${ledger.customer.name}`,
-        phone: ledger.customer.phone,
-        email: ledger.customer.email,
-        partyName: ledger.customer.name,
+        subject: `Account ledger — ${ledger.supplier.name}`,
+        phone: ledger.supplier.phone,
+        email: ledger.supplier.email,
+        partyName: ledger.supplier.name,
       })
     } catch {
       toast.error('Failed to share the ledger')
     }
   }
 
-  if (!customer) {
+  if (!supplier) {
     return (
       <div className="space-y-4">
         <button
-          onClick={() => navigate('/customers')}
+          onClick={() => navigate('/suppliers')}
           className="btn btn-secondary inline-flex items-center gap-2"
         >
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <div className="card text-center py-12 text-gray-500 dark:text-gray-400">
-          No customer selected. Open a ledger from the Customers list.
+          No supplier selected. Open a ledger from the Suppliers list.
         </div>
       </div>
     )
@@ -95,25 +95,25 @@ const CustomerLedger = () => {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
           <button
-            onClick={() => navigate('/customers')}
+            onClick={() => navigate('/suppliers')}
             className="btn btn-secondary inline-flex items-center gap-2"
           >
             <ArrowLeft className="w-4 h-4" /> Back
           </button>
           <div>
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{customer.name}</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Customer Ledger</p>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{supplier.name}</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">Supplier Ledger</p>
           </div>
         </div>
         {ledger && (
           <div className="flex items-center gap-2">
-            <DownloadMenu variant="button" getOpts={async () => buildCustomerLedgerDownloadOpts(ledger)} />
+            <DownloadMenu variant="button" getOpts={async () => buildSupplierLedgerDownloadOpts(ledger)} />
             <ShareMenu
               variant="button"
               onShare={handleShare}
-              phone={customer.phone}
-              email={customer.email}
-              partyName={customer.name}
+              phone={supplier.phone}
+              email={supplier.email}
+              partyName={supplier.name}
             />
           </div>
         )}
@@ -155,7 +155,7 @@ const CustomerLedger = () => {
                   {ledger.rows.length === 0 ? (
                     <tr className="border-t">
                       <td className="table-cell text-center text-gray-500 dark:text-gray-400 py-8" colSpan={5}>
-                        No transactions yet for this customer.
+                        No transactions yet for this supplier.
                       </td>
                     </tr>
                   ) : (
@@ -186,4 +186,4 @@ const CustomerLedger = () => {
   )
 }
 
-export default CustomerLedger
+export default SupplierLedger
