@@ -251,6 +251,7 @@ const CashBank = () => {
             <table className="table">
               <thead>
                 <tr>
+                  <th className="table-header sticky top-0 z-10">S.No</th>
                   <th className="table-header sticky top-0 z-10">Name</th>
                   <th className="table-header sticky top-0 z-10">Type</th>
                   <th className="table-header sticky top-0 z-10">Account Number</th>
@@ -260,8 +261,9 @@ const CashBank = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredAccounts.map((account) => (
+                {filteredAccounts.map((account, index) => (
                   <tr key={account.id} className="border-t">
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{account.name}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${

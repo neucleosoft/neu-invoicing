@@ -7,9 +7,9 @@ import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
-import SortHeader from '../components/SortHeader'
 import SupplierItemsModal from '../components/SupplierItemsModal'
 import { useSortable } from '../hooks/useSortable'
+import SortHeader from '../components/SortHeader'
 import { Users, Search as SearchIcon, Loader2 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
@@ -300,7 +300,7 @@ const Suppliers = () => {
       {/* Suppliers Table */}
       <div className="card">
         {loading ? (
-          <TableSkeleton rows={6} columns={7} />
+          <TableSkeleton rows={6} columns={8} />
         ) : filteredSuppliers.length === 0 ? (
           searchQuery.trim() ? (
             <EmptyState
@@ -324,6 +324,7 @@ const Suppliers = () => {
           <table className="table">
             <thead>
               <tr>
+                <th className="table-header sticky top-0 z-10">S.No</th>
                 <SortHeader label="Name" sortKey="name" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                 <SortHeader label="Type" sortKey="type" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                 <SortHeader label="GSTIN" sortKey="taxId" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
@@ -334,10 +335,11 @@ const Suppliers = () => {
               </tr>
             </thead>
             <tbody>
-              {sortedSuppliers.map((supplier) => {
+              {sortedSuppliers.map((supplier, index) => {
                 const balanceDisplay = getBalanceDisplay(supplier)
                 return (
                   <tr key={supplier.id} className="border-t">
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell">
                       <div className="flex items-center gap-3">
                         {/* Supplier Avatar */}

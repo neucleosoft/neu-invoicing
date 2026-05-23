@@ -18,8 +18,8 @@ import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
-import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
+import SortHeader from '../components/SortHeader'
 import { useStore } from '../store/useStore'
 
 interface Party {
@@ -638,7 +638,7 @@ const ProformaInvoices = () => {
 
       <div className="card">
         {loading ? (
-          <TableSkeleton rows={6} columns={7} />
+          <TableSkeleton rows={6} columns={8} />
         ) : filteredProformaInvoices.length === 0 ? (
           searchQuery.trim() || dateFilter !== 'all' ? (
             <EmptyState
@@ -659,6 +659,7 @@ const ProformaInvoices = () => {
             <table className="table">
               <thead>
                 <tr>
+                  <th className="table-header sticky top-0 z-10">S.No</th>
                   <SortHeader label="PI #" sortKey="invoiceNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Date" sortKey="invoiceDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Expiry" sortKey="dueDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
@@ -669,8 +670,9 @@ const ProformaInvoices = () => {
                 </tr>
               </thead>
               <tbody>
-                {sortedProformaInvoices.map((proformaInvoice) => (
+                {sortedProformaInvoices.map((proformaInvoice, index) => (
                   <tr key={proformaInvoice.id} className="border-t">
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{proformaInvoice.invoiceNumber}</td>
                     <td className="table-cell">{new Date(proformaInvoice.invoiceDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{proformaInvoice.dueDate ? new Date(proformaInvoice.dueDate).toLocaleDateString('en-GB') : '-'}</td>
@@ -1030,6 +1032,7 @@ const ProformaInvoices = () => {
                 <table className="table w-full">
                   <thead>
                     <tr>
+                      <th className="table-header sticky top-0 z-10">S.No</th>
                       <th className="table-header sticky top-0 z-10">Item</th>
                       <th className="table-header sticky top-0 z-10">HSN/SKU</th>
                       <th className="table-header sticky top-0 z-10">Qty</th>
@@ -1041,6 +1044,7 @@ const ProformaInvoices = () => {
                   <tbody>
                     {viewingProformaInvoice.items?.map((item, index) => (
                       <tr key={index} className="border-t">
+                        <td className="table-cell">{index + 1}</td>
                         <td className="table-cell">{item.item?.name}</td>
                         <td className="table-cell text-gray-500">{item.hsnCode || '-'}</td>
                         <td className="table-cell">{item.quantity}</td>

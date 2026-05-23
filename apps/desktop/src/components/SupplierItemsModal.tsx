@@ -246,7 +246,7 @@ const SupplierItemsModal = ({ supplier, onClose }: SupplierItemsModalProps) => {
           )}
 
           {loading ? (
-            <TableSkeleton rows={4} columns={6} />
+            <TableSkeleton rows={4} columns={7} />
           ) : items.length === 0 ? (
             <EmptyState
               icon={Package}
@@ -263,6 +263,7 @@ const SupplierItemsModal = ({ supplier, onClose }: SupplierItemsModalProps) => {
               <table className="table">
                 <thead>
                   <tr>
+                    <th className="table-header">S.No</th>
                     <th className="table-header">Name</th>
                     <th className="table-header">HSN</th>
                     <th className="table-header">Unit</th>
@@ -273,8 +274,9 @@ const SupplierItemsModal = ({ supplier, onClose }: SupplierItemsModalProps) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {items.map((item) => (
+                  {items.map((item, index) => (
                     <tr key={item.id} className="border-t">
+                      <td className="table-cell">{index + 1}</td>
                       <td className="table-cell font-medium">{item.name}</td>
                       <td className="table-cell text-sm">{item.hsnCode || '-'}</td>
                       <td className="table-cell">{item.unit}</td>

@@ -196,6 +196,7 @@ const Payments = () => {
           <table className="table">
             <thead>
               <tr>
+                <th className="table-header sticky top-0 z-10">S.No</th>
                 <th className="table-header sticky top-0 z-10">Date</th>
                 <th className="table-header sticky top-0 z-10">Type</th>
                 <th className="table-header sticky top-0 z-10">Party</th>
@@ -206,8 +207,9 @@ const Payments = () => {
               </tr>
             </thead>
             <tbody>
-              {payments.map((payment) => (
+              {payments.map((payment, index) => (
                 <tr key={payment.id} className="border-t">
+                  <td className="table-cell">{index + 1}</td>
                   <td className="table-cell">{new Date(payment.paymentDate).toLocaleDateString('en-GB')}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-1 rounded-full text-xs ${

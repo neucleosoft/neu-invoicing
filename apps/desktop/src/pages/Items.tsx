@@ -164,7 +164,7 @@ const Items = () => {
       {/* Items Table */}
       <div className="card">
         {loading ? (
-          <TableSkeleton rows={6} columns={7} />
+          <TableSkeleton rows={6} columns={8} />
         ) : filteredItems.length === 0 ? (
           searchQuery.trim() ? (
             <EmptyState
@@ -185,6 +185,7 @@ const Items = () => {
           <table className="table">
             <thead>
               <tr>
+                <th className="table-header sticky top-0 z-10">S.No</th>
                 <th className="table-header sticky top-0 z-10">Name</th>
                 <th className="table-header sticky top-0 z-10">SKU/HSN</th>
                 <th className="table-header sticky top-0 z-10">Type</th>
@@ -195,8 +196,9 @@ const Items = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredItems.map((item) => (
+              {filteredItems.map((item, index) => (
                 <tr key={item.id} className="border-t">
+                  <td className="table-cell">{index + 1}</td>
                   <td className="table-cell font-medium">{item.name}</td>
                   <td className="table-cell">{item.skuHsn || '-'}</td>
                   <td className="table-cell">

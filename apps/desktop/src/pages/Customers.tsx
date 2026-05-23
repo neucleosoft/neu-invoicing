@@ -7,8 +7,8 @@ import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
-import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
+import SortHeader from '../components/SortHeader'
 import { Users, Search as SearchIcon, Loader2 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 
@@ -293,7 +293,7 @@ const Customers = () => {
       {/* Customers Table */}
       <div className="card">
         {loading ? (
-          <TableSkeleton rows={6} columns={7} />
+          <TableSkeleton rows={6} columns={8} />
         ) : filteredCustomers.length === 0 ? (
           searchQuery.trim() ? (
             <EmptyState
@@ -317,6 +317,7 @@ const Customers = () => {
           <table className="table">
             <thead>
               <tr>
+                <th className="table-header sticky top-0 z-10">S.No</th>
                 <SortHeader label="Name" sortKey="name" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                 <SortHeader label="Type" sortKey="type" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                 <SortHeader label="GSTIN" sortKey="taxId" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
@@ -327,10 +328,11 @@ const Customers = () => {
               </tr>
             </thead>
             <tbody>
-              {sortedCustomers.map((customer) => {
+              {sortedCustomers.map((customer, index) => {
                 const balanceDisplay = getBalanceDisplay(customer)
                 return (
                   <tr key={customer.id} className="border-t">
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell">
                       <div className="flex items-center gap-3">
                         {/* Customer Avatar */}

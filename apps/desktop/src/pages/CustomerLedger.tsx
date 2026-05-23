@@ -122,7 +122,7 @@ const CustomerLedger = () => {
       {/* Ledger table */}
       <div className="card">
         {loading ? (
-          <TableSkeleton rows={6} columns={5} />
+          <TableSkeleton rows={6} columns={6} />
         ) : !ledger ? (
           <p className="text-center py-12 text-red-600 dark:text-red-400">Could not load the ledger.</p>
         ) : (
@@ -137,6 +137,7 @@ const CustomerLedger = () => {
               <table className="table">
                 <thead>
                   <tr>
+                    <th className="table-header sticky top-0 z-10">S.No</th>
                     <th className="table-header sticky top-0 z-10">Date</th>
                     <th className="table-header sticky top-0 z-10">Particulars</th>
                     <th className="table-header sticky top-0 z-10 text-right">Debit</th>
@@ -146,7 +147,7 @@ const CustomerLedger = () => {
                 </thead>
                 <tbody>
                   <tr className="border-t">
-                    <td className="table-cell" colSpan={4}>
+                    <td className="table-cell" colSpan={5}>
                       <span className="italic text-gray-500 dark:text-gray-400">Opening Balance</span>
                     </td>
                     <td className="table-cell text-right">{renderBalance(ledger.openingBalance)}</td>
@@ -154,13 +155,14 @@ const CustomerLedger = () => {
 
                   {ledger.rows.length === 0 ? (
                     <tr className="border-t">
-                      <td className="table-cell text-center text-gray-500 dark:text-gray-400 py-8" colSpan={5}>
+                      <td className="table-cell text-center text-gray-500 dark:text-gray-400 py-8" colSpan={6}>
                         No transactions yet for this customer.
                       </td>
                     </tr>
                   ) : (
                     ledger.rows.map((r, i) => (
                       <tr key={`${r.type}-${r.number}-${i}`} className="border-t">
+                        <td className="table-cell">{i + 1}</td>
                         <td className="table-cell whitespace-nowrap">{fmtDate(r.date)}</td>
                         <td className="table-cell">{r.particulars}</td>
                         <td className="table-cell text-right">{r.debit ? formatCurrency(r.debit) : '—'}</td>
@@ -171,7 +173,7 @@ const CustomerLedger = () => {
                   )}
 
                   <tr className="border-t bg-gray-50 dark:bg-gray-800/60 font-bold">
-                    <td className="table-cell" colSpan={2}>Total</td>
+                    <td className="table-cell" colSpan={3}>Total</td>
                     <td className="table-cell text-right">{formatCurrency(ledger.totalDebit)}</td>
                     <td className="table-cell text-right">{formatCurrency(ledger.totalCredit)}</td>
                     <td className="table-cell text-right">{renderBalance(ledger.closingBalance)}</td>
