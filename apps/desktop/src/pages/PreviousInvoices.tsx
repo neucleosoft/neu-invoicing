@@ -7,8 +7,8 @@ import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
-import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
+import SortHeader from '../components/SortHeader'
 import BulkDownloadMenu from '../components/BulkDownloadMenu'
 import DownloadMenu from '../components/DownloadMenu'
 import ShareMenu from '../components/ShareMenu'
@@ -731,7 +731,7 @@ const PreviousInvoices = () => {
 
       <div className="card">
         {loading ? (
-          <TableSkeleton rows={6} columns={6} />
+          <TableSkeleton rows={6} columns={7} />
         ) : filteredRows.length === 0 ? (
           searchQuery.trim() || dateFilter !== 'all' ? (
             <EmptyState
@@ -752,7 +752,7 @@ const PreviousInvoices = () => {
             <table className="table">
               <thead>
                 <tr>
-                  <SortHeader label="#" sortKey="serialNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
+                  <th className="table-header sticky top-0 z-10">S.No</th>
                   <SortHeader label="Invoice #" sortKey="invoiceNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Date" sortKey="invoiceDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Party" sortKey="partyName" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
@@ -762,9 +762,9 @@ const PreviousInvoices = () => {
                 </tr>
               </thead>
               <tbody>
-                {sortedItems.map(row => (
+                {sortedItems.map((row, index) => (
                   <tr key={row.id} className="border-t">
-                    <td className="table-cell text-sm text-gray-500 dark:text-gray-400">{row.serialNumber ?? '—'}</td>
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">
                       <button
                         type="button"

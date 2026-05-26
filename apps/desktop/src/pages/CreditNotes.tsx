@@ -750,6 +750,7 @@ const CreditNotes = () => {
             <table className="table">
               <thead>
                 <tr>
+                  <th className="table-header sticky top-0 z-10">S.No</th>
                   <th className="table-header sticky top-0 z-10">Note #</th>
                   <th className="table-header sticky top-0 z-10">Date</th>
                   <th className="table-header sticky top-0 z-10">Type</th>
@@ -761,8 +762,9 @@ const CreditNotes = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredNotes.map((note) => (
+                {filteredNotes.map((note, index) => (
                   <tr key={note.id} className="border-t">
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{note.noteNumber}</td>
                     <td className="table-cell">{new Date(note.noteDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">
@@ -1151,6 +1153,7 @@ const CreditNotes = () => {
                 <table className="table w-full">
                   <thead>
                     <tr>
+                      <th className="table-header sticky top-0 z-10">S.No</th>
                       <th className="table-header sticky top-0 z-10">Item</th>
                       <th className="table-header sticky top-0 z-10">HSN/SKU</th>
                       <th className="table-header sticky top-0 z-10">Qty</th>
@@ -1163,6 +1166,7 @@ const CreditNotes = () => {
                   <tbody>
                     {viewingNote.items?.map((item, index) => (
                       <tr key={index} className="border-t">
+                        <td className="table-cell">{index + 1}</td>
                         <td className="table-cell">{item.item?.name}</td>
                         <td className="table-cell text-gray-500">{item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '-'}</td>
                         <td className="table-cell">{item.quantity}</td>

@@ -231,6 +231,7 @@ const CustomerStatement = () => {
             <table className="w-full">
               <thead className="bg-gray-50 dark:bg-gray-700/40">
                 <tr>
+                  <th className="table-header-cell">S.No</th>
                   <th className="table-header-cell">Date</th>
                   <th className="table-header-cell">Type</th>
                   <th className="table-header-cell">Number</th>
@@ -242,7 +243,7 @@ const CustomerStatement = () => {
               </thead>
               <tbody>
                 <tr className="bg-emerald-50 dark:bg-emerald-900/20 border-t border-gray-200 dark:border-gray-700">
-                  <td className="table-cell" colSpan={6}>
+                  <td className="table-cell" colSpan={7}>
                     <span className="font-semibold">Opening Balance</span>
                   </td>
                   <td className="table-cell text-right font-semibold">
@@ -253,7 +254,7 @@ const CustomerStatement = () => {
                   <tr className="border-t border-gray-200 dark:border-gray-700">
                     <td
                       className="table-cell text-center italic text-gray-500 dark:text-gray-400 py-6"
-                      colSpan={7}
+                      colSpan={8}
                     >
                       No transactions in this period.
                     </td>
@@ -261,6 +262,7 @@ const CustomerStatement = () => {
                 ) : (
                   statement.lines.map((line, i) => (
                     <tr key={i} className="border-t border-gray-200 dark:border-gray-700">
+                      <td className="table-cell">{i + 1}</td>
                       <td className="table-cell whitespace-nowrap">{formatDate(line.date)}</td>
                       <td className="table-cell">
                         <span
@@ -285,7 +287,7 @@ const CustomerStatement = () => {
                 )}
                 {statement.lines.length > 0 && (
                   <tr className="bg-emerald-50 dark:bg-emerald-900/20 border-t border-gray-200 dark:border-gray-700">
-                    <td className="table-cell" colSpan={4}>
+                    <td className="table-cell" colSpan={5}>
                       <span className="font-semibold">Period Totals</span>
                     </td>
                     <td className="table-cell text-right font-semibold">

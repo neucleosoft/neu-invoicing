@@ -15,8 +15,8 @@ import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
-import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
+import SortHeader from '../components/SortHeader'
 import { FileText, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
 import { useStore } from '../store/useStore'
@@ -634,7 +634,7 @@ const Quotations = () => {
 
       <div className="card">
         {loading ? (
-          <TableSkeleton rows={6} columns={7} />
+          <TableSkeleton rows={6} columns={8} />
         ) : filteredQuotations.length === 0 ? (
           searchQuery.trim() || dateFilter !== 'all' ? (
             <EmptyState
@@ -655,6 +655,7 @@ const Quotations = () => {
             <table className="table">
               <thead>
                 <tr>
+                  <th className="table-header sticky top-0 z-10">S.No</th>
                   <SortHeader label="Quotation #" sortKey="invoiceNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Date" sortKey="invoiceDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Expiry" sortKey="dueDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
@@ -665,8 +666,9 @@ const Quotations = () => {
                 </tr>
               </thead>
               <tbody>
-                {sortedQuotations.map((quotation) => (
+                {sortedQuotations.map((quotation, index) => (
                   <tr key={quotation.id} className="border-t">
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{quotation.invoiceNumber}</td>
                     <td className="table-cell">{new Date(quotation.invoiceDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{quotation.dueDate ? new Date(quotation.dueDate).toLocaleDateString('en-GB') : '-'}</td>
@@ -1026,6 +1028,7 @@ const Quotations = () => {
                 <table className="table w-full">
                   <thead>
                     <tr>
+                      <th className="table-header sticky top-0 z-10">S.No</th>
                       <th className="table-header sticky top-0 z-10">Item</th>
                       <th className="table-header sticky top-0 z-10">HSN/SKU</th>
                       <th className="table-header sticky top-0 z-10">Qty</th>
@@ -1037,6 +1040,7 @@ const Quotations = () => {
                   <tbody>
                     {viewingQuotation.items?.map((item, index) => (
                       <tr key={index} className="border-t">
+                        <td className="table-cell">{index + 1}</td>
                         <td className="table-cell">{item.item?.name}</td>
                         <td className="table-cell text-gray-500">{item.hsnCode || '-'}</td>
                         <td className="table-cell">{item.quantity}</td>

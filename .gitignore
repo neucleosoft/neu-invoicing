@@ -74,6 +74,13 @@ scripts/_list-pending.mjs
 scripts/import-from-jsonl.mjs
 scripts/import-purchase-bills.mjs
 scripts/rescan-previous-invoices.js
+apps/desktop/scripts/_data/
+apps/desktop/scripts/_inspect-boss-db.cjs
+apps/desktop/scripts/_inspect-db.cjs
+apps/desktop/scripts/_diff-dbs.cjs
+apps/desktop/scripts/_premerge-check.cjs
+apps/desktop/scripts/_merge-into-boss.cjs
+apps/desktop/scripts/insert-extracted-bills.mjs
 
 # Scraping tools (not part of the app)
 platform-tools/

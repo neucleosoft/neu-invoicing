@@ -1088,7 +1088,7 @@ const Purchase = () => {
       {/* Bills Table */}
       <div className="card">
         {loading ? (
-          <TableSkeleton rows={6} columns={6} />
+          <TableSkeleton rows={6} columns={7} />
         ) : filteredBills.length === 0 ? (
           searchQuery.trim() || dateFilter !== 'all' ? (
             <EmptyState
@@ -1109,6 +1109,7 @@ const Purchase = () => {
           <table className="table">
             <thead>
               <tr>
+                <th className="table-header sticky top-0 z-10">S.No</th>
                 <th className="table-header sticky top-0 z-10">Bill #</th>
                 <th className="table-header sticky top-0 z-10">Date</th>
                 <th className="table-header sticky top-0 z-10">Supplier</th>
@@ -1118,8 +1119,9 @@ const Purchase = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredBills.map((bill) => (
+              {filteredBills.map((bill, index) => (
                 <tr key={bill.id} className="border-t">
+                  <td className="table-cell">{index + 1}</td>
                   <td className="table-cell font-medium">
                     {bill.billNumber}
                     {(bill as any).purchaseOrder?.orderNumber && (
@@ -1692,6 +1694,7 @@ const Purchase = () => {
                 <table className="table w-full">
                   <thead>
                     <tr>
+                      <th className="table-header sticky top-0 z-10">S.No</th>
                       <th className="table-header sticky top-0 z-10">Item</th>
                       <th className="table-header sticky top-0 z-10">HSN/SKU</th>
                       <th className="table-header sticky top-0 z-10">Qty</th>
@@ -1703,6 +1706,7 @@ const Purchase = () => {
                   <tbody>
                     {viewingBill.items?.map((item: any, index: number) => (
                       <tr key={index} className="border-t">
+                        <td className="table-cell">{index + 1}</td>
                         <td className="table-cell">{item.item?.name}</td>
                         <td className="table-cell text-gray-500">{item.hsnCode || item.item?.hsnCode || item.item?.skuHsn || '-'}</td>
                         <td className="table-cell">{item.quantity}</td>

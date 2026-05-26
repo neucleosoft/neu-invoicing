@@ -362,6 +362,7 @@ const Dashboard = () => {
             <table className="table">
               <thead>
                 <tr>
+                  <th className="table-header sticky top-0 z-10">S.No</th>
                   <th className="table-header sticky top-0 z-10">Date</th>
                   <th className="table-header sticky top-0 z-10">Type</th>
                   <th className="table-header sticky top-0 z-10">Number</th>
@@ -370,8 +371,9 @@ const Dashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {latestTransactions.map((txn) => (
+                {latestTransactions.map((txn, index) => (
                   <tr key={txn.id} className="border-t">
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell">{new Date(txn.date).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs font-medium ${getTypeBadgeClass(txn.type)}`}>
@@ -402,6 +404,7 @@ const Dashboard = () => {
             <table className="table">
               <thead>
                 <tr>
+                  <th className="table-header sticky top-0 z-10">S.No</th>
                   <th className="table-header sticky top-0 z-10">Item Name</th>
                   <th className="table-header sticky top-0 z-10">SKU/HSN</th>
                   <th className="table-header sticky top-0 z-10">Current Stock</th>
@@ -410,8 +413,9 @@ const Dashboard = () => {
                 </tr>
               </thead>
               <tbody>
-                {lowStockItems.map((item) => (
+                {lowStockItems.map((item, index) => (
                   <tr key={item.id} className="border-t">
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{item.name}</td>
                     <td className="table-cell">{item.skuHsn || '-'}</td>
                     <td className="table-cell">
