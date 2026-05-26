@@ -57,60 +57,52 @@ export async function checkCloudBackup(accessToken: string): Promise<CloudBackup
   }
 }
 
-// Fetches the raw file bytes for a Drive file id. `alt=media` is what
-// switches Drive's GET from "return JSON metadata" to "return file body".
-// Returns Uint8Array so it can be handed to expo-file-system's File.write
-// or to expo-sqlite's deserialize without further conversion.
-export async function downloadCloudBackup(
-  accessToken: string,
-  fileId: string
-): Promise<Uint8Array> {
-  const res = await fetch(`${DRIVE_FILES_URL}/${fileId}?alt=media`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-  if (!res.ok) {
-    const errText = await res.text()
-    throw new Error(`Drive download failed (${res.status}): ${errText}`)
-  }
-  const buffer = await res.arrayBuffer()
-  return new Uint8Array(buffer)
-}
-
-// Overwrites the live mobile SQLite file with downloaded cloud bytes, then
-// stamps the migration table so Drizzle's runMigrations() treats every known
-// migration as already applied on the next boot.
+// One-call restore: list → stream-download → stamp migrations. Callers
+// (Settings screen) invoke this and then reload the app — the SQLiteProvider
+// is still holding a (now-invalid) handle to the old file in memory, so
+// anything that touches the live db before the reload will throw.
 //
-// Caller MUST trigger an app reload immediately after this returns — the
-// SQLiteProvider is still holding a (now-invalid) handle to the old file in
-// memory. Anything that touches the live db before the reload will throw.
-export async function applyCloudBackup(
-  bytes: Uint8Array,
+// Throws if no backup exists so the UI can surface "nothing to restore from"
+// without doing its own list call first.
+export async function restoreFromCloud(
+  accessToken: string,
   liveDb: SQLite.SQLiteDatabase
-): Promise<void> {
-  // 1. Release Android's lock on the live DB so we can overwrite the file.
+): Promise<CloudBackupInfo> {
+  const info = await checkCloudBackup(accessToken)
+  if (!info.exists || !info.fileId) {
+    throw new Error('No cloud backup found — sync from desktop first.')
+  }
+
+  // Release Android's lock on the live DB so we can overwrite the file.
   await liveDb.closeAsync()
 
-  // 2. expo-sqlite stores DBs at <documentDirectory>/SQLite/<name>. Make sure
-  //    that directory exists (it will after first launch, but be defensive).
+  // expo-sqlite stores DBs at <documentDirectory>/SQLite/<name>. Be defensive
+  // — the directory exists after first launch but not on a fresh install
+  // where the user restores before opening any screen that touches the db.
   const sqliteDir = new Directory(Paths.document, 'SQLite')
   if (!sqliteDir.exists) {
     sqliteDir.create({ intermediates: true })
   }
 
-  // 3. Overwrite the DB file with the downloaded bytes.
+  // Stream Drive's response straight to disk via the native downloader. The
+  // previous arrayBuffer-based version held the entire file in JS memory,
+  // which OOM'd Android's ~256MB JVM heap on any DB above that size.
   const dbFile = new File(sqliteDir, MOBILE_DB_NAME)
-  if (dbFile.exists) {
-    dbFile.delete()
-  }
-  dbFile.create()
-  dbFile.write(bytes)
+  await File.downloadFileAsync(
+    `${DRIVE_FILES_URL}/${info.fileId}?alt=media`,
+    dbFile,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      idempotent: true,
+    }
+  )
 
-  // 4. The imported file came from Prisma — it has every table our schema
-  //    expects, but no __drizzle_migrations table. Without intervention the
-  //    next runMigrations() pass will try to CREATE TABLE Item etc. and fail
-  //    with "table already exists". Insert a single row dated forward of every
-  //    known migration; Drizzle's migrator compares each migration's
-  //    folderMillis against the latest created_at and skips anything older.
+  // The imported file came from Prisma — it has every table our schema
+  // expects, but no __drizzle_migrations table. Without intervention the
+  // next runMigrations() pass will try to CREATE TABLE Item etc. and fail
+  // with "table already exists". Insert a single row dated forward of every
+  // known migration; Drizzle's migrator compares each migration's
+  // folderMillis against the latest created_at and skips anything older.
   const importedDb = await SQLite.openDatabaseAsync(MOBILE_DB_NAME)
   try {
     await importedDb.execAsync(`
@@ -128,20 +120,6 @@ export async function applyCloudBackup(
   } finally {
     await importedDb.closeAsync()
   }
-}
 
-// One-call restore: list → download → apply. Callers (Settings screen) just
-// invoke this and reload the app. Throws if no backup exists, so the UI can
-// surface "nothing to restore from" without doing its own list call first.
-export async function restoreFromCloud(
-  accessToken: string,
-  liveDb: SQLite.SQLiteDatabase
-): Promise<CloudBackupInfo> {
-  const info = await checkCloudBackup(accessToken)
-  if (!info.exists || !info.fileId) {
-    throw new Error('No cloud backup found — sync from desktop first.')
-  }
-  const bytes = await downloadCloudBackup(accessToken, info.fileId)
-  await applyCloudBackup(bytes, liveDb)
   return info
 }
