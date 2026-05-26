@@ -21,6 +21,11 @@ const MAPPING = {
   'cube.fill': 'inventory-2',
   'person.fill': 'person',
   'doc.text.fill': 'receipt-long',
+  'gearshape.fill': 'settings',
+  'wallet.pass.fill': 'account-balance-wallet',
+  'chart.line.uptrend.xyaxis': 'trending-up',
+  'exclamationmark.triangle.fill': 'warning',
+  'clock.fill': 'schedule',
 } as IconMapping;
 
 /**
