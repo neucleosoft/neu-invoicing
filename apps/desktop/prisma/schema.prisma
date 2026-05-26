@@ -2,6 +2,11 @@
 
 generator client {
   provider = "prisma-client-js"
+  // Force the generated client into a real folder under apps/desktop/node_modules,
+  // not pnpm's virtual store at node_modules/.pnpm/@prisma+client@*/.../.prisma/client.
+  // Without this, electron-builder's `node_modules/.prisma/**/*` rule finds nothing to
+  // bundle and the installed app errors with "Cannot find module '.prisma/client/default'".
+  output   = "../node_modules/.prisma/client"
 }
 
 datasource db {

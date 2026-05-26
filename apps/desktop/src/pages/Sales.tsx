@@ -17,8 +17,8 @@ import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 import EmptyState from '../components/EmptyState'
 import { TableSkeleton } from '../components/Skeleton'
-import SortHeader from '../components/SortHeader'
 import { useSortable } from '../hooks/useSortable'
+import SortHeader from '../components/SortHeader'
 import { Wallet, Search as SearchIcon } from 'lucide-react'
 import SearchableSelect from '../components/SearchableSelect'
 import { useStore } from '../store/useStore'
@@ -703,7 +703,7 @@ const Sales = () => {
       {/* Invoices Table */}
       <div className="card">
         {loading ? (
-          <TableSkeleton rows={6} columns={7} />
+          <TableSkeleton rows={6} columns={8} />
         ) : filteredInvoices.length === 0 ? (
           searchQuery.trim() || dateFilter !== 'all' ? (
             <EmptyState
@@ -726,6 +726,7 @@ const Sales = () => {
             <table className="table">
               <thead>
                 <tr>
+                  <th className="table-header sticky top-0 z-10">S.No</th>
                   <SortHeader label="Invoice #" sortKey="invoiceNumber" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Date" sortKey="invoiceDate" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
                   <SortHeader label="Party" sortKey="party" activeKey={sortKey} activeDir={sortDir} onToggle={toggleSort} />
@@ -735,8 +736,9 @@ const Sales = () => {
                 </tr>
               </thead>
               <tbody>
-                {sortedInvoices.map((invoice) => (
+                {sortedInvoices.map((invoice, index) => (
                   <tr key={invoice.id} className="border-t">
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{invoice.invoiceNumber}</td>
                     <td className="table-cell">{new Date(invoice.invoiceDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{invoice.customer?.name}</td>
@@ -1207,6 +1209,7 @@ const Sales = () => {
                 <table className="table w-full">
                   <thead>
                     <tr>
+                      <th className="table-header sticky top-0 z-10">S.No</th>
                       <th className="table-header sticky top-0 z-10">Item</th>
                       <th className="table-header sticky top-0 z-10">HSN/SKU</th>
                       <th className="table-header sticky top-0 z-10">Qty</th>
@@ -1218,6 +1221,7 @@ const Sales = () => {
                   <tbody>
                     {viewingInvoice.items?.map((item, index) => (
                       <tr key={index} className="border-t">
+                        <td className="table-cell">{index + 1}</td>
                         <td className="table-cell">{item.item?.name}</td>
                         <td className="table-cell text-gray-500">{item.hsnCode || '-'}</td>
                         <td className="table-cell">{item.quantity}</td>

@@ -595,6 +595,7 @@ const GSTReports = () => {
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                    <th className="px-4 py-3 text-left font-semibold">S.No</th>
                     <th className="px-4 py-3 text-left font-semibold">Section</th>
                     <th className="px-4 py-3 text-right font-semibold">Invoices</th>
                     <th className="px-4 py-3 text-right font-semibold">Taxable Value</th>
@@ -605,8 +606,9 @@ const GSTReports = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.entries(gstr1Data.sections).map(([key, section]) => (
+                  {Object.entries(gstr1Data.sections).map(([key, section], index) => (
                     <tr key={key} className="border-t hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <td className="px-4 py-3">{index + 1}</td>
                       <td className="px-4 py-3 font-medium">{section.sectionName}</td>
                       <td className="px-4 py-3 text-right">{section.invoiceCount}</td>
                       <td className="px-4 py-3 text-right">{formatCurrency(section.totalTaxableValue)}</td>
@@ -638,6 +640,7 @@ const GSTReports = () => {
                 <table className="w-full">
                   <thead className="sticky top-0 z-10">
                     <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                      <th className="px-4 py-3 text-left font-semibold">S.No</th>
                       <th className="px-4 py-3 text-left font-semibold">HSN Code</th>
                       <th className="px-4 py-3 text-left font-semibold">Description</th>
                       <th className="px-4 py-3 text-right font-semibold">Qty</th>
@@ -650,6 +653,7 @@ const GSTReports = () => {
                   <tbody>
                     {gstr1Data.hsnSummary.map((hsn, idx) => (
                       <tr key={idx} className="border-t">
+                        <td className="px-4 py-3">{idx + 1}</td>
                         <td className="px-4 py-3 font-mono">{hsn.hsnCode}</td>
                         <td className="px-4 py-3">{hsn.description}</td>
                         <td className="px-4 py-3 text-right">{hsn.totalQuantity} {hsn.uqc}</td>
@@ -1028,6 +1032,7 @@ const GSTReports = () => {
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                    <th className="px-4 py-3 text-left font-semibold">S.No</th>
                     <th className="px-4 py-3 text-left font-semibold">HSN Code</th>
                     <th className="px-4 py-3 text-left font-semibold">Description</th>
                     <th className="px-4 py-3 text-left font-semibold">UQC</th>
@@ -1042,6 +1047,7 @@ const GSTReports = () => {
                 <tbody>
                   {hsnData.map((hsn, idx) => (
                     <tr key={idx} className="border-t hover:bg-gray-50 dark:hover:bg-gray-700/50">
+                      <td className="px-4 py-3">{idx + 1}</td>
                       <td className="px-4 py-3 font-mono">{hsn.hsnCode}</td>
                       <td className="px-4 py-3">{hsn.description}</td>
                       <td className="px-4 py-3">{hsn.uqc}</td>
@@ -1056,7 +1062,7 @@ const GSTReports = () => {
                 </tbody>
                 <tfoot>
                   <tr className="bg-gray-100 dark:bg-gray-700 font-bold">
-                    <td colSpan={4} className="px-4 py-3">Total</td>
+                    <td colSpan={5} className="px-4 py-3">Total</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(hsnData.reduce((s, h) => s + h.taxableValue, 0))}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(hsnData.reduce((s, h) => s + h.igstAmount, 0))}</td>
                     <td className="px-4 py-3 text-right">{formatCurrency(hsnData.reduce((s, h) => s + h.cgstAmount, 0))}</td>
@@ -1086,6 +1092,7 @@ const GSTReports = () => {
               <table className="w-full">
                 <thead className="sticky top-0 z-10">
                   <tr className="bg-gray-50 dark:bg-gray-700 text-gray-700 dark:text-gray-200">
+                    <th className="px-4 py-2 text-left">S.No</th>
                     <th className="px-4 py-2 text-left">Invoice No.</th>
                     <th className="px-4 py-2 text-left">Date</th>
                     <th className="px-4 py-2 text-left">Party</th>
@@ -1096,8 +1103,9 @@ const GSTReports = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {drillDownInvoices.map((inv: any) => (
+                  {drillDownInvoices.map((inv: any, index: number) => (
                     <tr key={inv.id} className="border-t">
+                      <td className="px-4 py-2">{index + 1}</td>
                       <td className="px-4 py-2 font-medium">{inv.invoiceNumber}</td>
                       <td className="px-4 py-2">{new Date(inv.invoiceDate).toLocaleDateString('en-GB')}</td>
                       <td className="px-4 py-2">{inv.customer?.name}</td>

@@ -705,6 +705,8 @@ declare global {
         recordPaymentIn: (data: any) => Promise<{ success: boolean; data?: PaymentTransaction; error?: string }>
         recordPaymentOut: (data: any) => Promise<{ success: boolean; data?: PaymentTransaction; error?: string }>
         getAll: (type?: string) => Promise<{ success: boolean; data?: PaymentTransaction[]; error?: string }>
+        update: (id: string, data: any) => Promise<{ success: boolean; data?: PaymentTransaction; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
       }
       challan: {
         getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>

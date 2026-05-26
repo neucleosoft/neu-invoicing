@@ -161,14 +161,16 @@ const Reports = () => {
                     <table className="table w-full">
                       <thead>
                         <tr>
+                          <th className="table-header sticky top-0 z-10">S.No</th>
                           <th className="table-header sticky top-0 z-10">Item</th>
                           <th className="table-header sticky top-0 z-10">Current Stock</th>
                           <th className="table-header sticky top-0 z-10">Low Stock Warning</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {reportData.map((item: any) => (
+                        {reportData.map((item: any, index: number) => (
                           <tr key={item.id} className="border-t">
+                            <td className="table-cell">{index + 1}</td>
                             <td className="table-cell">{item.name}</td>
                             <td className="table-cell">{item.currentStock}</td>
                             <td className="table-cell">{item.lowStockWarning}</td>
@@ -183,13 +185,15 @@ const Reports = () => {
                     <table className="table w-full">
                       <thead>
                         <tr>
+                          <th className="table-header sticky top-0 z-10">S.No</th>
                           <th className="table-header sticky top-0 z-10">Customer</th>
                           <th className="table-header sticky top-0 z-10">Balance Due</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {reportData.map((party: any) => (
+                        {reportData.map((party: any, index: number) => (
                           <tr key={party.id} className="border-t">
+                            <td className="table-cell">{index + 1}</td>
                             <td className="table-cell">{party.name}</td>
                             <td className="table-cell">{formatCurrency(party.currentBalance || 0)}</td>
                           </tr>
@@ -203,13 +207,15 @@ const Reports = () => {
                     <table className="table w-full">
                       <thead>
                         <tr>
+                          <th className="table-header sticky top-0 z-10">S.No</th>
                           <th className="table-header sticky top-0 z-10">Supplier</th>
                           <th className="table-header sticky top-0 z-10">Balance Due</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {reportData.map((party: any) => (
+                        {reportData.map((party: any, index: number) => (
                           <tr key={party.id} className="border-t">
+                            <td className="table-cell">{index + 1}</td>
                             <td className="table-cell">{party.name}</td>
                             <td className="table-cell">{formatCurrency(Math.abs(party.currentBalance) || 0)}</td>
                           </tr>

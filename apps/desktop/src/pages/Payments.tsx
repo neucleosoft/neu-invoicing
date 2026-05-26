@@ -4,6 +4,7 @@ import { formatCurrency } from '../utils/currency'
 import NumberInput from '../components/NumberInput'
 import DateInput from '../components/DateInput'
 import { useToast } from '../components/ToastContext'
+import { useConfirm } from '../components/ConfirmDialogContext'
 import SearchableSelect from '../components/SearchableSelect'
 
 interface Party {
@@ -19,6 +20,8 @@ const Payments = () => {
   const [showModal, setShowModal] = useState(false)
   const [paymentType, setPaymentType] = useState<'PAYMENT_IN' | 'PAYMENT_OUT'>('PAYMENT_IN')
   const [parties, setParties] = useState<Party[]>([])
+  // When set, the modal is editing this payment instead of creating a new one.
+  const [editingPayment, setEditingPayment] = useState<PaymentTransaction | null>(null)
 
   // Form state. `counterPartyId` holds the customer ID for PAYMENT_IN and the supplier ID
   // for PAYMENT_OUT — same field, polymorphic by `paymentType`. Routed to either
@@ -32,6 +35,7 @@ const Payments = () => {
   })
 
   const toast = useToast()
+  const confirm = useConfirm()
 
   useEffect(() => {
     loadPayments()
@@ -65,8 +69,38 @@ const Payments = () => {
   }
 
   const openPaymentModal = (type: 'PAYMENT_IN' | 'PAYMENT_OUT') => {
+    setEditingPayment(null)
     setPaymentType(type)
     setShowModal(true)
+  }
+
+  // Open the modal pre-filled to edit an existing payment.
+  const openEditModal = (pmt: PaymentTransaction) => {
+    setEditingPayment(pmt)
+    setPaymentType(pmt.type)
+    setFormData({
+      counterPartyId: pmt.customerId || pmt.supplierId || '',
+      amount: pmt.amount,
+      paymentMode: pmt.paymentMode,
+      paymentDate: new Date(pmt.paymentDate).toISOString().split('T')[0],
+      notes: pmt.notes || '',
+    })
+    setShowModal(true)
+  }
+
+  const handleDelete = async (pmt: PaymentTransaction) => {
+    const ok = await confirm({
+      message: 'Delete this payment? The party balance and any linked invoice/bill will be adjusted back.',
+      danger: true,
+    })
+    if (!ok) return
+    const result = await window.electronAPI.payment.delete(pmt.id)
+    if (result.success) {
+      toast.success('Payment deleted')
+      loadPayments()
+    } else {
+      toast.error('Failed to delete payment: ' + (result.error || 'Unknown error'))
+    }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -100,23 +134,28 @@ const Payments = () => {
         }
 
     let result
-    if (paymentType === 'PAYMENT_IN') {
+    if (editingPayment) {
+      result = await window.electronAPI.payment.update(editingPayment.id, paymentData)
+    } else if (paymentType === 'PAYMENT_IN') {
       result = await window.electronAPI.payment.recordPaymentIn(paymentData)
     } else {
       result = await window.electronAPI.payment.recordPaymentOut(paymentData)
     }
 
     if (result.success) {
-      toast.success('Payment recorded successfully!')
+      toast.success(editingPayment ? 'Payment updated successfully!' : 'Payment recorded successfully!')
       setShowModal(false)
       resetForm()
       loadPayments()
     } else {
-      toast.error('Failed to record payment: ' + (result.error || 'Unknown error'))
+      toast.error(
+        `Failed to ${editingPayment ? 'update' : 'record'} payment: ` + (result.error || 'Unknown error'),
+      )
     }
   }
 
   const resetForm = () => {
+    setEditingPayment(null)
     setFormData({
       counterPartyId: '',
       amount: 0,
@@ -157,17 +196,20 @@ const Payments = () => {
           <table className="table">
             <thead>
               <tr>
+                <th className="table-header sticky top-0 z-10">S.No</th>
                 <th className="table-header sticky top-0 z-10">Date</th>
                 <th className="table-header sticky top-0 z-10">Type</th>
                 <th className="table-header sticky top-0 z-10">Party</th>
                 <th className="table-header sticky top-0 z-10">Amount</th>
                 <th className="table-header sticky top-0 z-10">Mode</th>
                 <th className="table-header sticky top-0 z-10">Notes</th>
+                <th className="table-header sticky top-0 z-10">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {payments.map((payment) => (
+              {payments.map((payment, index) => (
                 <tr key={payment.id} className="border-t">
+                  <td className="table-cell">{index + 1}</td>
                   <td className="table-cell">{new Date(payment.paymentDate).toLocaleDateString('en-GB')}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-1 rounded-full text-xs ${
@@ -180,6 +222,20 @@ const Payments = () => {
                   <td className="table-cell font-medium">{formatCurrency(payment.amount)}</td>
                   <td className="table-cell">{payment.paymentMode.replace('_', ' ')}</td>
                   <td className="table-cell">{payment.notes || '-'}</td>
+                  <td className="table-cell">
+                    <button
+                      onClick={() => openEditModal(payment)}
+                      className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 mr-3"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => handleDelete(payment)}
+                      className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                    >
+                      Delete
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -194,7 +250,9 @@ const Payments = () => {
             <div className="p-6">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-2xl font-bold">
-                  {paymentType === 'PAYMENT_IN' ? 'Record Payment In' : 'Record Payment Out'}
+                  {editingPayment
+                    ? paymentType === 'PAYMENT_IN' ? 'Edit Payment In' : 'Edit Payment Out'
+                    : paymentType === 'PAYMENT_IN' ? 'Record Payment In' : 'Record Payment Out'}
                 </h2>
                 <button onClick={() => { setShowModal(false); resetForm(); }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">
                   ×
@@ -279,7 +337,7 @@ const Payments = () => {
                     type="submit"
                     className="btn btn-primary"
                   >
-                    Record Payment
+                    {editingPayment ? 'Update Payment' : 'Record Payment'}
                   </button>
                 </div>
               </form>

@@ -682,6 +682,7 @@ const DeliveryChallan = () => {
             <table className="table">
               <thead>
                 <tr>
+                  <th className="table-header sticky top-0 z-10">S.No</th>
                   <th className="table-header sticky top-0 z-10">Challan #</th>
                   <th className="table-header sticky top-0 z-10">Date</th>
                   <th className="table-header sticky top-0 z-10">Party</th>
@@ -691,8 +692,9 @@ const DeliveryChallan = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredChallans.map((challan) => (
+                {filteredChallans.map((challan, index) => (
                   <tr key={challan.id} className="border-t">
+                    <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{challan.challanNumber}</td>
                     <td className="table-cell">{new Date(challan.challanDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{challan.customer?.name}</td>
@@ -1126,6 +1128,7 @@ const DeliveryChallan = () => {
                 <table className="table w-full">
                   <thead>
                     <tr>
+                      <th className="table-header sticky top-0 z-10">S.No</th>
                       <th className="table-header sticky top-0 z-10">Item</th>
                       <th className="table-header sticky top-0 z-10">Qty</th>
                       <th className="table-header sticky top-0 z-10">Rate</th>
@@ -1136,6 +1139,7 @@ const DeliveryChallan = () => {
                   <tbody>
                     {viewingChallan.items?.map((item, index) => (
                       <tr key={index} className="border-t">
+                        <td className="table-cell">{index + 1}</td>
                         <td className="table-cell">{item.item?.name}</td>
                         <td className="table-cell">{item.quantity}</td>
                         <td className="table-cell">{formatCurrency(item.rate)}</td>

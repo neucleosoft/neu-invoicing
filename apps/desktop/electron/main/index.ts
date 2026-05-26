@@ -1,3 +1,5 @@
+import { app as _app } from 'electron'
+_app.setName('neu-invoicing')
 import 'dotenv/config'
 
 import path from 'path'
