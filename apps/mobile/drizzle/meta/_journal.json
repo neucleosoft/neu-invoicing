@@ -8,6 +8,13 @@
       "when": 1779266993991,
       "tag": "0000_lyrical_scarlet_witch",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1779430957165,
+      "tag": "0001_swift_psynapse",
+      "breakpoints": true
     }
   ]
 }

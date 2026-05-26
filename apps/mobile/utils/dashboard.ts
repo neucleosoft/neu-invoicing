@@ -1,0 +1,128 @@
+// Drizzle query helpers used by the dashboard screen. Each function takes a
+// db instance (obtained via useDb() at the call site) and returns a Promise.
+// Split out of the screen so the screen file stays focused on layout, and
+// future dashboards (or a "/reports" screen) can reuse these aggregates.
+//
+// Mirrors apps/desktop/electron/main/handlers/dashboard.ts in intent.
+
+import {
+  and,
+  count,
+  desc,
+  eq,
+  gte,
+  isNotNull,
+  lt,
+  ne,
+  sql,
+} from 'drizzle-orm'
+
+import { schema, useDb } from '@/db'
+
+// Reuse useDb's inferred return type so callers and helpers stay in sync.
+type Db = ReturnType<typeof useDb>
+
+// Indian SMB fallback. Most businesses use April-March; desktop's Company
+// schema defaults `fiscalYearStart` to 4 for the same reason.
+const DEFAULT_FY_START_MONTH = 4
+
+// Reads the company's preferred FY start month. Falls back to April if the
+// company row doesn't exist or the column is null.
+export async function getFiscalYearStartMonth(db: Db): Promise<number> {
+  const rows = await db
+    .select({ fyStart: schema.company.fiscalYearStart })
+    .from(schema.company)
+    .limit(1)
+  return rows[0]?.fyStart ?? DEFAULT_FY_START_MONTH
+}
+
+// Sum of balanceDue across unpaid invoices — money customers still owe.
+export async function getTotalReceivables(db: Db): Promise<number> {
+  const rows = await db
+    .select({
+      total: sql<number>`COALESCE(SUM(${schema.salesInvoice.balanceDue}), 0)`,
+    })
+    .from(schema.salesInvoice)
+    .where(ne(schema.salesInvoice.status, 'PAID'))
+  return rows[0]?.total ?? 0
+}
+
+// Sum of totalAmount for invoices issued since the start of the current FY.
+// "Current FY" is calendar-year-aware: if today is March (before April),
+// the FY started April 1 of the PREVIOUS calendar year.
+export async function getTotalInvoicedThisFY(
+  db: Db,
+  fyStartMonth: number,
+): Promise<number> {
+  const today = new Date()
+  const year =
+    today.getMonth() + 1 < fyStartMonth
+      ? today.getFullYear() - 1
+      : today.getFullYear()
+  const fyStartDate = new Date(year, fyStartMonth - 1, 1)
+  const rows = await db
+    .select({
+      total: sql<number>`COALESCE(SUM(${schema.salesInvoice.totalAmount}), 0)`,
+    })
+    .from(schema.salesInvoice)
+    .where(gte(schema.salesInvoice.invoiceDate, fyStartDate))
+  return rows[0]?.total ?? 0
+}
+
+// Count of unpaid invoices whose dueDate is strictly before today.
+export async function getOverdueCount(db: Db): Promise<number> {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const rows = await db
+    .select({ count: count() })
+    .from(schema.salesInvoice)
+    .where(
+      and(
+        ne(schema.salesInvoice.status, 'PAID'),
+        isNotNull(schema.salesInvoice.dueDate),
+        lt(schema.salesInvoice.dueDate, today),
+      ),
+    )
+  return rows[0]?.count ?? 0
+}
+
+// Count of stock-tracked items whose currentStock has dropped below the
+// per-item warning threshold. The column-to-column comparison is expressed
+// via raw sql template because drizzle's `lt` helper takes a column + value.
+export async function getLowStockCount(db: Db): Promise<number> {
+  const rows = await db
+    .select({ count: count() })
+    .from(schema.item)
+    .where(
+      and(
+        eq(schema.item.trackStock, true),
+        sql`${schema.item.currentStock} < ${schema.item.lowStockWarning}`,
+      ),
+    )
+  return rows[0]?.count ?? 0
+}
+
+export type RecentInvoice = typeof schema.salesInvoice.$inferSelect & {
+  customerName: string | null
+}
+
+// Top N invoices by invoiceDate desc, joined with their customer for the name.
+// Same shape as the rows in the Invoices tab — same display pattern reused.
+export async function getRecentInvoices(
+  db: Db,
+  limit: number,
+): Promise<RecentInvoice[]> {
+  const rows = await db
+    .select({
+      invoice: schema.salesInvoice,
+      customerName: schema.customer.name,
+    })
+    .from(schema.salesInvoice)
+    .leftJoin(
+      schema.customer,
+      eq(schema.salesInvoice.customerId, schema.customer.id),
+    )
+    .orderBy(desc(schema.salesInvoice.invoiceDate))
+    .limit(limit)
+  return rows.map((r) => ({ ...r.invoice, customerName: r.customerName }))
+}

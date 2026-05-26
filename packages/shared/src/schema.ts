@@ -4,10 +4,26 @@ import {
   integer,
   real,
   blob,
+  customType,
 } from "drizzle-orm/sqlite-core";
+import cuid from "cuid";
 
-const cuid = () => crypto.randomUUID();
 const now = () => new Date();
+
+// Stores Date values as ISO-8601 strings in a TEXT column. Matches the
+// on-disk format Prisma uses for SQLite DateTime fields, so a backup file
+// produced by the desktop app can be opened by Drizzle without conversion.
+const isoDate = customType<{ data: Date; driverData: string }>({
+  dataType() {
+    return "text";
+  },
+  toDriver(value: Date): string {
+    return value.toISOString();
+  },
+  fromDriver(value: string): Date {
+    return new Date(value);
+  },
+});
 
 // =============================================================
 // Company (singleton)
@@ -28,10 +44,10 @@ export const company = sqliteTable("Company", {
   bankDetails: text("bankDetails"),
   stateCode: text("stateCode"),
   stateName: text("stateName"),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -63,11 +79,11 @@ export const customer = sqliteTable("Party", {
   fetchedFromGst: integer("fetchedFromGst", { mode: "boolean" })
     .notNull()
     .default(false),
-  lastGstFetch: integer("lastGstFetch", { mode: "timestamp" }),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  lastGstFetch: isoDate("lastGstFetch"),
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -98,11 +114,11 @@ export const supplier = sqliteTable("Supplier", {
   fetchedFromGst: integer("fetchedFromGst", { mode: "boolean" })
     .notNull()
     .default(false),
-  lastGstFetch: integer("lastGstFetch", { mode: "timestamp" }),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  lastGstFetch: isoDate("lastGstFetch"),
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -127,10 +143,10 @@ export const item = sqliteTable("Item", {
     .default(false),
   currentStock: real("currentStock").notNull().default(0),
   lowStockWarning: real("lowStockWarning").notNull().default(10),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -150,10 +166,10 @@ export const supplierItem = sqliteTable("SupplierItem", {
   lastPurchasePrice: real("lastPurchasePrice").notNull().default(0),
   defaultTaxRate: real("defaultTaxRate").notNull().default(0),
   linkedItemId: text("linkedItemId").references(() => item.id),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -165,10 +181,10 @@ export const supplierItem = sqliteTable("SupplierItem", {
 export const salesInvoice = sqliteTable("SalesInvoice", {
   id: text("id").primaryKey().$defaultFn(cuid),
   invoiceNumber: text("invoiceNumber").notNull().unique(),
-  invoiceDate: integer("invoiceDate", { mode: "timestamp" })
+  invoiceDate: isoDate("invoiceDate")
     .notNull()
     .$defaultFn(now),
-  dueDate: integer("dueDate", { mode: "timestamp" }),
+  dueDate: isoDate("dueDate"),
   type: text("type").notNull().default("INVOICE"),
   customerId: text("partyId")
     .notNull()
@@ -203,10 +219,10 @@ export const salesInvoice = sqliteTable("SalesInvoice", {
   vehicleNumber: text("vehicleNumber"),
   warrantyPeriod: text("warrantyPeriod"),
   dispatchedThrough: text("dispatchedThrough"),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -235,7 +251,7 @@ export const salesInvoiceItem = sqliteTable("SalesInvoiceItem", {
   igstAmount: real("igstAmount").notNull().default(0),
   cessRate: real("cessRate").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -246,10 +262,10 @@ export const salesInvoiceItem = sqliteTable("SalesInvoiceItem", {
 export const quotation = sqliteTable("Quotation", {
   id: text("id").primaryKey().$defaultFn(cuid),
   invoiceNumber: text("invoiceNumber").notNull().unique(),
-  invoiceDate: integer("invoiceDate", { mode: "timestamp" })
+  invoiceDate: isoDate("invoiceDate")
     .notNull()
     .$defaultFn(now),
-  dueDate: integer("dueDate", { mode: "timestamp" }),
+  dueDate: isoDate("dueDate"),
   customerId: text("partyId")
     .notNull()
     .references(() => customer.id),
@@ -274,11 +290,11 @@ export const quotation = sqliteTable("Quotation", {
   cessAmount: real("cessAmount").notNull().default(0),
   supplyType: text("supplyType").notNull().default("B2B"),
   ecommerceGstin: text("ecommerceGstin"),
-  deliveryTime: integer("deliveryTime", { mode: "timestamp" }),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  deliveryTime: isoDate("deliveryTime"),
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -307,7 +323,7 @@ export const quotationItem = sqliteTable("QuotationItem", {
   igstAmount: real("igstAmount").notNull().default(0),
   cessRate: real("cessRate").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -318,10 +334,10 @@ export const quotationItem = sqliteTable("QuotationItem", {
 export const proformaInvoice = sqliteTable("ProformaInvoice", {
   id: text("id").primaryKey().$defaultFn(cuid),
   invoiceNumber: text("invoiceNumber").notNull().unique(),
-  invoiceDate: integer("invoiceDate", { mode: "timestamp" })
+  invoiceDate: isoDate("invoiceDate")
     .notNull()
     .$defaultFn(now),
-  dueDate: integer("dueDate", { mode: "timestamp" }),
+  dueDate: isoDate("dueDate"),
   customerId: text("partyId")
     .notNull()
     .references(() => customer.id),
@@ -346,11 +362,11 @@ export const proformaInvoice = sqliteTable("ProformaInvoice", {
   cessAmount: real("cessAmount").notNull().default(0),
   supplyType: text("supplyType").notNull().default("B2B"),
   ecommerceGstin: text("ecommerceGstin"),
-  deliveryTime: integer("deliveryTime", { mode: "timestamp" }),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  deliveryTime: isoDate("deliveryTime"),
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -379,7 +395,7 @@ export const proformaInvoiceItem = sqliteTable("ProformaInvoiceItem", {
   igstAmount: real("igstAmount").notNull().default(0),
   cessRate: real("cessRate").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -390,10 +406,10 @@ export const proformaInvoiceItem = sqliteTable("ProformaInvoiceItem", {
 export const purchaseOrder = sqliteTable("PurchaseOrder", {
   id: text("id").primaryKey().$defaultFn(cuid),
   orderNumber: text("orderNumber").notNull().unique(),
-  orderDate: integer("orderDate", { mode: "timestamp" })
+  orderDate: isoDate("orderDate")
     .notNull()
     .$defaultFn(now),
-  expectedDate: integer("expectedDate", { mode: "timestamp" }),
+  expectedDate: isoDate("expectedDate"),
   supplierId: text("supplierId")
     .notNull()
     .references(() => supplier.id),
@@ -416,10 +432,10 @@ export const purchaseOrder = sqliteTable("PurchaseOrder", {
   sgstAmount: real("sgstAmount").notNull().default(0),
   igstAmount: real("igstAmount").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -447,7 +463,7 @@ export const purchaseOrderItem = sqliteTable("PurchaseOrderItem", {
   sgstAmount: real("sgstAmount").notNull().default(0),
   igstRate: real("igstRate").notNull().default(0),
   igstAmount: real("igstAmount").notNull().default(0),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -458,7 +474,7 @@ export const purchaseOrderItem = sqliteTable("PurchaseOrderItem", {
 export const purchaseBill = sqliteTable("PurchaseBill", {
   id: text("id").primaryKey().$defaultFn(cuid),
   billNumber: text("billNumber").notNull().unique(),
-  billDate: integer("billDate", { mode: "timestamp" })
+  billDate: isoDate("billDate")
     .notNull()
     .$defaultFn(now),
   supplierId: text("supplierId")
@@ -485,17 +501,17 @@ export const purchaseBill = sqliteTable("PurchaseBill", {
   igstAmount: real("igstAmount").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
   supplierInvoiceNumber: text("supplierInvoiceNumber"),
-  supplierInvoiceDate: integer("supplierInvoiceDate", { mode: "timestamp" }),
+  supplierInvoiceDate: isoDate("supplierInvoiceDate"),
   itcEligibility: text("itcEligibility").notNull().default("ELIGIBLE"),
   attachmentData: blob("attachmentData", { mode: "buffer" }),
   attachmentMimeType: text("attachmentMimeType"),
   purchaseOrderId: text("purchaseOrderId").references(() => purchaseOrder.id, {
     onDelete: "set null",
   }),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -524,7 +540,7 @@ export const purchaseBillItem = sqliteTable("PurchaseBillItem", {
   igstAmount: real("igstAmount").notNull().default(0),
   cessRate: real("cessRate").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -539,7 +555,7 @@ export const paymentTransaction = sqliteTable("PaymentTransaction", {
   supplierId: text("supplierId").references(() => supplier.id),
   amount: real("amount").notNull(),
   paymentMode: text("paymentMode").notNull().default("CASH"),
-  paymentDate: integer("paymentDate", { mode: "timestamp" })
+  paymentDate: isoDate("paymentDate")
     .notNull()
     .$defaultFn(now),
   referenceType: text("referenceType"),
@@ -547,7 +563,7 @@ export const paymentTransaction = sqliteTable("PaymentTransaction", {
   salesInvoiceId: text("salesInvoiceId").references(() => salesInvoice.id),
   purchaseBillId: text("purchaseBillId").references(() => purchaseBill.id),
   notes: text("notes"),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -565,7 +581,7 @@ export const stockMovement = sqliteTable("StockMovement", {
   referenceType: text("referenceType"),
   referenceId: text("referenceId"),
   notes: text("notes"),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -575,16 +591,14 @@ export const stockMovement = sqliteTable("StockMovement", {
 // =============================================================
 export const syncMetadata = sqliteTable("SyncMetadata", {
   id: text("id").primaryKey().$defaultFn(cuid),
-  lastSyncTimestamp: integer("lastSyncTimestamp", { mode: "timestamp" })
+  lastSyncTimestamp: isoDate("lastSyncTimestamp")
     .notNull()
     .$defaultFn(now),
   deviceId: text("deviceId").notNull(),
   syncStatus: text("syncStatus").notNull().default("idle"),
-  cloudFileModifiedTime: integer("cloudFileModifiedTime", {
-    mode: "timestamp",
-  }),
+  cloudFileModifiedTime: isoDate("cloudFileModifiedTime"),
   lastError: text("lastError"),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -597,10 +611,10 @@ export const settings = sqliteTable("Settings", {
   id: text("id").primaryKey().$defaultFn(cuid),
   key: text("key").notNull().unique(),
   value: text("value").notNull(),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -612,7 +626,7 @@ export const settings = sqliteTable("Settings", {
 export const deliveryChallan = sqliteTable("DeliveryChallan", {
   id: text("id").primaryKey().$defaultFn(cuid),
   challanNumber: text("challanNumber").notNull().unique(),
-  challanDate: integer("challanDate", { mode: "timestamp" })
+  challanDate: isoDate("challanDate")
     .notNull()
     .$defaultFn(now),
   customerId: text("partyId")
@@ -631,10 +645,10 @@ export const deliveryChallan = sqliteTable("DeliveryChallan", {
   ewayBillNo: text("ewayBillNo"),
   warrantyPeriod: text("warrantyPeriod"),
   dispatchedThrough: text("dispatchedThrough"),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -654,7 +668,7 @@ export const deliveryChallanItem = sqliteTable("DeliveryChallanItem", {
   discount: real("discount").notNull().default(0),
   total: real("total").notNull(),
   hsnCode: text("hsnCode"),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -665,7 +679,7 @@ export const deliveryChallanItem = sqliteTable("DeliveryChallanItem", {
 export const creditDebitNote = sqliteTable("CreditDebitNote", {
   id: text("id").primaryKey().$defaultFn(cuid),
   noteNumber: text("noteNumber").notNull().unique(),
-  noteDate: integer("noteDate", { mode: "timestamp" })
+  noteDate: isoDate("noteDate")
     .notNull()
     .$defaultFn(now),
   type: text("type").notNull(),
@@ -688,10 +702,10 @@ export const creditDebitNote = sqliteTable("CreditDebitNote", {
   status: text("status").notNull().default("ACTIVE"),
   notes: text("notes"),
   termsConditions: text("termsConditions"),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -718,7 +732,7 @@ export const creditDebitNoteItem = sqliteTable("CreditDebitNoteItem", {
   sgstAmount: real("sgstAmount").notNull().default(0),
   igstRate: real("igstRate").notNull().default(0),
   igstAmount: real("igstAmount").notNull().default(0),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -734,10 +748,10 @@ export const bankAccount = sqliteTable("BankAccount", {
   bankName: text("bankName"),
   ifscCode: text("ifscCode"),
   currentBalance: real("currentBalance").notNull().default(0),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -763,13 +777,13 @@ export const gstCache = sqliteTable("GstCache", {
   pincode: text("pincode"),
   additionalAddresses: text("additionalAddresses"),
   rawResponse: text("rawResponse"),
-  fetchedAt: integer("fetchedAt", { mode: "timestamp" })
+  fetchedAt: isoDate("fetchedAt")
     .notNull()
     .$defaultFn(now),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -782,7 +796,7 @@ export const previousInvoice = sqliteTable("PreviousInvoice", {
   id: text("id").primaryKey().$defaultFn(cuid),
   serialNumber: integer("serialNumber").unique(),
   invoiceNumber: text("invoiceNumber").notNull(),
-  invoiceDate: integer("invoiceDate", { mode: "timestamp" }).notNull(),
+  invoiceDate: isoDate("invoiceDate").notNull(),
   partyName: text("partyName").notNull(),
   partyGstin: text("partyGstin"),
   totalAmount: real("totalAmount").notNull(),
@@ -790,10 +804,10 @@ export const previousInvoice = sqliteTable("PreviousInvoice", {
   fileData: blob("fileData", { mode: "buffer" }).notNull(),
   fileMimeType: text("fileMimeType").notNull(),
   fileName: text("fileName").notNull(),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: integer("updatedAt", { mode: "timestamp" })
+  updatedAt: isoDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -812,7 +826,7 @@ export const previousInvoiceItem = sqliteTable("PreviousInvoiceItem", {
   discount: real("discount").notNull().default(0),
   taxRate: real("taxRate").notNull().default(0),
   amount: real("amount").notNull(),
-  createdAt: integer("createdAt", { mode: "timestamp" })
+  createdAt: isoDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
