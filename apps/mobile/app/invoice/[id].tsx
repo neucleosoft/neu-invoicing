@@ -25,6 +25,8 @@ type LineRow = LineItem & { itemName: string | null }
 export default function InvoiceDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const db = useDb()
+  const onEdit = () =>
+    router.push({ pathname: '/invoice/edit/[id]', params: { id } })
   const [invoice, setInvoice] = useState<Invoice | null>(null)
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [lines, setLines] = useState<LineRow[]>([])
@@ -68,7 +70,7 @@ export default function InvoiceDetailScreen() {
   if (loading) {
     return (
       <ThemedView style={styles.container}>
-        <Header onBack={() => router.back()} />
+        <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!invoice} />
         <ThemedText style={styles.centered}>Loading…</ThemedText>
       </ThemedView>
     )
@@ -77,7 +79,7 @@ export default function InvoiceDetailScreen() {
   if (!invoice) {
     return (
       <ThemedView style={styles.container}>
-        <Header onBack={() => router.back()} />
+        <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!invoice} />
         <View style={styles.centeredBlock}>
           <ThemedText type="subtitle">Invoice not found</ThemedText>
           <ThemedText style={styles.muted}>
@@ -109,7 +111,7 @@ export default function InvoiceDetailScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Header onBack={() => router.back()} />
+      <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!invoice} />
       <ScrollView contentContainerStyle={styles.content}>
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
@@ -269,16 +271,28 @@ export default function InvoiceDetailScreen() {
   )
 }
 
-function Header({ onBack }: { onBack: () => void }) {
+function Header({
+  onBack,
+  onEdit,
+  editEnabled,
+}: {
+  onBack: () => void
+  onEdit: () => void
+  editEnabled: boolean
+}) {
   return (
     <View style={styles.header}>
-      <Pressable onPress={onBack} style={styles.headerButton}>
-        <ThemedText style={styles.headerButtonText}>←</ThemedText>
+      <Pressable onPress={onBack} style={styles.headerButton} hitSlop={8}>
+        <ThemedText style={styles.headerArrow}>←</ThemedText>
       </Pressable>
       <ThemedText type="defaultSemiBold" style={styles.headerTitle}>
         Invoice
       </ThemedText>
-      <Pressable disabled style={[styles.headerButton, styles.headerButtonDisabled]}>
+      <Pressable
+        onPress={onEdit}
+        disabled={!editEnabled}
+        style={[styles.headerButton, !editEnabled && styles.headerButtonDisabled]}
+      >
         <ThemedText style={styles.headerButtonText}>Edit</ThemedText>
       </Pressable>
     </View>
@@ -297,6 +311,7 @@ const styles = StyleSheet.create({
   headerButton: { paddingVertical: 6, paddingHorizontal: 10 },
   headerButtonDisabled: { opacity: 0.3 },
   headerButtonText: { fontSize: 16 },
+  headerArrow: { fontSize: 28, fontWeight: '500', lineHeight: 30 },
   headerTitle: { flex: 1, textAlign: 'center' },
   content: { paddingHorizontal: 16, paddingBottom: 32, gap: 16 },
   centered: { textAlign: 'center', marginTop: 64 },

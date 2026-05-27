@@ -53,7 +53,7 @@ const styles = StyleSheet.create({
     shadowRadius: 6,
   },
   icon: {
-    color: 'white',
+    color: 'black',
     fontSize: 28,
     fontWeight: '300',
     // Without explicit lineHeight the "+" sits visually below center on Android.

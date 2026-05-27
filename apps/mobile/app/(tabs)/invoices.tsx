@@ -104,7 +104,7 @@ export default function InvoicesScreen() {
               description="Create your first invoice to start billing customers."
               action={{
                 label: 'New Invoice',
-                onPress: () => router.push('/invoice/new'),
+                onPress: () => router.push('/invoice/newInvoice'),
               }}
             />
           )
@@ -112,7 +112,7 @@ export default function InvoicesScreen() {
         renderItem={renderItem}
       />
 
-      <Fab onPress={() => router.push('/invoice/new')} label="New invoice" />
+      <Fab onPress={() => router.push('/invoice/newInvoice')} label="New invoice" />
     </ThemedView>
   )
 }
@@ -156,6 +156,19 @@ const InvoiceRow = memo(function InvoiceRow({ row }: { row: Row }) {
               {formatInvoiceStatus(displayStatus)}
             </ThemedText>
           </View>
+          {/* Nested Pressable: in RN the inner press wins, so tapping Edit
+              navigates to the edit screen without also triggering the card's
+              View navigation. Hitslop widens the touch target without
+              enlarging the visible chip. */}
+          <Pressable
+            onPress={() =>
+              router.push({ pathname: '/invoice/edit/[id]', params: { id: row.id } })
+            }
+            hitSlop={8}
+            style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
+          >
+            <ThemedText style={styles.editChipText}>Edit</ThemedText>
+          </Pressable>
         </View>
       </ThemedView>
     </Pressable>
@@ -189,4 +202,7 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   statusBadgeText: { fontSize: 10, fontWeight: '600' },
+  editChip: { paddingHorizontal: 6, paddingVertical: 2 },
+  editChipPressed: { opacity: 0.5 },
+  editChipText: { fontSize: 12, fontWeight: '600', color: '#16a34a' },
 })
