@@ -743,6 +743,29 @@ declare global {
         getTotalBalance: () => Promise<{ success: boolean; data?: { cash: number; bank: number; total: number }; error?: string }>
         adjustBalance: (id: string, amount: number, notes?: string) => Promise<{ success: boolean; data?: any; error?: string }>
       }
+      expense: {
+        getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>
+        getById: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
+        getReceipt: (
+          id: string,
+        ) => Promise<{
+          success: boolean
+          data?: { receiptData: Uint8Array; receiptMimeType: string | null; receiptFileName: string | null }
+          error?: string
+        }>
+        create: (data: any) => Promise<{ success: boolean; data?: any; error?: string }>
+        update: (id: string, data: any) => Promise<{ success: boolean; data?: any; error?: string }>
+        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        getTotals: (args?: { fromDate?: string; toDate?: string }) => Promise<{
+          success: boolean
+          data?: {
+            byCategory: { category: string; total: number; count: number }[]
+            grandTotal: number
+            totalCount: number
+          }
+          error?: string
+        }>
+      }
       dashboard: {
         getMetrics: () => Promise<{ success: boolean; data?: DashboardMetrics; error?: string }>
         getRecentInvoices: (limit: number) => Promise<{ success: boolean; data?: SalesInvoice[]; error?: string }>

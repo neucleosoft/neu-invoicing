@@ -29,6 +29,7 @@ import { setupChallanHandlers } from './handlers/challan'
 import { setupCreditNoteHandlers } from './handlers/creditNote'
 import { setupPreviousInvoiceHandlers } from './handlers/previousInvoice'
 import { setupCashBankHandlers } from './handlers/cashBank'
+import { setupExpenseHandlers } from './handlers/expense'
 import { setupShareHandlers } from './handlers/share'
 
 protocol.registerSchemesAsPrivileged([
@@ -132,6 +133,7 @@ app.whenReady().then(async () => {
   setupCreditNoteHandlers()
   setupPreviousInvoiceHandlers()
   setupCashBankHandlers()
+  setupExpenseHandlers()
   setupShareHandlers()
 
   // One-shot data fix: pre-split databases held suppliers in the Customer/Party

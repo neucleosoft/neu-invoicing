@@ -643,6 +643,26 @@ model BankAccount {
   updatedAt      DateTime @updatedAt
 }
 
+// Daily business expenses — non-inventory money out (rent, utilities, salaries,
+// travel, etc.). Standalone records: no supplier, no bill linkage, no balance
+// side-effect on bank accounts, no GST/ITC fields. Optional receipt attachment
+// stored as BLOB (same pattern as PreviousInvoice.fileData).
+model Expense {
+  id              String   @id @default(cuid())
+  date            DateTime @default(now())
+  category        String // one of EXPENSE_CATEGORIES (see Expenses.tsx)
+  description     String
+  amount          Float
+  paymentMode     String   @default("CASH") // CASH, BANK_TRANSFER, UPI, CARD, CHEQUE
+  notes           String?
+  // Receipt attachment (optional)
+  receiptData     Bytes?
+  receiptMimeType String?
+  receiptFileName String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
 // GST Lookup Cache - Stores fetched GST details to minimize API calls
 model GstCache {
   id                  String   @id @default(cuid())
