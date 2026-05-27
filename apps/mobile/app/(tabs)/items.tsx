@@ -17,7 +17,7 @@ export default function ItemsScreen() {
   const [items, setItems] = useState<Item[]>([])
   const [search, setSearch] = useState('')
 
-  // Re-fetch every time the tab regains focus, e.g. after returning from /item/new.
+  // Re-fetch every time the tab regains focus, e.g. after returning from /item/newItem.
   useFocusEffect(
     useCallback(() => {
       db.select()
@@ -74,14 +74,14 @@ export default function ItemsScreen() {
             <EmptyState
               title="No items yet"
               description="Add your first product or service to start invoicing."
-              action={{ label: 'Add Item', onPress: () => router.push('/item/new') }}
+              action={{ label: 'Add Item', onPress: () => router.push('/item/newItem') }}
             />
           )
         }
         renderItem={renderItem}
       />
 
-      <Fab onPress={() => router.push('/item/new')} label="Add item" />
+      <Fab onPress={() => router.push('/item/newItem')} label="Add item" />
     </ThemedView>
   )
 }
@@ -124,6 +124,17 @@ const ItemRow = memo(function ItemRow({ item }: { item: Item }) {
         <View style={styles.cardRight}>
           <ThemedText type="defaultSemiBold">{formatCurrency(item.salePrice)}</ThemedText>
           <ThemedText style={styles.unitText}>per {item.unit}</ThemedText>
+          {/* Nested Pressable: inner press wins, so tapping Edit navigates to
+              edit without also triggering the card's tap-to-view. */}
+          <Pressable
+            onPress={() =>
+              router.push({ pathname: '/item/edit/[id]', params: { id: item.id } })
+            }
+            hitSlop={8}
+            style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
+          >
+            <ThemedText style={styles.editChipText}>Edit</ThemedText>
+          </Pressable>
         </View>
       </ThemedView>
     </Pressable>
@@ -190,4 +201,7 @@ const styles = StyleSheet.create({
   },
   lowStockChipText: { fontSize: 10, color: '#991b1b', fontWeight: '600' },
   unitText: { fontSize: 12, opacity: 0.6 },
+  editChip: { paddingHorizontal: 6, paddingVertical: 2 },
+  editChipPressed: { opacity: 0.5 },
+  editChipText: { fontSize: 12, fontWeight: '600', color: '#16a34a' },
 })
