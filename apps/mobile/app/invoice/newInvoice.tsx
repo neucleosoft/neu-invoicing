@@ -24,10 +24,19 @@ type LineRow = {
   itemName: string
   qty: number
   rate: number
+  discount: number
   taxRate: number
 }
 
-const STATUS_OPTIONS = ['DRAFT', 'SENT', 'PAID', 'PARTIAL', 'OVERDUE'] as const
+// Mirror desktop Sales.tsx status dropdown exactly: DRAFT (labeled "Unpaid"),
+// PAID, PARTIAL, OVERDUE. No SENT — desktop doesn't expose it on this form.
+const STATUS_OPTIONS = ['DRAFT', 'PAID', 'PARTIAL', 'OVERDUE'] as const
+const STATUS_LABELS: Record<(typeof STATUS_OPTIONS)[number], string> = {
+  DRAFT: 'Unpaid',
+  PAID: 'Paid',
+  PARTIAL: 'Partial',
+  OVERDUE: 'Overdue',
+}
 const PAYMENT_MODE_OPTIONS = [
   'CASH',
   'BANK_TRANSFER',
@@ -48,6 +57,12 @@ function parseDate(s: string): Date | null {
   if (!s.trim()) return null
   const d = new Date(s)
   return isNaN(d.getTime()) ? null : d
+}
+
+// Per-line amount mirrors desktop Sales.tsx:451 — discount reduces the
+// taxable base, tax is applied after discount.
+function lineAmount(qty: number, rate: number, discount: number, taxRate: number) {
+  return (qty * rate - discount) * (1 + taxRate / 100)
 }
 
 export default function NewInvoiceScreen() {
@@ -86,8 +101,16 @@ export default function NewInvoiceScreen() {
   }, [db])
 
   const selectedCustomer = customers.find((c) => c.id === customerId) ?? null
-  const subtotal = lines.reduce((s, l) => s + l.qty * l.rate, 0)
-  const taxAmount = lines.reduce((s, l) => s + l.qty * l.rate * (l.taxRate / 100), 0)
+  // Subtotal/tax mirror desktop Sales.tsx:460-479: discount reduces the
+  // taxable base before tax is applied.
+  const subtotal = lines.reduce(
+    (s, l) => s + (l.qty * l.rate - l.discount),
+    0,
+  )
+  const taxAmount = lines.reduce(
+    (s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100),
+    0,
+  )
   const total = subtotal + taxAmount
   const paid = parseFloat(amountPaid) || 0
   const balanceDue = total - paid
@@ -95,13 +118,20 @@ export default function NewInvoiceScreen() {
   function pickItem(it: Item) {
     setLines([
       ...lines,
-      { itemId: it.id, itemName: it.name, qty: 1, rate: it.salePrice, taxRate: it.taxRate },
+      {
+        itemId: it.id,
+        itemName: it.name,
+        qty: 1,
+        rate: it.salePrice,
+        discount: 0,
+        taxRate: it.taxRate,
+      },
     ])
     setShowItemPicker(false)
   }
 
-  function updateQty(index: number, qty: string) {
-    setLines(lines.map((l, i) => (i === index ? { ...l, qty: parseFloat(qty) || 0 } : l)))
+  function updateLine(index: number, patch: Partial<LineRow>) {
+    setLines(lines.map((l, i) => (i === index ? { ...l, ...patch } : l)))
   }
 
   function removeLine(index: number) {
@@ -155,8 +185,9 @@ export default function NewInvoiceScreen() {
           itemId: l.itemId,
           quantity: l.qty,
           rate: l.rate,
+          discount: l.discount,
           taxRate: l.taxRate,
-          total: l.qty * l.rate * (1 + l.taxRate / 100),
+          total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
         }))
       )
 
@@ -205,7 +236,7 @@ export default function NewInvoiceScreen() {
 
       <ThemedText style={styles.label}>Status</ThemedText>
       <Pressable style={styles.picker} onPress={() => setShowStatusPicker(true)}>
-        <ThemedText>{status}</ThemedText>
+        <ThemedText>{STATUS_LABELS[status]}</ThemedText>
       </Pressable>
 
       <Field
@@ -223,23 +254,74 @@ export default function NewInvoiceScreen() {
 
       <SectionHeader>Line Items</SectionHeader>
       {lines.map((l, i) => (
-        <View key={i} style={styles.lineRow}>
-          <View style={{ flex: 2 }}>
-            <ThemedText type="defaultSemiBold">{l.itemName}</ThemedText>
-            <ThemedText style={styles.lineMeta}>
-              ₹{l.rate.toFixed(2)} · {l.taxRate}% GST
+        <ThemedView
+          key={i}
+          lightColor="#f9fafb"
+          darkColor="#1f2937"
+          style={styles.lineCard}
+        >
+          <View style={styles.lineTop}>
+            <ThemedText type="defaultSemiBold" style={styles.lineName} numberOfLines={2}>
+              {l.itemName}
+            </ThemedText>
+            <Pressable style={styles.removeButton} onPress={() => removeLine(i)}>
+              <ThemedText style={styles.removeText}>×</ThemedText>
+            </Pressable>
+          </View>
+
+          <View style={styles.lineFieldsRow}>
+            <View style={styles.lineFieldSmall}>
+              <ThemedText style={styles.lineFieldLabel}>Qty</ThemedText>
+              <TextInput
+                style={styles.lineInput}
+                value={String(l.qty)}
+                onChangeText={(v) => updateLine(i, { qty: parseFloat(v) || 0 })}
+                keyboardType="numeric"
+                placeholderTextColor="#999"
+              />
+            </View>
+            <View style={styles.lineField}>
+              <ThemedText style={styles.lineFieldLabel}>Rate</ThemedText>
+              <TextInput
+                style={styles.lineInput}
+                value={String(l.rate)}
+                onChangeText={(v) => updateLine(i, { rate: parseFloat(v) || 0 })}
+                keyboardType="numeric"
+                placeholderTextColor="#999"
+              />
+            </View>
+          </View>
+
+          <View style={styles.lineFieldsRow}>
+            <View style={styles.lineField}>
+              <ThemedText style={styles.lineFieldLabel}>Discount</ThemedText>
+              <TextInput
+                style={styles.lineInput}
+                value={String(l.discount)}
+                onChangeText={(v) => updateLine(i, { discount: parseFloat(v) || 0 })}
+                keyboardType="numeric"
+                placeholderTextColor="#999"
+              />
+            </View>
+            <View style={styles.lineFieldSmall}>
+              <ThemedText style={styles.lineFieldLabel}>Tax %</ThemedText>
+              <TextInput
+                style={styles.lineInput}
+                value={String(l.taxRate)}
+                onChangeText={(v) => updateLine(i, { taxRate: parseFloat(v) || 0 })}
+                keyboardType="numeric"
+                placeholderTextColor="#999"
+              />
+            </View>
+          </View>
+
+          <View style={styles.lineAmountRow}>
+            <ThemedText style={styles.lineMeta}>Amount</ThemedText>
+            <ThemedText type="defaultSemiBold">
+              ₹{lineAmount(l.qty, l.rate, l.discount, l.taxRate).toFixed(2)}
             </ThemedText>
           </View>
-          <TextInput
-            style={styles.qtyInput}
-            value={String(l.qty)}
-            onChangeText={(v) => updateQty(i, v)}
-            keyboardType="numeric"
-          />
-          <Pressable style={styles.removeButton} onPress={() => removeLine(i)}>
-            <ThemedText style={styles.removeText}>×</ThemedText>
-          </Pressable>
-        </View>
+        </ThemedView>
       ))}
       <Pressable style={styles.addLineButton} onPress={() => setShowItemPicker(true)}>
         <ThemedText style={styles.addLineButtonText}>+ Add Line Item</ThemedText>
@@ -420,7 +502,7 @@ export default function NewInvoiceScreen() {
                   }}
                 >
                   <ThemedText type={item === status ? 'defaultSemiBold' : undefined}>
-                    {item === status ? `✓ ${item}` : item}
+                    {item === status ? `✓ ${STATUS_LABELS[item]}` : STATUS_LABELS[item]}
                   </ThemedText>
                 </Pressable>
               )}
@@ -518,27 +600,36 @@ const styles = StyleSheet.create({
     borderColor: '#007AFF',
   },
   placeholder: { opacity: 0.5 },
-  lineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  lineCard: {
+    padding: 12,
+    borderRadius: 10,
     gap: 8,
-    paddingVertical: 8,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ccc',
+    marginTop: 4,
   },
-  lineMeta: { fontSize: 12, opacity: 0.6, marginTop: 2 },
-  qtyInput: {
-    width: 60,
+  lineTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  lineName: { flex: 1 },
+  lineFieldsRow: { flexDirection: 'row', gap: 8 },
+  lineField: { flex: 1, gap: 4 },
+  lineFieldSmall: { width: 80, gap: 4 },
+  lineFieldLabel: { fontSize: 12, opacity: 0.6 },
+  lineInput: {
     borderWidth: 1,
     borderColor: '#ccc',
     borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-    textAlign: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    fontSize: 15,
     color: '#000',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#fff',
   },
-  removeButton: { paddingHorizontal: 8, paddingVertical: 4 },
+  lineAmountRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 4,
+  },
+  lineMeta: { fontSize: 13, opacity: 0.6 },
+  removeButton: { paddingHorizontal: 8, paddingVertical: 2 },
   removeText: { fontSize: 22, color: '#FF3B30' },
   addLineButton: {
     borderWidth: 1,

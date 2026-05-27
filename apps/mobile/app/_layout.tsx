@@ -55,10 +55,16 @@ function RootLayoutInner() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="login" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
+      {/* Default headerShown: false — detail/edit/new screens render their
+          own header. Without this, unregistered routes (invoice/[id], etc.)
+          fall back to Expo's default header which shows the raw filename. */}
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="login" />
+        <Stack.Screen
+          name="modal"
+          options={{ presentation: 'modal', title: 'Modal', headerShown: true }}
+        />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>

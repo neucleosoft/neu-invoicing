@@ -125,8 +125,8 @@ export default function ItemDetailScreen() {
 function Header({ onBack }: { onBack: () => void }) {
   return (
     <View style={styles.header}>
-      <Pressable onPress={onBack} style={styles.headerButton}>
-        <ThemedText style={styles.headerButtonText}>←</ThemedText>
+      <Pressable onPress={onBack} style={styles.headerButton} hitSlop={8}>
+        <ThemedText style={styles.headerArrow}>←</ThemedText>
       </Pressable>
       <ThemedText type="defaultSemiBold" style={styles.headerTitle}>
         Item Details
@@ -152,6 +152,7 @@ const styles = StyleSheet.create({
   headerButton: { paddingVertical: 6, paddingHorizontal: 10 },
   headerButtonDisabled: { opacity: 0.3 },
   headerButtonText: { fontSize: 16 },
+  headerArrow: { fontSize: 28, fontWeight: '500', lineHeight: 30 },
   headerTitle: { flex: 1, textAlign: 'center' },
   content: { paddingHorizontal: 16, paddingBottom: 32, gap: 16 },
   centered: { textAlign: 'center', marginTop: 64 },
