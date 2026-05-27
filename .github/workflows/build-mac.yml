@@ -1,0 +1,49 @@
+name: Build macOS
+
+# Trigger manually from anywhere:
+#   gh workflow run build-mac.yml --ref nitesh
+# Or via the GitHub UI: Actions tab → "Build macOS" → "Run workflow".
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client (darwin engine)
+        working-directory: apps/desktop
+        run: pnpm prisma:generate
+
+      - name: Build macOS DMG (unsigned)
+        working-directory: apps/desktop
+        env:
+          # No Apple Developer cert configured — skip code signing.
+          # Apple Silicon users opening the .app will see "app is damaged".
+          # Workaround on the user's machine after install:
+          #   xattr -dr com.apple.quarantine "/Applications/Neu Invoicing.app"
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: pnpm build:mac
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neu-invoicing-macos-${{ github.run_number }}
+          path: apps/desktop/release/*.dmg
+          if-no-files-found: error
+          retention-days: 30
