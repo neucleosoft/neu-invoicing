@@ -77,14 +77,14 @@ export default function CustomersScreen() {
             <EmptyState
               title="No customers yet"
               description="Add your first customer to start invoicing them."
-              action={{ label: 'Add Customer', onPress: () => router.push('/customer/new') }}
+              action={{ label: 'Add Customer', onPress: () => router.push('/customer/newCustomer') }}
             />
           )
         }
         renderItem={renderItem}
       />
 
-      <Fab onPress={() => router.push('/customer/new')} label="Add customer" />
+      <Fab onPress={() => router.push('/customer/newCustomer')} label="Add customer" />
     </ThemedView>
   )
 }
@@ -127,6 +127,17 @@ const CustomerRow = memo(function CustomerRow({ customer }: { customer: Customer
               ? 'advance'
               : 'settled'}
           </ThemedText>
+          {/* Nested Pressable: inner press wins, so tapping Edit navigates to
+              edit without also triggering the card's tap-to-view. */}
+          <Pressable
+            onPress={() =>
+              router.push({ pathname: '/customer/edit/[id]', params: { id: customer.id } })
+            }
+            hitSlop={8}
+            style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
+          >
+            <ThemedText style={styles.editChipText}>Edit</ThemedText>
+          </Pressable>
         </View>
       </ThemedView>
     </Pressable>
@@ -162,4 +173,7 @@ const styles = StyleSheet.create({
   },
   gstChipText: { fontSize: 10, color: '#1e40af', fontWeight: '600' },
   muted: { fontSize: 11, opacity: 0.5 },
+  editChip: { paddingHorizontal: 6, paddingVertical: 2 },
+  editChipPressed: { opacity: 0.5 },
+  editChipText: { fontSize: 12, fontWeight: '600', color: '#16a34a' },
 })

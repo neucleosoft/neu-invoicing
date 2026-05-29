@@ -134,7 +134,7 @@ export default function DashboardScreen() {
           <ActionTile
             iconName="person.fill"
             label="New Customer"
-            onPress={() => router.push('/customer/new')}
+            onPress={() => router.push('/customer/newCustomer')}
           />
           <ActionTile
             iconName="cube.fill"

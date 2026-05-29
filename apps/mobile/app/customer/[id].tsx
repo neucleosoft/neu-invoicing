@@ -27,6 +27,8 @@ function balanceWord(balance: number): string {
 export default function CustomerDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const db = useDb()
+  const onEdit = () =>
+    router.push({ pathname: '/customer/edit/[id]', params: { id } })
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [loading, setLoading] = useState(true)
 
@@ -48,7 +50,7 @@ export default function CustomerDetailScreen() {
   if (loading) {
     return (
       <ThemedView style={styles.container}>
-        <Header onBack={() => router.back()} />
+        <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!customer} />
         <ThemedText style={styles.centered}>Loading…</ThemedText>
       </ThemedView>
     )
@@ -57,7 +59,7 @@ export default function CustomerDetailScreen() {
   if (!customer) {
     return (
       <ThemedView style={styles.container}>
-        <Header onBack={() => router.back()} />
+        <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!customer} />
         <View style={styles.centeredBlock}>
           <ThemedText type="subtitle">Customer not found</ThemedText>
           <ThemedText style={styles.muted}>
@@ -75,7 +77,7 @@ export default function CustomerDetailScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Header onBack={() => router.back()} />
+      <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!customer} />
       <ScrollView contentContainerStyle={styles.content}>
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
@@ -136,7 +138,15 @@ export default function CustomerDetailScreen() {
   )
 }
 
-function Header({ onBack }: { onBack: () => void }) {
+function Header({
+  onBack,
+  onEdit,
+  editEnabled,
+}: {
+  onBack: () => void
+  onEdit: () => void
+  editEnabled: boolean
+}) {
   return (
     <View style={styles.header}>
       <Pressable onPress={onBack} style={styles.headerButton} hitSlop={8}>
@@ -145,7 +155,11 @@ function Header({ onBack }: { onBack: () => void }) {
       <ThemedText type="defaultSemiBold" style={styles.headerTitle}>
         Customer Details
       </ThemedText>
-      <Pressable disabled style={[styles.headerButton, styles.headerButtonDisabled]}>
+      <Pressable
+        onPress={onEdit}
+        disabled={!editEnabled}
+        style={[styles.headerButton, !editEnabled && styles.headerButtonDisabled]}
+      >
         <ThemedText style={styles.headerButtonText}>Edit</ThemedText>
       </Pressable>
     </View>

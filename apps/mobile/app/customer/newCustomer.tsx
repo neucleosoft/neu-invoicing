@@ -1,5 +1,5 @@
 import { router } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   Alert,
   FlatList,
@@ -15,7 +15,11 @@ import {
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
-import { validateGSTIN, type GstValidationResult } from '@neu/shared'
+import {
+  INDIAN_STATE_CODES,
+  validateGSTIN,
+  type GstValidationResult,
+} from '@neu/shared'
 
 const GST_TYPE_OPTIONS = [
   'REGULAR',
@@ -27,6 +31,14 @@ const GST_TYPE_OPTIONS = [
 ] as const
 
 type GstTypeOption = (typeof GST_TYPE_OPTIONS)[number]
+
+// [code, name] tuples sorted by code so the picker reads the same order as
+// official GST forms. INDIAN_STATE_CODES is a Record<string, string>; turning
+// it into an array once at module load is cheaper than re-sorting on every
+// render.
+const STATE_ENTRIES = Object.entries(INDIAN_STATE_CODES).sort(([a], [b]) =>
+  a.localeCompare(b),
+) as [string, string][]
 
 export default function NewCustomerScreen() {
   const db = useDb()
@@ -40,13 +52,14 @@ export default function NewCustomerScreen() {
   const [city, setCity] = useState('')
   const [pincode, setPincode] = useState('')
   const [stateCode, setStateCode] = useState('')
-  const [stateName, setStateName] = useState('')
   const [openingBalance, setOpeningBalance] = useState('0')
   const [saving, setSaving] = useState(false)
   const [showGstTypePicker, setShowGstTypePicker] = useState(false)
+  const [showStatePicker, setShowStatePicker] = useState(false)
   const [gstValidation, setGstValidation] = useState<GstValidationResult | null>(null)
 
-  // Validate GSTIN as user types; auto-fill state when valid.
+  // Validate GSTIN as user types; auto-fill state when valid (mirrors desktop
+  // Customers.tsx:87-94, 130-138).
   useEffect(() => {
     if (taxId.length === 0) {
       setGstValidation(null)
@@ -54,11 +67,15 @@ export default function NewCustomerScreen() {
     }
     const result = validateGSTIN(taxId)
     setGstValidation(result)
-    if (result.valid && result.stateCode && result.stateName) {
+    if (result.valid && result.stateCode) {
       setStateCode(result.stateCode)
-      setStateName(result.stateName)
     }
   }, [taxId])
+
+  const selectedStateName = useMemo(
+    () => INDIAN_STATE_CODES[stateCode] || '',
+    [stateCode],
+  )
 
   async function handleSave() {
     if (!name.trim()) {
@@ -79,8 +96,8 @@ export default function NewCustomerScreen() {
         shippingAddress: shippingAddress.trim() || null,
         city: city.trim() || null,
         pincode: pincode.trim() || null,
-        stateCode: stateCode.trim() || null,
-        stateName: stateName.trim() || null,
+        stateCode: stateCode || null,
+        stateName: selectedStateName || null,
         openingBalance: opening,
         currentBalance: opening,
       })
@@ -166,12 +183,13 @@ export default function NewCustomerScreen() {
         keyboardType="numeric"
         maxLength={6}
       />
-      <Field
-        label="State"
-        value={stateName}
-        onChangeText={setStateName}
-        placeholder="Auto-filled from GSTIN"
-      />
+
+      <ThemedText style={styles.label}>State</ThemedText>
+      <Pressable style={styles.picker} onPress={() => setShowStatePicker(true)}>
+        <ThemedText style={stateCode ? undefined : styles.placeholder}>
+          {stateCode ? `${stateCode} — ${selectedStateName}` : 'Select state'}
+        </ThemedText>
+      </Pressable>
 
       <Field
         label="Opening Balance (₹)"
@@ -217,6 +235,36 @@ export default function NewCustomerScreen() {
           </ThemedView>
         </View>
       </Modal>
+
+      <Modal visible={showStatePicker} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <ThemedView style={styles.modalContent}>
+            <ThemedText type="title" style={styles.modalTitle}>
+              Select State
+            </ThemedText>
+            <FlatList
+              data={STATE_ENTRIES}
+              keyExtractor={([code]) => code}
+              renderItem={({ item: [code, label] }) => (
+                <Pressable
+                  style={styles.modalRow}
+                  onPress={() => {
+                    setStateCode(code)
+                    setShowStatePicker(false)
+                  }}
+                >
+                  <ThemedText type={code === stateCode ? 'defaultSemiBold' : undefined}>
+                    {code === stateCode ? `✓ ${code} — ${label}` : `${code} — ${label}`}
+                  </ThemedText>
+                </Pressable>
+              )}
+            />
+            <Pressable style={styles.modalClose} onPress={() => setShowStatePicker(false)}>
+              <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
+            </Pressable>
+          </ThemedView>
+        </View>
+      </Modal>
     </ScrollView>
   )
 }
@@ -253,6 +301,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#007AFF',
   },
+  placeholder: { opacity: 0.5 },
   saveButton: {
     backgroundColor: '#007AFF',
     paddingVertical: 14,
