@@ -32,6 +32,11 @@ export function useManualBackup() {
   const toast = useToast()
   const confirm = useConfirm()
   const [isWorking, setIsWorking] = useState(false)
+  // Which network operation is actually in flight, for per-button spinners.
+  // Set ONLY inside doUpload/doDownload (the slow Drive calls) — deliberately
+  // null during confirm/conflict dialogs so a spinner doesn't show while we're
+  // waiting on the user to read a prompt.
+  const [activeOp, setActiveOp] = useState<'upload' | 'restore' | null>(null)
   const [conflictDialog, setConflictDialog] = useState<ConflictDialogState>({ open: false })
   const [timestamps, setTimestamps] = useState<SyncTimestamps>({
     thisDeviceLastUpload: null,
@@ -65,6 +70,7 @@ export function useManualBackup() {
 
   const doUpload = useCallback(async () => {
     setIsWorking(true)
+    setActiveOp('upload')
     try {
       const result = await window.electronAPI.sync.upload()
       if (result.success) {
@@ -77,12 +83,14 @@ export function useManualBackup() {
       toast.error('Backup failed')
     } finally {
       setIsWorking(false)
+      setActiveOp(null)
       refreshTimestamps()
     }
   }, [toast, refreshTimestamps])
 
   const doDownload = useCallback(async () => {
     setIsWorking(true)
+    setActiveOp('restore')
     try {
       const result = await window.electronAPI.sync.download()
       if (result.success) {
@@ -95,6 +103,7 @@ export function useManualBackup() {
       toast.error('Restore failed')
     } finally {
       setIsWorking(false)
+      setActiveOp(null)
       refreshTimestamps()
     }
   }, [toast, refreshTimestamps])
@@ -214,6 +223,7 @@ export function useManualBackup() {
     triggerRestore,
     timestamps,
     isWorking,
+    activeOp,
     conflictDialogProps: {
       open: conflictDialog.open,
       cloudModifiedTime: conflictDialog.cloudModifiedTime,

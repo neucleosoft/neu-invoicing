@@ -1,6 +1,7 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { google } from 'googleapis'
 import Store from 'electron-store'
+import { resetSyncBaseline } from './sync'
 
 const store = new Store()
 
@@ -120,6 +121,12 @@ export const setupAuthHandlers = () => {
       store.delete('demo_mode')
       setOfflineMode(false)
       oauth2Client.setCredentials({})
+      // Clear this device's sync baseline so the NEXT account that signs in
+      // doesn't inherit the previous account's "last known" mtimes. Without
+      // this, an account switch can make syncState() falsely report "in sync"
+      // and silently overwrite the new account's data (the cross-account
+      // contamination behind the data-loss incident).
+      resetSyncBaseline()
 
       return { success: true }
     } catch (error) {

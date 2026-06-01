@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
@@ -33,6 +33,46 @@ export default function SupplierDetailScreen() {
     router.push({ pathname: '/supplier/edit/[id]', params: { id } })
   const [supplier, setSupplier] = useState<Supplier | null>(null)
   const [loading, setLoading] = useState(true)
+
+  function handleDelete() {
+    if (!id) return
+    Alert.alert('Delete supplier', `Delete "${supplier?.name ?? ''}"? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            // Guard (mirrors desktop supplier:delete): block if the supplier has
+            // any purchase bills or payments — deleting would orphan those and
+            // corrupt the payable ledger. Remove those records first.
+            const [bill] = await db
+              .select({ id: schema.purchaseBill.id })
+              .from(schema.purchaseBill)
+              .where(eq(schema.purchaseBill.supplierId, id))
+              .limit(1)
+            const [pay] = await db
+              .select({ id: schema.paymentTransaction.id })
+              .from(schema.paymentTransaction)
+              .where(eq(schema.paymentTransaction.supplierId, id))
+              .limit(1)
+            if (bill || pay) {
+              Alert.alert(
+                'Cannot delete',
+                'This supplier has purchase bills or payments. Delete those records first.',
+              )
+              return
+            }
+            await db.delete(schema.supplier).where(eq(schema.supplier.id, id))
+            router.back()
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Failed to delete'
+            Alert.alert('Error', msg)
+          }
+        },
+      },
+    ])
+  }
 
   useEffect(() => {
     if (!id) {
@@ -133,6 +173,10 @@ export default function SupplierDetailScreen() {
           <Row label="Created" value={formatDate(supplier.createdAt)} />
           <Row label="Updated" value={formatDate(supplier.updatedAt)} />
         </Section>
+
+        <Pressable style={styles.deleteButton} onPress={handleDelete}>
+          <ThemedText style={styles.deleteButtonText}>Delete supplier</ThemedText>
+        </Pressable>
       </ScrollView>
     </ThemedView>
   )
@@ -199,4 +243,13 @@ const styles = StyleSheet.create({
   heroRight: { alignItems: 'flex-end', gap: 2 },
   heroBalance: { fontSize: 22 },
   muted: { opacity: 0.6, fontSize: 13 },
+  deleteButton: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
 })

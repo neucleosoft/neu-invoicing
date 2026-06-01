@@ -53,6 +53,21 @@ const setLastKnownLocalMtime = (time: Date) => {
   store.set(LAST_KNOWN_LOCAL_MTIME_KEY, time.toISOString())
 }
 
+// Clear this device's per-account sync baseline. MUST be called on sign-out /
+// account-switch: the trackers below describe THIS device's relationship to a
+// SPECIFIC account's cloud file. If account B signs in while account A's
+// baseline is still present, syncState() compares B's cloud against A's
+// remembered mtimes and can conclude "nothing changed" — letting an upload
+// silently overwrite B's cloud, or skipping the divergence guard. Wiping the
+// baseline forces the next sync to treat this as a fresh device (no false
+// "already in sync"), which is the safe default.
+export const resetSyncBaseline = () => {
+  store.delete(LAST_KNOWN_CLOUD_MTIME_KEY)
+  store.delete(LAST_KNOWN_LOCAL_MTIME_KEY)
+  store.delete(LAST_UPLOAD_TIMESTAMP_KEY)
+  store.delete(LAST_SCHEDULED_SYNC_KEY)
+}
+
 // Scheduled-backup configuration. Per-device (electron-store, not synced).
 // Each device sets its own cadence — office desktop "weekly" vs home laptop
 // "monthly" is fine; they don't need to agree.

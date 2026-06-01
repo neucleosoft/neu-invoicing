@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
@@ -31,6 +31,46 @@ export default function CustomerDetailScreen() {
     router.push({ pathname: '/customer/edit/[id]', params: { id } })
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [loading, setLoading] = useState(true)
+
+  function handleDelete() {
+    if (!id) return
+    Alert.alert('Delete customer', `Delete "${customer?.name ?? ''}"? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            // Guard (mirrors desktop customer:delete): block if the customer has
+            // any sales invoices or payments — deleting would orphan those and
+            // corrupt the ledger. The user must remove those records first.
+            const [inv] = await db
+              .select({ id: schema.salesInvoice.id })
+              .from(schema.salesInvoice)
+              .where(eq(schema.salesInvoice.customerId, id))
+              .limit(1)
+            const [pay] = await db
+              .select({ id: schema.paymentTransaction.id })
+              .from(schema.paymentTransaction)
+              .where(eq(schema.paymentTransaction.customerId, id))
+              .limit(1)
+            if (inv || pay) {
+              Alert.alert(
+                'Cannot delete',
+                'This customer has invoices or payments. Delete those records first.',
+              )
+              return
+            }
+            await db.delete(schema.customer).where(eq(schema.customer.id, id))
+            router.back()
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Failed to delete'
+            Alert.alert('Error', msg)
+          }
+        },
+      },
+    ])
+  }
 
   useEffect(() => {
     if (!id) {
@@ -133,6 +173,10 @@ export default function CustomerDetailScreen() {
           <Row label="Created" value={formatDate(customer.createdAt)} />
           <Row label="Updated" value={formatDate(customer.updatedAt)} />
         </Section>
+
+        <Pressable style={styles.deleteButton} onPress={handleDelete}>
+          <ThemedText style={styles.deleteButtonText}>Delete customer</ThemedText>
+        </Pressable>
       </ScrollView>
     </ThemedView>
   )
@@ -199,4 +243,13 @@ const styles = StyleSheet.create({
   heroRight: { alignItems: 'flex-end', gap: 2 },
   heroBalance: { fontSize: 22 },
   muted: { opacity: 0.6, fontSize: 13 },
+  deleteButton: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
 })

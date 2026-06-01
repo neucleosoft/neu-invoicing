@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../store/useStore'
+import { useConfirm } from '../components/ConfirmDialogContext'
 
 const Login = () => {
   const [loading, setLoading] = useState(false)
@@ -8,6 +9,7 @@ const Login = () => {
   const [error, setError] = useState('')
   const navigate = useNavigate()
   const { setAuthStatus, setCompany } = useStore()
+  const confirm = useConfirm()
 
   // Skip Google sign-in: use the app offline. Cloud backup stays disabled
   // until the user later connects Google from Settings (Phase 2).
@@ -43,16 +45,42 @@ const Login = () => {
       const result = await window.electronAPI.auth.signInWithGoogle()
 
       if (result.success) {
-        // Cloud may have existing data — pull it down before checking for a
-        // local company, so returning users don't briefly see the onboarding
-        // page. Done BEFORE setAuthStatus so the user stays on the login screen
-        // while this resolves.
-        // (See open question in MIGRATIONS / issues: this silently bypasses the
-        // Phase 1 restore prompt for sign-in flows — intentional for now.)
+        // A cloud backup may exist for the account just signed in. Pulling it
+        // down REPLACES the live local database — so it must be consented to,
+        // NEVER automatic. (This block used to silently download here, which is
+        // how signing into a different account overwrote a user's local data.)
+        //
+        // We only prompt when there's actually a decision to make: if there's
+        // local data, downloading would destroy it, so we ask and DEFAULT TO
+        // KEEPING LOCAL. The destructive "Use cloud data" path requires an
+        // explicit click, and we surface the cloud backup's age so the user can
+        // see whether it's newer or older than what they have.
         try {
           const backup = await window.electronAPI.sync.checkCloudBackup()
           if (backup.exists) {
-            await window.electronAPI.sync.download()
+            const localCompany = await window.electronAPI.company.get()
+            const hasLocalData = localCompany.success && !!localCompany.data
+
+            if (!hasLocalData) {
+              // No local data to lose — safe to restore the cloud copy directly.
+              await window.electronAPI.sync.download()
+            } else {
+              const when = backup.modifiedTime
+                ? new Date(backup.modifiedTime).toLocaleString()
+                : 'an unknown time'
+              const useCloud = await confirm({
+                title: 'Cloud backup found',
+                message:
+                  `This account has a cloud backup from ${when}. Using it will REPLACE all data currently on this device — anything not in that backup will be lost. ` +
+                  `If the backup is older than your current work, keep your local data instead.`,
+                confirmText: 'Use cloud data (replace local)',
+                cancelText: 'Keep my local data',
+                danger: true,
+              })
+              if (useCloud) {
+                await window.electronAPI.sync.download()
+              }
+            }
           }
         } catch (syncError) {
           console.log('Cloud check failed, continuing with local data:', syncError)
