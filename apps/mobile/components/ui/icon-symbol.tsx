@@ -26,6 +26,7 @@ const MAPPING = {
   'chart.line.uptrend.xyaxis': 'trending-up',
   'exclamationmark.triangle.fill': 'warning',
   'clock.fill': 'schedule',
+  'cart.fill': 'shopping-cart',
 } as IconMapping;
 
 /**
