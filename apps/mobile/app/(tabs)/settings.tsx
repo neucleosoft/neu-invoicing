@@ -1,21 +1,37 @@
-import { useEffect, useState } from 'react';
+import { router, useFocusEffect } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, DevSettings, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/auth';
+import { schema, useDb } from '@/db';
 import { checkCloudBackup, restoreFromCloud, type CloudBackupInfo } from '@/sync/drive';
 import { getOpenRouterKey, setOpenRouterKey } from '@/utils/billOcr';
 
 export default function SettingsScreen() {
   const { user, accessToken, signOut } = useAuth();
   const liveDb = useSQLiteContext();
+  const db = useDb();
 
   const [backupInfo, setBackupInfo] = useState<CloudBackupInfo | null>(null);
   const [backupLoading, setBackupLoading] = useState(true);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
+
+  // Company name shown in the Business section. null = still loading, '' = no
+  // company yet. Reloaded on focus so it updates after editing the profile.
+  const [companyName, setCompanyName] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      db.select({ name: schema.company.name })
+        .from(schema.company)
+        .limit(1)
+        .then((rows) => setCompanyName(rows[0]?.name ?? ''));
+    }, [db]),
+  );
 
   // AI Bill Scan key. We show whether a key is saved (not the key itself), and
   // let the user paste a new one or clear it. Stored in SecureStore by billOcr.
@@ -139,6 +155,29 @@ export default function SettingsScreen() {
       </ThemedView>
 
       <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Business</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Your company details — shown on invoices and documents.
+        </ThemedText>
+        <Pressable
+          onPress={() =>
+            router.push(companyName ? '/company/edit' : '/company/setup')
+          }
+          style={styles.businessRow}
+        >
+          <View style={styles.profileText}>
+            <ThemedText type="defaultSemiBold">
+              {companyName || (companyName === '' ? 'No company set up' : 'Loading…')}
+            </ThemedText>
+            <ThemedText style={styles.businessAction}>
+              {companyName ? 'Edit company profile' : 'Set up your business'}
+            </ThemedText>
+          </View>
+          <ThemedText style={styles.businessChevron}>›</ThemedText>
+        </Pressable>
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Backup & Restore</ThemedText>
 
         {backupLoading && <ThemedText>Checking cloud…</ThemedText>}
@@ -236,6 +275,19 @@ const styles = StyleSheet.create({
   avatar: { width: 56, height: 56, borderRadius: 28 },
   avatarPlaceholder: { backgroundColor: '#ccc' },
   profileText: { flex: 1 },
+  businessHint: { fontSize: 13, opacity: 0.6, lineHeight: 18 },
+  businessRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  businessAction: { fontSize: 13, color: '#007AFF', marginTop: 2 },
+  businessChevron: { fontSize: 24, opacity: 0.4 },
   statusBox: {
     borderWidth: 1,
     borderColor: '#e5e7eb',
