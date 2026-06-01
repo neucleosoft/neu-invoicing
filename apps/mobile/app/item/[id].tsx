@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
@@ -19,6 +19,46 @@ export default function ItemDetailScreen() {
     router.push({ pathname: '/item/edit/[id]', params: { id } })
   const [item, setItem] = useState<Item | null>(null)
   const [loading, setLoading] = useState(true)
+
+  function handleDelete() {
+    if (!id) return
+    Alert.alert('Delete item', `Delete "${item?.name ?? ''}"? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            // Guard (mirrors desktop item:delete): block if the item is used on
+            // any sales invoice or linked to a supplier item — deleting would
+            // orphan those lines. Remove those references first.
+            const [line] = await db
+              .select({ id: schema.salesInvoiceItem.id })
+              .from(schema.salesInvoiceItem)
+              .where(eq(schema.salesInvoiceItem.itemId, id))
+              .limit(1)
+            const [si] = await db
+              .select({ id: schema.supplierItem.id })
+              .from(schema.supplierItem)
+              .where(eq(schema.supplierItem.linkedItemId, id))
+              .limit(1)
+            if (line || si) {
+              Alert.alert(
+                'Cannot delete',
+                'This item is used on invoices or linked to a supplier item. Remove those references first.',
+              )
+              return
+            }
+            await db.delete(schema.item).where(eq(schema.item.id, id))
+            router.back()
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Failed to delete'
+            Alert.alert('Error', msg)
+          }
+        },
+      },
+    ])
+  }
 
   useEffect(() => {
     if (!id) {
@@ -119,6 +159,10 @@ export default function ItemDetailScreen() {
           <Row label="Created" value={formatDate(item.createdAt)} />
           <Row label="Updated" value={formatDate(item.updatedAt)} />
         </Section>
+
+        <Pressable style={styles.deleteButton} onPress={handleDelete}>
+          <ThemedText style={styles.deleteButtonText}>Delete item</ThemedText>
+        </Pressable>
       </ScrollView>
     </ThemedView>
   )
@@ -193,4 +237,13 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   lowStockChipText: { fontSize: 10, color: '#991b1b', fontWeight: '600' },
+  deleteButton: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
 })

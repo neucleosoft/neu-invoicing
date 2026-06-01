@@ -189,7 +189,7 @@ const SupplierItemRow = memo(function SupplierItemRow({
   return (
     <Pressable
       onPress={() =>
-        router.push({ pathname: '/supplierItem/edit/[id]', params: { id: row.id } })
+        router.push({ pathname: '/supplierItem/[id]', params: { id: row.id } })
       }
       style={({ pressed }) => [pressed && styles.cardPressed]}
     >

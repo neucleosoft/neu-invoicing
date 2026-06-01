@@ -119,40 +119,6 @@ export default function EditSupplierItemScreen() {
     }
   }
 
-  function handleDelete() {
-    if (!id) return
-    Alert.alert('Delete supplier item', `Delete "${name}" from this catalog?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            // Guard (mirrors desktop): refuse if any purchase bill line still
-            // references this supplier item — deleting would orphan that line.
-            const refs = await db
-              .select({ id: schema.purchaseBillItem.id })
-              .from(schema.purchaseBillItem)
-              .where(eq(schema.purchaseBillItem.supplierItemId, id))
-              .limit(1)
-            if (refs.length > 0) {
-              Alert.alert(
-                'Cannot delete',
-                'This supplier item is used on one or more purchase bills. Remove it from those bills first.',
-              )
-              return
-            }
-            await db.delete(schema.supplierItem).where(eq(schema.supplierItem.id, id))
-            router.back()
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : 'Failed to delete'
-            Alert.alert('Error', msg)
-          }
-        },
-      },
-    ])
-  }
-
   if (loading) {
     return (
       <ThemedView style={styles.loadingContainer}>
@@ -226,10 +192,6 @@ export default function EditSupplierItemScreen() {
           </ThemedText>
         </Pressable>
       </View>
-
-      <Pressable style={styles.deleteButton} onPress={handleDelete}>
-        <ThemedText style={styles.deleteButtonText}>Delete supplier item</ThemedText>
-      </Pressable>
 
       <Modal visible={showUnitPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -368,15 +330,6 @@ const styles = StyleSheet.create({
   },
   saveButtonDisabled: { opacity: 0.5 },
   saveButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
-  deleteButton: {
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginTop: 12,
-    borderWidth: 1,
-    borderColor: '#FF3B30',
-  },
-  deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { maxHeight: '80%', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16 },
   modalTitle: { marginBottom: 12 },
