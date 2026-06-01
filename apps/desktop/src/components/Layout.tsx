@@ -26,6 +26,8 @@ import {
   RefreshCw,
   AlertTriangle,
   CheckCircle2,
+  CloudUpload,
+  CloudDownload,
 } from 'lucide-react'
 import { useStore } from '../store/useStore'
 import CommandPalette from './CommandPalette'
@@ -148,7 +150,25 @@ const Layout = () => {
     navigate('/login')
   }
 
-  const { triggerBackup, isWorking: isBackingUp, conflictDialogProps } = useManualBackup()
+  const {
+    triggerBackup,
+    triggerUpload,
+    triggerRestore,
+    timestamps,
+    isWorking: isBackingUp,
+    conflictDialogProps,
+  } = useManualBackup()
+
+  // Short "May 30, 6:05 PM" style for the button subtitles. Empty when never.
+  const fmtStamp = (iso: string | null): string =>
+    iso
+      ? new Date(iso).toLocaleString(undefined, {
+          month: 'short',
+          day: 'numeric',
+          hour: 'numeric',
+          minute: '2-digit',
+        })
+      : 'Never'
   const { connect: connectGoogle, isConnecting, dialog: connectDialog } = useConnectGoogle()
 
   const collapsed = !sidebarOpen
@@ -301,31 +321,77 @@ const Layout = () => {
             )
           })()}
 
-          {/* Sync Status — hidden in offline mode (no Google = no sync). */}
+          {/* Sync controls — two EXPLICIT directions so you always see which way
+              data is about to move (the single auto-button used to hide this,
+              which is how an old cloud copy could silently overwrite newer local
+              data). Each button shows its timestamp = the warning label. Hidden
+              in offline mode (no Google = no sync). */}
           {authStatus?.isAuthenticated && (
             <>
-              <button
-                onClick={triggerBackup}
-                disabled={isBackingUp}
-                className={`${collapsed ? 'w-full flex justify-center' : 'w-full flex items-center justify-between'} px-3 py-2 text-sm rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors mb-3 disabled:opacity-60`}
-                title={syncStatus?.status === 'error'
-                  ? `Sync error — click to retry\n\n${syncStatus?.lastError || 'Unknown error'}`
-                  : 'Sync now'}
-              >
-                <span className="flex items-center gap-2">
-                  <SyncBadge />
-                  {!collapsed && (
-                    <span className="text-gray-700 dark:text-gray-200">
-                      {syncStatus?.status === 'syncing' ? 'Syncing…' : syncStatus?.status === 'error' ? 'Sync error' : 'Synced'}
+              {collapsed ? (
+                <div className="space-y-2 mb-3">
+                  <button
+                    onClick={triggerUpload}
+                    disabled={isBackingUp}
+                    className="w-full flex justify-center px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-60"
+                    title={`Back up to cloud — this device last: ${fmtStamp(timestamps.thisDeviceLastUpload)}`}
+                  >
+                    <CloudUpload className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                  </button>
+                  <button
+                    onClick={triggerRestore}
+                    disabled={isBackingUp || !timestamps.cloudExists}
+                    className="w-full flex justify-center px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-40"
+                    title={`Restore from cloud — cloud backup: ${fmtStamp(timestamps.cloudModifiedTime)}`}
+                  >
+                    <CloudDownload className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-2 mb-3">
+                  <button
+                    onClick={triggerUpload}
+                    disabled={isBackingUp}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-60 text-left"
+                    title="Upload this device's data to the cloud"
+                  >
+                    <CloudUpload className="w-4 h-4 shrink-0 text-primary-600 dark:text-primary-400" />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm text-gray-800 dark:text-gray-100">Back up to cloud</span>
+                      <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                        This device: {fmtStamp(timestamps.thisDeviceLastUpload)}
+                      </span>
                     </span>
-                  )}
-                </span>
-                {!collapsed && syncStatus?.lastSync && (
-                  <span className="text-xs text-gray-500 dark:text-gray-400">
-                    {new Date(syncStatus.lastSync).toLocaleTimeString()}
+                  </button>
+                  <button
+                    onClick={triggerRestore}
+                    disabled={isBackingUp || !timestamps.cloudExists}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-40 text-left"
+                    title="Replace this device's data with the cloud backup"
+                  >
+                    <CloudDownload className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-sm text-gray-800 dark:text-gray-100">Restore from cloud</span>
+                      <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                        {timestamps.cloudExists ? `Cloud backup: ${fmtStamp(timestamps.cloudModifiedTime)}` : 'No cloud backup yet'}
+                      </span>
+                    </span>
+                  </button>
+                </div>
+              )}
+              {/* Live sync status line (badge + error), under the buttons. */}
+              {!collapsed && (
+                <div className="flex items-center gap-2 mb-3 px-1 text-xs text-gray-500 dark:text-gray-400">
+                  <SyncBadge />
+                  <span>
+                    {syncStatus?.status === 'syncing'
+                      ? 'Syncing…'
+                      : syncStatus?.status === 'error'
+                      ? 'Sync error'
+                      : 'Up to date'}
                   </span>
-                )}
-              </button>
+                </div>
+              )}
               {!collapsed && syncStatus?.status === 'error' && syncStatus?.lastError && (
                 <div className="mb-3 -mt-1 px-3 py-2 text-xs rounded-lg bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-300 border border-red-200 dark:border-red-900/50">
                   {syncStatus.lastError}

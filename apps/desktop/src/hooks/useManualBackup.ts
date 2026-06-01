@@ -1,10 +1,19 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useToast } from '../components/ToastContext'
 import { useConfirm } from '../components/ConfirmDialogContext'
 
 interface ConflictDialogState {
   open: boolean
   cloudModifiedTime?: string
+}
+
+// Timestamps shown under the two explicit sync buttons. These ARE the safety
+// feature: seeing "this device: May 30" vs "cloud: May 25" is what makes an
+// about-to-go-backwards Restore obvious before you click it.
+export interface SyncTimestamps {
+  thisDeviceLastUpload: string | null
+  cloudModifiedTime: string | null
+  cloudExists: boolean
 }
 
 // Orchestrates the manual-sync flow:
@@ -24,6 +33,35 @@ export function useManualBackup() {
   const confirm = useConfirm()
   const [isWorking, setIsWorking] = useState(false)
   const [conflictDialog, setConflictDialog] = useState<ConflictDialogState>({ open: false })
+  const [timestamps, setTimestamps] = useState<SyncTimestamps>({
+    thisDeviceLastUpload: null,
+    cloudModifiedTime: null,
+    cloudExists: false,
+  })
+
+  // Pull the two timestamps the buttons display. getBackupInfo gives us *this
+  // device's* last upload; checkCloudBackup gives the cloud copy's modified
+  // time. Refreshed on mount and after every upload/download so the labels
+  // never go stale.
+  const refreshTimestamps = useCallback(async () => {
+    try {
+      const [info, cloud] = await Promise.all([
+        window.electronAPI.sync.getBackupInfo(),
+        window.electronAPI.sync.checkCloudBackup(),
+      ])
+      setTimestamps({
+        thisDeviceLastUpload: info.thisDeviceLastUpload,
+        cloudModifiedTime: cloud.exists ? cloud.modifiedTime ?? null : null,
+        cloudExists: cloud.exists,
+      })
+    } catch (e) {
+      console.error('refreshTimestamps failed:', e)
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshTimestamps()
+  }, [refreshTimestamps])
 
   const doUpload = useCallback(async () => {
     setIsWorking(true)
@@ -39,8 +77,9 @@ export function useManualBackup() {
       toast.error('Backup failed')
     } finally {
       setIsWorking(false)
+      refreshTimestamps()
     }
-  }, [toast])
+  }, [toast, refreshTimestamps])
 
   const doDownload = useCallback(async () => {
     setIsWorking(true)
@@ -56,8 +95,9 @@ export function useManualBackup() {
       toast.error('Restore failed')
     } finally {
       setIsWorking(false)
+      refreshTimestamps()
     }
-  }, [toast])
+  }, [toast, refreshTimestamps])
 
   const triggerBackup = useCallback(async () => {
     if (isWorking) return
@@ -108,6 +148,52 @@ export function useManualBackup() {
     }
   }, [isWorking, doUpload, doDownload, confirm, toast])
 
+  // Explicit "Back up to cloud" (device → cloud). The user chose this direction,
+  // but we still guard: if the cloud is genuinely newer (someone else synced
+  // since), uploading would silently lose their work — so we hand off to the
+  // conflict dialog instead of blindly overwriting. This is the "keep the
+  // conflict dialog" backstop on the safe direction.
+  const triggerUpload = useCallback(async () => {
+    if (isWorking) return
+    setIsWorking(true)
+    try {
+      const state = await window.electronAPI.sync.syncState()
+      setIsWorking(false)
+      if (state.cloudExists && (state.isConflict || state.cloudChanged)) {
+        setConflictDialog({ open: true, cloudModifiedTime: state.cloudModifiedTime })
+        return
+      }
+      await doUpload()
+    } catch (e) {
+      console.error('triggerUpload syncState error:', e)
+      setIsWorking(false)
+      // If we can't check state, fall back to a plain upload rather than block
+      // the user — upload is the non-destructive direction.
+      await doUpload()
+    }
+  }, [isWorking, doUpload])
+
+  // Explicit "Restore from cloud" (cloud → device). This is the DESTRUCTIVE
+  // direction — it replaces local data — so always confirm, and surface the
+  // cloud timestamp in the prompt so the user can see what they're pulling.
+  const triggerRestore = useCallback(async () => {
+    if (isWorking) return
+    if (!timestamps.cloudExists) {
+      toast.info('No cloud backup to restore from')
+      return
+    }
+    const when = timestamps.cloudModifiedTime
+      ? new Date(timestamps.cloudModifiedTime).toLocaleString()
+      : 'an unknown time'
+    const ok = await confirm({
+      title: 'Restore from cloud?',
+      message: `This replaces ALL local data with the cloud backup from ${when}. Anything on this device that isn't in that backup will be lost. This cannot be undone.`,
+      confirmText: 'Restore (replace local)',
+      cancelText: 'Cancel',
+    })
+    if (ok) await doDownload()
+  }, [isWorking, timestamps, confirm, toast, doDownload])
+
   const handleConflictUpload = useCallback(async () => {
     setConflictDialog({ open: false })
     await doUpload()
@@ -124,6 +210,9 @@ export function useManualBackup() {
 
   return {
     triggerBackup,
+    triggerUpload,
+    triggerRestore,
+    timestamps,
     isWorking,
     conflictDialogProps: {
       open: conflictDialog.open,
