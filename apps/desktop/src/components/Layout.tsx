@@ -156,6 +156,7 @@ const Layout = () => {
     triggerRestore,
     timestamps,
     isWorking: isBackingUp,
+    activeOp,
     conflictDialogProps,
   } = useManualBackup()
 
@@ -333,18 +334,26 @@ const Layout = () => {
                   <button
                     onClick={triggerUpload}
                     disabled={isBackingUp}
-                    className="w-full flex justify-center px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-60"
+                    className="w-full flex justify-center px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-60 disabled:cursor-wait"
                     title={`Back up to cloud — this device last: ${fmtStamp(timestamps.thisDeviceLastUpload)}`}
                   >
-                    <CloudUpload className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                    {activeOp === 'upload' ? (
+                      <RefreshCw className="w-4 h-4 text-primary-600 dark:text-primary-400 animate-spin" />
+                    ) : (
+                      <CloudUpload className="w-4 h-4 text-primary-600 dark:text-primary-400" />
+                    )}
                   </button>
                   <button
                     onClick={triggerRestore}
                     disabled={isBackingUp || !timestamps.cloudExists}
-                    className="w-full flex justify-center px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-40"
+                    className="w-full flex justify-center px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-40 disabled:cursor-wait"
                     title={`Restore from cloud — cloud backup: ${fmtStamp(timestamps.cloudModifiedTime)}`}
                   >
-                    <CloudDownload className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    {activeOp === 'restore' ? (
+                      <RefreshCw className="w-4 h-4 text-amber-600 dark:text-amber-400 animate-spin" />
+                    ) : (
+                      <CloudDownload className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                    )}
                   </button>
                 </div>
               ) : (
@@ -352,12 +361,18 @@ const Layout = () => {
                   <button
                     onClick={triggerUpload}
                     disabled={isBackingUp}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-60 text-left"
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-60 disabled:cursor-wait text-left"
                     title="Upload this device's data to the cloud"
                   >
-                    <CloudUpload className="w-4 h-4 shrink-0 text-primary-600 dark:text-primary-400" />
+                    {activeOp === 'upload' ? (
+                      <RefreshCw className="w-4 h-4 shrink-0 text-primary-600 dark:text-primary-400 animate-spin" />
+                    ) : (
+                      <CloudUpload className="w-4 h-4 shrink-0 text-primary-600 dark:text-primary-400" />
+                    )}
                     <span className="flex-1 min-w-0">
-                      <span className="block text-sm text-gray-800 dark:text-gray-100">Back up to cloud</span>
+                      <span className="block text-sm text-gray-800 dark:text-gray-100">
+                        {activeOp === 'upload' ? 'Backing up…' : 'Back up to cloud'}
+                      </span>
                       <span className="block text-[11px] text-gray-500 dark:text-gray-400">
                         This device: {fmtStamp(timestamps.thisDeviceLastUpload)}
                       </span>
@@ -366,12 +381,18 @@ const Layout = () => {
                   <button
                     onClick={triggerRestore}
                     disabled={isBackingUp || !timestamps.cloudExists}
-                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-40 text-left"
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-gray-50 hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 transition-colors disabled:opacity-40 disabled:cursor-wait text-left"
                     title="Replace this device's data with the cloud backup"
                   >
-                    <CloudDownload className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    {activeOp === 'restore' ? (
+                      <RefreshCw className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400 animate-spin" />
+                    ) : (
+                      <CloudDownload className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    )}
                     <span className="flex-1 min-w-0">
-                      <span className="block text-sm text-gray-800 dark:text-gray-100">Restore from cloud</span>
+                      <span className="block text-sm text-gray-800 dark:text-gray-100">
+                        {activeOp === 'restore' ? 'Restoring…' : 'Restore from cloud'}
+                      </span>
                       <span className="block text-[11px] text-gray-500 dark:text-gray-400">
                         {timestamps.cloudExists ? `Cloud backup: ${fmtStamp(timestamps.cloudModifiedTime)}` : 'No cloud backup yet'}
                       </span>
