@@ -6,6 +6,14 @@ import { Suspense, useEffect } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 
+// Hermes has no global Buffer, but Drizzle's blob(buffer) column reads via
+// Buffer.from(). Any purchase bill carrying a scanned-image attachment would
+// crash on read without this. Install it once, before anything touches the db.
+import { Buffer } from 'buffer';
+if (typeof (globalThis as { Buffer?: unknown }).Buffer === 'undefined') {
+  (globalThis as { Buffer?: unknown }).Buffer = Buffer;
+}
+
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { runMigrations } from '@/db';
 import { AuthProvider, useAuth } from '@/auth';

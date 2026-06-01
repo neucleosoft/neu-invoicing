@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Alert, DevSettings, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, DevSettings, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/auth';
 import { checkCloudBackup, restoreFromCloud, type CloudBackupInfo } from '@/sync/drive';
+import { getOpenRouterKey, setOpenRouterKey } from '@/utils/billOcr';
 
 export default function SettingsScreen() {
   const { user, accessToken, signOut } = useAuth();
@@ -15,6 +16,33 @@ export default function SettingsScreen() {
   const [backupLoading, setBackupLoading] = useState(true);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
+
+  // AI Bill Scan key. We show whether a key is saved (not the key itself), and
+  // let the user paste a new one or clear it. Stored in SecureStore by billOcr.
+  const [apiKeySaved, setApiKeySaved] = useState(false);
+  const [apiKeyInput, setApiKeyInput] = useState('');
+  const [savingKey, setSavingKey] = useState(false);
+
+  useEffect(() => {
+    getOpenRouterKey().then((k) => setApiKeySaved(!!k));
+  }, []);
+
+  async function handleSaveKey() {
+    setSavingKey(true);
+    try {
+      await setOpenRouterKey(apiKeyInput);
+      setApiKeySaved(!!apiKeyInput.trim());
+      setApiKeyInput('');
+      Alert.alert(
+        apiKeyInput.trim() ? 'Key saved' : 'Key cleared',
+        apiKeyInput.trim()
+          ? 'You can now scan bill photos when creating a purchase bill.'
+          : 'AI bill scan is now turned off.',
+      );
+    } finally {
+      setSavingKey(false);
+    }
+  }
 
   // Auto-load cloud backup status when the screen opens so the user sees
   // "Last cloud backup: <date>" without having to tap anything first.
@@ -160,6 +188,39 @@ export default function SettingsScreen() {
       </ThemedView>
 
       <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">AI Bill Scan</ThemedText>
+        <ThemedText style={styles.aiHint}>
+          Optional. Add a free OpenRouter API key to scan a photo of a supplier
+          bill and auto-fill the purchase form. Get one at openrouter.ai.
+        </ThemedText>
+        <View style={styles.statusRow}>
+          <ThemedText style={styles.statusLabel}>Status</ThemedText>
+          <ThemedText style={styles.statusValue}>
+            {apiKeySaved ? 'Key saved ✓' : 'Not set'}
+          </ThemedText>
+        </View>
+        <TextInput
+          value={apiKeyInput}
+          onChangeText={setApiKeyInput}
+          placeholder={apiKeySaved ? 'Paste a new key to replace' : 'sk-or-…'}
+          placeholderTextColor="#9ca3af"
+          autoCapitalize="none"
+          autoCorrect={false}
+          secureTextEntry
+          style={styles.keyInput}
+        />
+        <Pressable
+          onPress={handleSaveKey}
+          disabled={savingKey}
+          style={[styles.keyButton, savingKey && styles.disabledButton]}
+        >
+          <ThemedText style={styles.keyButtonText}>
+            {savingKey ? 'Saving…' : apiKeyInput.trim() ? 'Save key' : 'Clear key'}
+          </ThemedText>
+        </Pressable>
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
         <Pressable onPress={handleSignOut} style={styles.signOutButton}>
           <ThemedText style={styles.signOutText}>Sign out</ThemedText>
         </Pressable>
@@ -212,4 +273,23 @@ const styles = StyleSheet.create({
   },
   signOutText: { color: '#dc2626', fontWeight: '600' },
   error: { color: 'red' },
+  aiHint: { fontSize: 13, opacity: 0.7, lineHeight: 19 },
+  keyInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 15,
+    color: '#111827',
+    backgroundColor: '#f5f5f5',
+  },
+  keyButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  keyButtonText: { color: 'white', fontWeight: '600' },
 });
