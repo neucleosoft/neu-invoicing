@@ -15,6 +15,7 @@ import {
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { generateInvoiceNumber } from '@/utils/invoiceNumber'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
@@ -71,7 +72,10 @@ export default function NewInvoiceScreen() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
 
-  const [invoiceNumber] = useState(`INV-${Date.now()}`)
+  // Sequential FY-scoped number (NS/SL/{FY}/NN), generated on mount to mirror
+  // desktop. Shown read-only as a preview; re-resolved at save time so a number
+  // taken by another save in between can't collide.
+  const [invoiceNumber, setInvoiceNumber] = useState('…')
   const [customerId, setCustomerId] = useState<string | null>(null)
   const [status, setStatus] = useState<StatusOption>('DRAFT')
   const [invoiceDate, setInvoiceDate] = useState(todayIso())
@@ -98,6 +102,7 @@ export default function NewInvoiceScreen() {
   useEffect(() => {
     db.select().from(schema.customer).then(setCustomers)
     db.select().from(schema.item).then(setItems)
+    generateInvoiceNumber(db).then(setInvoiceNumber)
   }, [db])
 
   const selectedCustomer = customers.find((c) => c.id === customerId) ?? null
@@ -156,10 +161,14 @@ export default function NewInvoiceScreen() {
 
     setSaving(true)
     try {
+      // Re-resolve the number at save time: the preview was generated on mount,
+      // but another invoice could have been saved since, so we recompute to take
+      // the truly-next number and avoid a unique-constraint collision.
+      const finalNumber = await generateInvoiceNumber(db)
       const [inserted] = await db
         .insert(schema.salesInvoice)
         .values({
-          invoiceNumber,
+          invoiceNumber: finalNumber,
           customerId,
           status,
           invoiceDate: invDate,
