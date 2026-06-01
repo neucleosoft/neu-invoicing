@@ -1,3 +1,4 @@
+import { eq, sql } from 'drizzle-orm'
 import { router } from 'expo-router'
 import { useEffect, useState } from 'react'
 import {
@@ -165,54 +166,95 @@ export default function NewInvoiceScreen() {
       // but another invoice could have been saved since, so we recompute to take
       // the truly-next number and avoid a unique-constraint collision.
       const finalNumber = await generateInvoiceNumber(db)
-      const [inserted] = await db
-        .insert(schema.salesInvoice)
-        .values({
-          invoiceNumber: finalNumber,
-          customerId,
-          status,
-          invoiceDate: invDate,
-          dueDate: due,
-          subtotal,
-          taxAmount,
-          totalAmount: total,
-          amountPaid: paid,
-          balanceDue,
-          notes: notes.trim() || null,
-          termsConditions: termsConditions.trim() || null,
-          poNumber: poNumber.trim() || null,
-          ewayBillNo: ewayBillNo.trim() || null,
-          vehicleNumber: vehicleNumber.trim() || null,
-          warrantyPeriod: warrantyPeriod.trim() || null,
-          dispatchedThrough: dispatchedThrough.trim() || null,
-        })
-        .returning()
 
-      await db.insert(schema.salesInvoiceItem).values(
-        lines.map((l) => ({
-          salesInvoiceId: inserted.id,
-          itemId: l.itemId,
-          quantity: l.qty,
-          rate: l.rate,
-          discount: l.discount,
-          taxRate: l.taxRate,
-          total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-        }))
-      )
+      // Everything below is one transaction so the invoice, its lines, the
+      // customer-balance bump, and the stock decrements all commit together — a
+      // half-write must never leave the customer balance out of sync with the
+      // invoice. Mirrors desktop sales.ts create ($transaction).
+      await db.transaction(async (tx) => {
+        const [inserted] = await tx
+          .insert(schema.salesInvoice)
+          .values({
+            invoiceNumber: finalNumber,
+            customerId,
+            status,
+            invoiceDate: invDate,
+            dueDate: due,
+            subtotal,
+            taxAmount,
+            totalAmount: total,
+            amountPaid: paid,
+            balanceDue,
+            notes: notes.trim() || null,
+            termsConditions: termsConditions.trim() || null,
+            poNumber: poNumber.trim() || null,
+            ewayBillNo: ewayBillNo.trim() || null,
+            vehicleNumber: vehicleNumber.trim() || null,
+            warrantyPeriod: warrantyPeriod.trim() || null,
+            dispatchedThrough: dispatchedThrough.trim() || null,
+          })
+          .returning()
 
-      // Record a payment transaction if any amount was paid up-front (mirrors desktop)
-      if (paid > 0) {
-        await db.insert(schema.paymentTransaction).values({
-          type: 'PAYMENT_IN',
-          customerId,
-          amount: paid,
-          paymentMode,
-          paymentDate: invDate,
-          referenceType: 'INVOICE',
-          referenceId: inserted.id,
-          salesInvoiceId: inserted.id,
-        })
-      }
+        await tx.insert(schema.salesInvoiceItem).values(
+          lines.map((l) => ({
+            salesInvoiceId: inserted.id,
+            itemId: l.itemId,
+            quantity: l.qty,
+            rate: l.rate,
+            discount: l.discount,
+            taxRate: l.taxRate,
+            total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
+          })),
+        )
+
+        // Raise what the customer owes by the unpaid portion of this invoice.
+        // THIS is the line that was missing — without it, every mobile invoice
+        // left the customer balance (and the Receivables dashboard) understated.
+        // Mirrors desktop sales.ts:120-123 (increment by balanceDue).
+        if (balanceDue !== 0) {
+          await tx
+            .update(schema.customer)
+            .set({
+              currentBalance: sql`${schema.customer.currentBalance} + ${balanceDue}`,
+            })
+            .where(eq(schema.customer.id, customerId))
+        }
+
+        // Selling reduces stock. For each stock-tracked item, decrement its
+        // currentStock and log a SALE movement. Mirrors desktop sales.ts:125-143.
+        for (const l of lines) {
+          const item = items.find((i) => i.id === l.itemId)
+          if (item?.trackStock) {
+            await tx
+              .update(schema.item)
+              .set({ currentStock: sql`${schema.item.currentStock} - ${l.qty}` })
+              .where(eq(schema.item.id, l.itemId))
+            await tx.insert(schema.stockMovement).values({
+              itemId: l.itemId,
+              movementType: 'SALE',
+              quantity: -l.qty,
+              referenceType: 'INVOICE',
+              referenceId: inserted.id,
+            })
+          }
+        }
+
+        // Record an up-front payment if any (mirrors desktop). Note: balanceDue
+        // already nets this out (total - paid), so the customer balance above is
+        // correct — we don't double-count by also subtracting paid here.
+        if (paid > 0) {
+          await tx.insert(schema.paymentTransaction).values({
+            type: 'PAYMENT_IN',
+            customerId,
+            amount: paid,
+            paymentMode,
+            paymentDate: invDate,
+            referenceType: 'INVOICE',
+            referenceId: inserted.id,
+            salesInvoiceId: inserted.id,
+          })
+        }
+      })
 
       router.back()
     } catch (e) {
