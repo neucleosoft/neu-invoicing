@@ -154,6 +154,46 @@ export default function EditSupplierScreen() {
     }
   }
 
+  function handleDelete() {
+    if (!id) return
+    Alert.alert('Delete supplier', `Delete "${name}"? This cannot be undone.`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            // Guard (mirrors desktop supplier:delete): block if the supplier has
+            // any purchase bills or payments — deleting would orphan those and
+            // corrupt the payable ledger. Remove those records first.
+            const [bill] = await db
+              .select({ id: schema.purchaseBill.id })
+              .from(schema.purchaseBill)
+              .where(eq(schema.purchaseBill.supplierId, id))
+              .limit(1)
+            const [pay] = await db
+              .select({ id: schema.paymentTransaction.id })
+              .from(schema.paymentTransaction)
+              .where(eq(schema.paymentTransaction.supplierId, id))
+              .limit(1)
+            if (bill || pay) {
+              Alert.alert(
+                'Cannot delete',
+                'This supplier has purchase bills or payments. Delete those records first.',
+              )
+              return
+            }
+            await db.delete(schema.supplier).where(eq(schema.supplier.id, id))
+            router.back()
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : 'Failed to delete'
+            Alert.alert('Error', msg)
+          }
+        },
+      },
+    ])
+  }
+
   if (loading) {
     return (
       <ThemedView style={styles.loadingContainer}>
@@ -268,6 +308,10 @@ export default function EditSupplierScreen() {
           </ThemedText>
         </Pressable>
       </View>
+
+      <Pressable style={styles.deleteButton} onPress={handleDelete}>
+        <ThemedText style={styles.deleteButtonText}>Delete supplier</ThemedText>
+      </Pressable>
 
       <Modal visible={showGstTypePicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -394,6 +438,15 @@ const styles = StyleSheet.create({
   },
   saveButtonDisabled: { opacity: 0.5 },
   saveButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  deleteButton: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: '#FF3B30',
+  },
+  deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { maxHeight: '80%', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16 },
   modalTitle: { marginBottom: 12 },
