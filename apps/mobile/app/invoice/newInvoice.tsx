@@ -13,6 +13,8 @@ import {
   type TextInputProps,
 } from 'react-native'
 
+import { applyPayment } from '@neu/shared'
+
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
@@ -172,19 +174,24 @@ export default function NewInvoiceScreen() {
       // half-write must never leave the customer balance out of sync with the
       // invoice. Mirrors desktop sales.ts create ($transaction).
       await db.transaction(async (tx) => {
+        // Insert the invoice in its UNPAID state (amountPaid 0, full balance
+        // due). Any up-front payment is then applied via the shared applyPayment
+        // below — the SAME path the standalone Payments screen uses. This keeps
+        // all payment math in one place (packages/shared/paymentLogic) so the
+        // two can never drift.
         const [inserted] = await tx
           .insert(schema.salesInvoice)
           .values({
             invoiceNumber: finalNumber,
             customerId,
-            status,
+            status: 'DRAFT',
             invoiceDate: invDate,
             dueDate: due,
             subtotal,
             taxAmount,
             totalAmount: total,
-            amountPaid: paid,
-            balanceDue,
+            amountPaid: 0,
+            balanceDue: total,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
             poNumber: poNumber.trim() || null,
@@ -207,15 +214,14 @@ export default function NewInvoiceScreen() {
           })),
         )
 
-        // Raise what the customer owes by the unpaid portion of this invoice.
-        // THIS is the line that was missing — without it, every mobile invoice
-        // left the customer balance (and the Receivables dashboard) understated.
-        // Mirrors desktop sales.ts:120-123 (increment by balanceDue).
-        if (balanceDue !== 0) {
+        // Raise what the customer owes by the FULL invoice total — they owe all
+        // of it until a payment is applied. (Mirrors desktop sales.ts: balance up
+        // by the invoice; the up-front payment then reduces it below.)
+        if (total !== 0) {
           await tx
             .update(schema.customer)
             .set({
-              currentBalance: sql`${schema.customer.currentBalance} + ${balanceDue}`,
+              currentBalance: sql`${schema.customer.currentBalance} + ${total}`,
             })
             .where(eq(schema.customer.id, customerId))
         }
@@ -239,9 +245,12 @@ export default function NewInvoiceScreen() {
           }
         }
 
-        // Record an up-front payment if any (mirrors desktop). Note: balanceDue
-        // already nets this out (total - paid), so the customer balance above is
-        // correct — we don't double-count by also subtracting paid here.
+        // Up-front payment: record the row, then route its effect through the
+        // shared applyPayment. That decrements the customer by `paid` (netting
+        // the balance to total - paid) AND sets the invoice's amountPaid /
+        // balanceDue / status from their freshly-inserted zero state. No
+        // double-count: the customer was bumped by `total`, applyPayment removes
+        // `paid`; the invoice started at amountPaid 0, applyPayment adds `paid`.
         if (paid > 0) {
           await tx.insert(schema.paymentTransaction).values({
             type: 'PAYMENT_IN',
@@ -252,6 +261,14 @@ export default function NewInvoiceScreen() {
             referenceType: 'INVOICE',
             referenceId: inserted.id,
             salesInvoiceId: inserted.id,
+          })
+          await applyPayment(tx, {
+            type: 'PAYMENT_IN',
+            amount: paid,
+            customerId,
+            supplierId: null,
+            salesInvoiceId: inserted.id,
+            purchaseBillId: null,
           })
         }
       })
