@@ -28,6 +28,13 @@ const CARDS: HubCard[] = [
     enabled: true,
   },
   {
+    title: 'Purchase Orders',
+    subtitle: 'Intent-to-buy issued before the bill',
+    icon: 'doc.text.fill',
+    route: '/purchaseOrder',
+    enabled: true,
+  },
+  {
     title: 'Suppliers',
     subtitle: 'People and businesses you buy from',
     icon: 'person.fill',
@@ -39,6 +46,20 @@ const CARDS: HubCard[] = [
     subtitle: "Each supplier's catalog and prices",
     icon: 'cube.fill',
     route: '/supplierItem',
+    enabled: true,
+  },
+  {
+    title: 'Payments',
+    subtitle: 'Money received and paid out',
+    icon: 'wallet.pass.fill',
+    route: '/payment',
+    enabled: true,
+  },
+  {
+    title: 'Cash & Bank',
+    subtitle: 'Your cash and bank account balances',
+    icon: 'wallet.pass.fill',
+    route: '/cashBank',
     enabled: true,
   },
 ]
