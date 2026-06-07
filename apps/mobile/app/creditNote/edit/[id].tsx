@@ -13,12 +13,15 @@ import {
   type TextInputProps,
 } from 'react-native'
 
+import { computeGstValues } from '@neu/shared'
+
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 
 type Item = typeof schema.item.$inferSelect
 type Invoice = typeof schema.salesInvoice.$inferSelect
+type Company = typeof schema.company.$inferSelect
 type LineRow = { itemId: string; itemName: string; qty: number; rate: number; discount: number; taxRate: number }
 
 type NoteType = 'CREDIT_NOTE' | 'DEBIT_NOTE'
@@ -46,6 +49,14 @@ export default function EditCreditNoteScreen() {
   const [items, setItems] = useState<Item[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [customerName, setCustomerName] = useState('')
+  // The seller's company + the note's customer GST fields — both feed the shared
+  // GST split so an edit recomputes inter-state / CGST-SGST-IGST correctly.
+  const [company, setCompany] = useState<Company | null>(null)
+  const [customerGst, setCustomerGst] = useState<{
+    taxId: string | null
+    stateCode: string | null
+    stateName: string | null
+  } | null>(null)
 
   // Locked-on-edit values.
   const [noteNumber, setNoteNumber] = useState('')
@@ -82,8 +93,24 @@ export default function EditCreditNoteScreen() {
       setReason(n.reason ?? '')
       setNotes(n.notes ?? '')
       setTermsConditions(n.termsConditions ?? '')
-      const [c] = await db.select({ name: schema.customer.name }).from(schema.customer).where(eq(schema.customer.id, n.customerId)).limit(1)
+      const [c] = await db
+        .select({
+          name: schema.customer.name,
+          taxId: schema.customer.taxId,
+          stateCode: schema.customer.stateCode,
+          stateName: schema.customer.stateName,
+        })
+        .from(schema.customer)
+        .where(eq(schema.customer.id, n.customerId))
+        .limit(1)
       setCustomerName(c?.name ?? 'Unknown')
+      setCustomerGst(
+        c
+          ? { taxId: c.taxId, stateCode: c.stateCode, stateName: c.stateName }
+          : null,
+      )
+      const [comp] = await db.select().from(schema.company).limit(1)
+      setCompany(comp ?? null)
       const invs = await db.select().from(schema.salesInvoice).where(eq(schema.salesInvoice.customerId, n.customerId)).orderBy(desc(schema.salesInvoice.invoiceDate))
       setInvoices(invs)
       const its = await db.select().from(schema.creditDebitNoteItem).where(eq(schema.creditDebitNoteItem.creditDebitNoteId, id))
@@ -119,6 +146,33 @@ export default function EditCreditNoteScreen() {
       Alert.alert('Validation', 'Invalid date (YYYY-MM-DD)')
       return
     }
+    // Recompute the GST split for the edited lines (same shared path as create)
+    // so the stored CGST/SGST/IGST stay correct after an edit. The helper works
+    // on the SAME positive quantity*rate-discount the existing total math uses,
+    // so gst.totalAmount === total (magnitude); the reverse/reapply sign logic
+    // below is unchanged.
+    const gst = computeGstValues({
+      company: company
+        ? { stateCode: company.stateCode, stateName: company.stateName }
+        : null,
+      party: {
+        taxId: customerGst?.taxId,
+        stateCode: customerGst?.stateCode,
+        stateName: customerGst?.stateName,
+      },
+      items: lines.map((l) => {
+        const cat = items.find((i) => i.id === l.itemId)
+        return {
+          quantity: l.qty,
+          rate: l.rate,
+          discount: l.discount,
+          taxRate: l.taxRate,
+          catalogHsnCode: cat?.hsnCode,
+          catalogSkuHsn: cat?.skuHsn,
+        }
+      }),
+    })
+
     setSaving(true)
     try {
       // Reverse-then-reapply (modeled on paymentSave.updatePayment): the note has
@@ -144,16 +198,26 @@ export default function EditCreditNoteScreen() {
         // 2. Delete + reinsert lines.
         await tx.delete(schema.creditDebitNoteItem).where(eq(schema.creditDebitNoteItem.creditDebitNoteId, id))
         await tx.insert(schema.creditDebitNoteItem).values(
-          lines.map((l) => ({
-            creditDebitNoteId: id,
-            itemId: l.itemId,
-            quantity: l.qty,
-            rate: l.rate,
-            discount: l.discount,
-            taxRate: l.taxRate,
-            total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-            taxableAmount: l.qty * l.rate - l.discount,
-          })),
+          lines.map((l, idx) => {
+            const g = gst.items[idx]
+            return {
+              creditDebitNoteId: id,
+              itemId: l.itemId,
+              quantity: l.qty,
+              rate: l.rate,
+              discount: l.discount,
+              taxRate: l.taxRate,
+              total: g.total,
+              hsnCode: g.hsnCode || null,
+              taxableAmount: g.taxableAmount,
+              cgstRate: g.cgstRate,
+              cgstAmount: g.cgstAmount,
+              sgstRate: g.sgstRate,
+              sgstAmount: g.sgstAmount,
+              igstRate: g.igstRate,
+              igstAmount: g.igstAmount,
+            }
+          }),
         )
 
         // 3. Update the header (type stays the same as the original).
@@ -163,9 +227,13 @@ export default function EditCreditNoteScreen() {
             referenceInvoiceId,
             noteDate: nDate,
             reason: reason.trim() || null,
-            subtotal,
-            taxAmount,
-            totalAmount: total,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
           })

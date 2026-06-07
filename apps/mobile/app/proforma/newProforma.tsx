@@ -12,6 +12,8 @@ import {
   type TextInputProps,
 } from 'react-native'
 
+import { computeGstValues } from '@neu/shared'
+
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
@@ -19,6 +21,7 @@ import { generateProformaNumber } from '@/utils/docNumber'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
+type Company = typeof schema.company.$inferSelect
 type LineRow = { itemId: string; itemName: string; qty: number; rate: number; discount: number; taxRate: number }
 
 // Proforma Invoice = a provisional, non-binding pre-sale invoice. Same shape and
@@ -41,6 +44,9 @@ export default function NewProformaScreen() {
   const db = useDb()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
+  // The seller's company — its state code drives the inter-state (IGST vs
+  // CGST/SGST) decision when computing the GST split at save time.
+  const [company, setCompany] = useState<Company | null>(null)
 
   const [docNumber, setDocNumber] = useState('…')
   const [customerId, setCustomerId] = useState<string | null>(null)
@@ -60,6 +66,7 @@ export default function NewProformaScreen() {
   useEffect(() => {
     db.select().from(schema.customer).then(setCustomers)
     db.select().from(schema.item).then(setItems)
+    db.select().from(schema.company).limit(1).then((r) => setCompany(r[0] ?? null))
     generateProformaNumber(db).then(setDocNumber)
   }, [db])
 
@@ -83,6 +90,35 @@ export default function NewProformaScreen() {
     setSaving(true)
     try {
       const number = await generateProformaNumber(db)
+
+      // Compute the GST split (place of supply, inter-state, per-line CGST/SGST
+      // or IGST, supply type) the SAME way invoices do — via the shared
+      // computeGstValues. Without this every mobile-created proforma would store
+      // 0 for the split, and the GST reports + PDF tax tables would read zero.
+      // HSN falls back to the catalog item's hsnCode/skuHsn. Proforma is
+      // non-binding so NO customer-balance or stock effect is applied.
+      const gst = computeGstValues({
+        company: company
+          ? { stateCode: company.stateCode, stateName: company.stateName }
+          : null,
+        party: {
+          taxId: selectedCustomer?.taxId,
+          stateCode: selectedCustomer?.stateCode,
+          stateName: selectedCustomer?.stateName,
+        },
+        items: lines.map((l) => {
+          const cat = items.find((i) => i.id === l.itemId)
+          return {
+            quantity: l.qty,
+            rate: l.rate,
+            discount: l.discount,
+            taxRate: l.taxRate,
+            catalogHsnCode: cat?.hsnCode,
+            catalogSkuHsn: cat?.skuHsn,
+          }
+        }),
+      })
+
       const [inserted] = await db
         .insert(schema.proformaInvoice)
         .values({
@@ -92,25 +128,45 @@ export default function NewProformaScreen() {
           invoiceDate: dDate,
           dueDate: parseDate(expiryDate),
           deliveryTime: parseDate(deliveryTime),
-          subtotal,
-          taxAmount,
-          totalAmount: total,
+          subtotal: gst.subtotal,
+          taxAmount: gst.taxAmount,
+          totalAmount: gst.totalAmount,
           notes: notes.trim() || null,
           termsConditions: termsConditions.trim() || null,
+          placeOfSupply: gst.placeOfSupply || null,
+          placeOfSupplyName: gst.placeOfSupplyName || null,
+          isInterState: gst.isInterState,
+          cgstAmount: gst.totalCgst,
+          sgstAmount: gst.totalSgst,
+          igstAmount: gst.totalIgst,
+          cessAmount: gst.totalCess,
+          supplyType: gst.supplyType,
         })
         .returning({ id: schema.proformaInvoice.id })
 
       await db.insert(schema.proformaInvoiceItem).values(
-        lines.map((l) => ({
-          proformaInvoiceId: inserted.id,
-          itemId: l.itemId,
-          quantity: l.qty,
-          rate: l.rate,
-          discount: l.discount,
-          taxRate: l.taxRate,
-          total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-          taxableAmount: l.qty * l.rate - l.discount,
-        })),
+        lines.map((l, idx) => {
+          const g = gst.items[idx]
+          return {
+            proformaInvoiceId: inserted.id,
+            itemId: l.itemId,
+            quantity: l.qty,
+            rate: l.rate,
+            discount: l.discount,
+            taxRate: l.taxRate,
+            total: g.total,
+            hsnCode: g.hsnCode || null,
+            taxableAmount: g.taxableAmount,
+            cgstRate: g.cgstRate,
+            cgstAmount: g.cgstAmount,
+            sgstRate: g.sgstRate,
+            sgstAmount: g.sgstAmount,
+            igstRate: g.igstRate,
+            igstAmount: g.igstAmount,
+            cessRate: g.cessRate,
+            cessAmount: g.cessAmount,
+          }
+        }),
       )
       router.back()
     } catch (e) {

@@ -13,11 +13,15 @@ import {
   type TextInputProps,
 } from 'react-native'
 
+import { computeGstValues } from '@neu/shared'
+
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 
 type Item = typeof schema.item.$inferSelect
+type Customer = typeof schema.customer.$inferSelect
+type Company = typeof schema.company.$inferSelect
 type LineRow = { itemId: string; itemName: string; qty: number; rate: number; discount: number; taxRate: number }
 
 // Edit only offers the two user-pickable states. CONVERTED is set by the convert
@@ -48,6 +52,10 @@ export default function EditChallanScreen() {
   const [found, setFound] = useState(true)
   const [items, setItems] = useState<Item[]>([])
   const [customerName, setCustomerName] = useState('')
+  // Full customer + company records, needed to recompute the GST split (place of
+  // supply / inter-state) on save the same way create does.
+  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [company, setCompany] = useState<Company | null>(null)
 
   const [challanNumber, setChallanNumber] = useState('')
   const [status, setStatus] = useState<StatusOption>('NON_RETURNABLE')
@@ -84,8 +92,11 @@ export default function EditChallanScreen() {
       setVehicleNumber(dc.vehicleNumber ?? '')
       setNotes(dc.notes ?? '')
       setTermsConditions(dc.termsConditions ?? '')
-      const [c] = await db.select({ name: schema.customer.name }).from(schema.customer).where(eq(schema.customer.id, dc.customerId)).limit(1)
+      const [c] = await db.select().from(schema.customer).where(eq(schema.customer.id, dc.customerId)).limit(1)
+      setCustomer(c ?? null)
       setCustomerName(c?.name ?? 'Unknown')
+      const [co] = await db.select().from(schema.company).limit(1)
+      setCompany(co ?? null)
       const its = await db.select().from(schema.deliveryChallanItem).where(eq(schema.deliveryChallanItem.deliveryChallanId, id))
       const allItems = await db.select().from(schema.item)
       setItems(allItems)
@@ -118,6 +129,34 @@ export default function EditChallanScreen() {
       Alert.alert('Validation', 'Invalid date (YYYY-MM-DD)')
       return
     }
+    // Recompute the GST split for the edited lines (same shared path as create)
+    // so the stored totals + per-line HSN stay correct after an edit. The
+    // DeliveryChallan/DeliveryChallanItem tables only have subtotal/taxAmount/
+    // totalAmount on the header and hsnCode on the line — no place-of-supply /
+    // inter-state / CGST/SGST/IGST/cess columns — so only those existing fields
+    // are persisted; the rest of the computed split is dropped.
+    const gst = computeGstValues({
+      company: company
+        ? { stateCode: company.stateCode, stateName: company.stateName }
+        : null,
+      party: {
+        taxId: customer?.taxId,
+        stateCode: customer?.stateCode,
+        stateName: customer?.stateName,
+      },
+      items: lines.map((l) => {
+        const cat = items.find((i) => i.id === l.itemId)
+        return {
+          quantity: l.qty,
+          rate: l.rate,
+          discount: l.discount,
+          taxRate: l.taxRate,
+          catalogHsnCode: cat?.hsnCode,
+          catalogSkuHsn: cat?.skuHsn,
+        }
+      }),
+    })
+
     setSaving(true)
     try {
       // Editing a challan does NOT re-move stock (parity with desktop): it's a
@@ -125,15 +164,19 @@ export default function EditChallanScreen() {
       await db.transaction(async (tx) => {
         await tx.delete(schema.deliveryChallanItem).where(eq(schema.deliveryChallanItem.deliveryChallanId, id))
         await tx.insert(schema.deliveryChallanItem).values(
-          lines.map((l) => ({
-            deliveryChallanId: id,
-            itemId: l.itemId,
-            quantity: l.qty,
-            rate: l.rate,
-            discount: l.discount,
-            taxRate: l.taxRate,
-            total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-          })),
+          lines.map((l, idx) => {
+            const g = gst.items[idx]
+            return {
+              deliveryChallanId: id,
+              itemId: l.itemId,
+              quantity: l.qty,
+              rate: l.rate,
+              discount: l.discount,
+              taxRate: l.taxRate,
+              total: g.total,
+              hsnCode: g.hsnCode || null,
+            }
+          }),
         )
         await tx
           .update(schema.deliveryChallan)
@@ -142,9 +185,9 @@ export default function EditChallanScreen() {
             challanDate: cDate,
             transportMode: transportMode || null,
             vehicleNumber: vehicleNumber.trim() || null,
-            subtotal,
-            taxAmount,
-            totalAmount: total,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
           })

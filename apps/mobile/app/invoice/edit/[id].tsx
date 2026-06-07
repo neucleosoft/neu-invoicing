@@ -13,12 +13,15 @@ import {
   type TextInputProps,
 } from 'react-native'
 
+import { computeGstValues } from '@neu/shared'
+
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
+type Company = typeof schema.company.$inferSelect
 
 type LineRow = {
   itemId: string
@@ -69,6 +72,7 @@ export default function EditInvoiceScreen() {
     useState<typeof schema.salesInvoice.$inferSelect | null>(null)
   const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
+  const [company, setCompany] = useState<Company | null>(null)
 
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [customerId, setCustomerId] = useState<string | null>(null)
@@ -112,7 +116,8 @@ export default function EditInvoiceScreen() {
         .where(eq(schema.salesInvoiceItem.salesInvoiceId, id)),
       db.select().from(schema.customer),
       db.select().from(schema.item),
-    ]).then(([invRows, lineRows, customerList, itemList]) => {
+      db.select().from(schema.company).limit(1),
+    ]).then(([invRows, lineRows, customerList, itemList, companyRows]) => {
       const inv = invRows[0]
       if (!inv) {
         setLoading(false)
@@ -160,6 +165,7 @@ export default function EditInvoiceScreen() {
       )
       setCustomers(customerList)
       setItems(itemList)
+      setCompany(companyRows[0] ?? null)
       setLoading(false)
     })
   }, [id, db])
@@ -232,6 +238,31 @@ export default function EditInvoiceScreen() {
       }
     }
 
+    // Recompute the GST split for the edited lines/customer (same shared path as
+    // create) so the stored CGST/SGST/IGST + place of supply stay correct after
+    // an edit. balanceDue continues to preserve amountPaid.
+    const gst = computeGstValues({
+      company: company
+        ? { stateCode: company.stateCode, stateName: company.stateName }
+        : null,
+      party: {
+        taxId: selectedCustomer?.taxId,
+        stateCode: selectedCustomer?.stateCode,
+        stateName: selectedCustomer?.stateName,
+      },
+      items: lines.map((l) => {
+        const cat = items.find((i) => i.id === l.itemId)
+        return {
+          quantity: l.qty,
+          rate: l.rate,
+          discount: l.discount,
+          taxRate: l.taxRate,
+          catalogHsnCode: cat?.hsnCode,
+          catalogSkuHsn: cat?.skuHsn,
+        }
+      }),
+    })
+
     setSaving(true)
     try {
       // Wrap the whole edit in a transaction so a half-write can't leave the
@@ -245,15 +276,28 @@ export default function EditInvoiceScreen() {
           .where(eq(schema.salesInvoiceItem.salesInvoiceId, id))
 
         await tx.insert(schema.salesInvoiceItem).values(
-          lines.map((l) => ({
-            salesInvoiceId: id,
-            itemId: l.itemId,
-            quantity: l.qty,
-            rate: l.rate,
-            discount: l.discount,
-            taxRate: l.taxRate,
-            total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-          })),
+          lines.map((l, idx) => {
+            const g = gst.items[idx]
+            return {
+              salesInvoiceId: id,
+              itemId: l.itemId,
+              quantity: l.qty,
+              rate: l.rate,
+              discount: l.discount,
+              taxRate: l.taxRate,
+              total: g.total,
+              hsnCode: g.hsnCode || null,
+              taxableAmount: g.taxableAmount,
+              cgstRate: g.cgstRate,
+              cgstAmount: g.cgstAmount,
+              sgstRate: g.sgstRate,
+              sgstAmount: g.sgstAmount,
+              igstRate: g.igstRate,
+              igstAmount: g.igstAmount,
+              cessRate: g.cessRate,
+              cessAmount: g.cessAmount,
+            }
+          }),
         )
 
         await tx
@@ -264,10 +308,18 @@ export default function EditInvoiceScreen() {
             status,
             invoiceDate: invDate,
             dueDate: due,
-            subtotal,
-            taxAmount,
-            totalAmount: total,
-            balanceDue,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
+            balanceDue: gst.totalAmount - amountPaid,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
+            supplyType: gst.supplyType,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
             poNumber: poNumber.trim() || null,

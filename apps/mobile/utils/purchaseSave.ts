@@ -1,5 +1,7 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
 
+import { computeGstValues } from '@neu/shared'
+
 import { schema, useDb } from '@/db'
 
 // The whole point of this file is to mirror the desktop purchase handler
@@ -208,6 +210,48 @@ function computeTotals(items: NormalizedLine[]) {
   return { subtotal, taxAmount, total: subtotal + taxAmount }
 }
 
+// Compute the India GST split (place of supply, inter-state CGST/SGST vs IGST,
+// per-line tax) for a purchase bill the SAME way desktop + mobile sales do, via
+// the shared computeGstValues. For a purchase the buyer is OUR company and the
+// counter-party is the SUPPLIER, so inter-state is decided by the company's
+// state vs the supplier's state. Without this, every mobile-entered purchase
+// would store 0 for the split and the GST/ITC reports would read zero.
+//
+// HSN per line is sourced from the already-resolved normalized line (which is
+// the typed line's HSN falling back to the SupplierItem catalog's hsnCode).
+// SupplierItem has no skuHsn column, so there's no catalogSkuHsn to pass.
+async function computePurchaseGst(
+  tx: any,
+  supplierId: string,
+  normalized: NormalizedLine[],
+) {
+  const [company] = await tx.select().from(schema.company).limit(1)
+  const [supplier] = await tx
+    .select()
+    .from(schema.supplier)
+    .where(eq(schema.supplier.id, supplierId))
+    .limit(1)
+
+  return computeGstValues({
+    company: company
+      ? { stateCode: company.stateCode, stateName: company.stateName }
+      : null,
+    party: {
+      taxId: supplier?.taxId,
+      stateCode: supplier?.stateCode,
+      stateName: supplier?.stateName,
+    },
+    items: normalized.map((it) => ({
+      quantity: it.quantity,
+      rate: it.rate,
+      discount: it.discount,
+      taxRate: it.taxRate,
+      // Already resolved against the SupplierItem catalog in normalizePurchaseItems.
+      catalogHsnCode: it.hsnCode || null,
+    })),
+  })
+}
+
 // Next internal bill number, BILL-YYYY-NNN. Mirrors desktop generateBillNumber:
 // take the highest existing number and add one. Single-user mobile, so no race.
 export async function generateBillNumber(db: Db): Promise<string> {
@@ -231,6 +275,12 @@ export async function createPurchaseBill(
     const normalized = await normalizePurchaseItems(tx, header.supplierId, lines)
     const { subtotal, taxAmount, total } = computeTotals(normalized)
 
+    // GST split (place of supply, inter-state, per-line CGST/SGST or IGST) from
+    // the shared helper. Totals it returns equal computeTotals above (same math,
+    // no doc discount), so stored totals/balance behaviour is unchanged — we only
+    // ADD the split columns the GST/ITC reports need.
+    const gst = await computePurchaseGst(tx, header.supplierId, normalized)
+
     // New bills start fully unpaid; recording payment is a separate action,
     // exactly like the desktop create form.
     const amountPaid = 0
@@ -252,12 +302,21 @@ export async function createPurchaseBill(
         balanceDue,
         status: 'DRAFT',
         notes: header.notes,
+        placeOfSupply: gst.placeOfSupply || null,
+        placeOfSupplyName: gst.placeOfSupplyName || null,
+        isInterState: gst.isInterState,
+        cgstAmount: gst.totalCgst,
+        sgstAmount: gst.totalSgst,
+        igstAmount: gst.totalIgst,
+        cessAmount: gst.totalCess,
         attachmentData: header.attachmentData ?? null,
         attachmentMimeType: header.attachmentMimeType ?? null,
       })
       .returning({ id: schema.purchaseBill.id })
 
-    for (const it of normalized) {
+    for (let idx = 0; idx < normalized.length; idx++) {
+      const it = normalized[idx]
+      const g = gst.items[idx]
       await tx.insert(schema.purchaseBillItem).values({
         purchaseBillId: bill.id,
         supplierItemId: it.supplierItemId,
@@ -265,9 +324,17 @@ export async function createPurchaseBill(
         rate: it.rate,
         discount: it.discount,
         taxRate: it.taxRate,
-        total: it.total,
-        hsnCode: it.hsnCode || null,
-        taxableAmount: it.taxableAmount,
+        total: g.total,
+        hsnCode: g.hsnCode || null,
+        taxableAmount: g.taxableAmount,
+        cgstRate: g.cgstRate,
+        cgstAmount: g.cgstAmount,
+        sgstRate: g.sgstRate,
+        sgstAmount: g.sgstAmount,
+        igstRate: g.igstRate,
+        igstAmount: g.igstAmount,
+        cessRate: g.cessRate,
+        cessAmount: g.cessAmount,
       })
     }
 
@@ -324,6 +391,9 @@ export async function updatePurchaseBill(
     const normalized = await normalizePurchaseItems(tx, header.supplierId, lines)
     const { subtotal, taxAmount, total } = computeTotals(normalized)
 
+    // Recompute the GST split against the (possibly changed) supplier + lines.
+    const gst = await computePurchaseGst(tx, header.supplierId, normalized)
+
     // amountPaid is owned by the payments flow, not the edit form — keep it.
     const amountPaid = existing.amountPaid || 0
     const balanceDue = total - amountPaid
@@ -366,6 +436,13 @@ export async function updatePurchaseBill(
         balanceDue,
         status,
         notes: header.notes,
+        placeOfSupply: gst.placeOfSupply || null,
+        placeOfSupplyName: gst.placeOfSupplyName || null,
+        isInterState: gst.isInterState,
+        cgstAmount: gst.totalCgst,
+        sgstAmount: gst.totalSgst,
+        igstAmount: gst.totalIgst,
+        cessAmount: gst.totalCess,
         // Only overwrite the attachment when a new one was picked this session.
         ...(header.attachmentData !== undefined
           ? {
@@ -377,7 +454,9 @@ export async function updatePurchaseBill(
       .where(eq(schema.purchaseBill.id, id))
 
     // 4. Reinsert the new lines.
-    for (const it of normalized) {
+    for (let idx = 0; idx < normalized.length; idx++) {
+      const it = normalized[idx]
+      const g = gst.items[idx]
       await tx.insert(schema.purchaseBillItem).values({
         purchaseBillId: id,
         supplierItemId: it.supplierItemId,
@@ -385,9 +464,17 @@ export async function updatePurchaseBill(
         rate: it.rate,
         discount: it.discount,
         taxRate: it.taxRate,
-        total: it.total,
-        hsnCode: it.hsnCode || null,
-        taxableAmount: it.taxableAmount,
+        total: g.total,
+        hsnCode: g.hsnCode || null,
+        taxableAmount: g.taxableAmount,
+        cgstRate: g.cgstRate,
+        cgstAmount: g.cgstAmount,
+        sgstRate: g.sgstRate,
+        sgstAmount: g.sgstAmount,
+        igstRate: g.igstRate,
+        igstAmount: g.igstAmount,
+        cessRate: g.cessRate,
+        cessAmount: g.cessAmount,
       })
     }
 

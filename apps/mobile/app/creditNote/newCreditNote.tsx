@@ -13,6 +13,8 @@ import {
   type TextInputProps,
 } from 'react-native'
 
+import { computeGstValues } from '@neu/shared'
+
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
@@ -20,6 +22,7 @@ import { schema, useDb } from '@/db'
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
 type Invoice = typeof schema.salesInvoice.$inferSelect
+type Company = typeof schema.company.$inferSelect
 
 type Db = ReturnType<typeof useDb>
 
@@ -72,6 +75,9 @@ export default function NewCreditNoteScreen() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
   const [invoices, setInvoices] = useState<Invoice[]>([])
+  // The seller's company — its state code drives the inter-state (IGST vs
+  // CGST/SGST) decision when computing the GST split at save time.
+  const [company, setCompany] = useState<Company | null>(null)
 
   const [type, setType] = useState<NoteType>('CREDIT_NOTE')
   const [noteNumber, setNoteNumber] = useState('…')
@@ -91,6 +97,7 @@ export default function NewCreditNoteScreen() {
   useEffect(() => {
     db.select().from(schema.customer).then(setCustomers)
     db.select().from(schema.item).then(setItems)
+    db.select().from(schema.company).limit(1).then((r) => setCompany(r[0] ?? null))
   }, [db])
 
   // The number depends on the chosen type, so regenerate whenever it flips.
@@ -151,6 +158,37 @@ export default function NewCreditNoteScreen() {
     setSaving(true)
     try {
       const number = await generateNoteNumber(db, type)
+
+      // Compute the GST split (inter-state, per-line CGST/SGST or IGST) the SAME
+      // way invoices do — via the shared computeGstValues. Credit/debit notes
+      // feed the GSTR-1 CDN section, so without this every mobile-created note
+      // would store 0 for the split and the GST reports would read zero. The
+      // helper works on the SAME positive quantity*rate-discount the existing
+      // line/total math uses, so gst.totalAmount === total (magnitude); the
+      // CREDIT/DEBIT sign stays only on the balance effects below. HSN falls back
+      // to the catalog item's hsnCode/skuHsn.
+      const gst = computeGstValues({
+        company: company
+          ? { stateCode: company.stateCode, stateName: company.stateName }
+          : null,
+        party: {
+          taxId: selectedCustomer?.taxId,
+          stateCode: selectedCustomer?.stateCode,
+          stateName: selectedCustomer?.stateName,
+        },
+        items: lines.map((l) => {
+          const cat = items.find((i) => i.id === l.itemId)
+          return {
+            quantity: l.qty,
+            rate: l.rate,
+            discount: l.discount,
+            taxRate: l.taxRate,
+            catalogHsnCode: cat?.hsnCode,
+            catalogSkuHsn: cat?.skuHsn,
+          }
+        }),
+      })
+
       // Money side-effects (customer balance, ref invoice balanceDue) must be
       // atomic with the insert, so the whole thing is one transaction.
       await db.transaction(async (tx) => {
@@ -163,9 +201,13 @@ export default function NewCreditNoteScreen() {
             customerId,
             referenceInvoiceId,
             reason: reason.trim() || null,
-            subtotal,
-            taxAmount,
-            totalAmount: total,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
             status: 'ACTIVE',
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
@@ -173,16 +215,26 @@ export default function NewCreditNoteScreen() {
           .returning({ id: schema.creditDebitNote.id })
 
         await tx.insert(schema.creditDebitNoteItem).values(
-          lines.map((l) => ({
-            creditDebitNoteId: inserted.id,
-            itemId: l.itemId,
-            quantity: l.qty,
-            rate: l.rate,
-            discount: l.discount,
-            taxRate: l.taxRate,
-            total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-            taxableAmount: l.qty * l.rate - l.discount,
-          })),
+          lines.map((l, idx) => {
+            const g = gst.items[idx]
+            return {
+              creditDebitNoteId: inserted.id,
+              itemId: l.itemId,
+              quantity: l.qty,
+              rate: l.rate,
+              discount: l.discount,
+              taxRate: l.taxRate,
+              total: g.total,
+              hsnCode: g.hsnCode || null,
+              taxableAmount: g.taxableAmount,
+              cgstRate: g.cgstRate,
+              cgstAmount: g.cgstAmount,
+              sgstRate: g.sgstRate,
+              sgstAmount: g.sgstAmount,
+              igstRate: g.igstRate,
+              igstAmount: g.igstAmount,
+            }
+          }),
         )
 
         // CREDIT_NOTE lowers what the customer owes; DEBIT_NOTE raises it.

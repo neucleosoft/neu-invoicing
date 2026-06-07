@@ -13,11 +13,15 @@ import {
   type TextInputProps,
 } from 'react-native'
 
+import { computeGstValues } from '@neu/shared'
+
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 
 type Item = typeof schema.item.$inferSelect
+type Customer = typeof schema.customer.$inferSelect
+type Company = typeof schema.company.$inferSelect
 type LineRow = { itemId: string; itemName: string; qty: number; rate: number; discount: number; taxRate: number }
 
 const STATUS_OPTIONS = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'] as const
@@ -45,6 +49,10 @@ export default function EditQuotationScreen() {
   const [found, setFound] = useState(true)
   const [items, setItems] = useState<Item[]>([])
   const [customerName, setCustomerName] = useState('')
+  // The locked customer's GST identity (state/taxId) and the seller's company —
+  // both feed the inter-state decision when recomputing the GST split at save.
+  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [company, setCompany] = useState<Company | null>(null)
 
   const [quoteNumber, setQuoteNumber] = useState('')
   const [status, setStatus] = useState<StatusOption>('DRAFT')
@@ -80,8 +88,11 @@ export default function EditQuotationScreen() {
       setDeliveryTime(toIso(q.deliveryTime))
       setNotes(q.notes ?? '')
       setTermsConditions(q.termsConditions ?? '')
-      const [c] = await db.select({ name: schema.customer.name }).from(schema.customer).where(eq(schema.customer.id, q.customerId)).limit(1)
+      const [c] = await db.select().from(schema.customer).where(eq(schema.customer.id, q.customerId)).limit(1)
+      setCustomer(c ?? null)
       setCustomerName(c?.name ?? 'Unknown')
+      const [comp] = await db.select().from(schema.company).limit(1)
+      setCompany(comp ?? null)
       const its = await db.select().from(schema.quotationItem).where(eq(schema.quotationItem.quotationId, id))
       const allItems = await db.select().from(schema.item)
       setItems(allItems)
@@ -114,6 +125,31 @@ export default function EditQuotationScreen() {
       Alert.alert('Validation', 'Invalid date (YYYY-MM-DD)')
       return
     }
+    // Recompute the GST split for the edited lines (same shared path as create)
+    // so the stored CGST/SGST/IGST + place of supply stay correct after an edit.
+    // The customer is locked in edit, but its state/taxId still drives the split.
+    const gst = computeGstValues({
+      company: company
+        ? { stateCode: company.stateCode, stateName: company.stateName }
+        : null,
+      party: {
+        taxId: customer?.taxId,
+        stateCode: customer?.stateCode,
+        stateName: customer?.stateName,
+      },
+      items: lines.map((l) => {
+        const cat = items.find((i) => i.id === l.itemId)
+        return {
+          quantity: l.qty,
+          rate: l.rate,
+          discount: l.discount,
+          taxRate: l.taxRate,
+          catalogHsnCode: cat?.hsnCode,
+          catalogSkuHsn: cat?.skuHsn,
+        }
+      }),
+    })
+
     setSaving(true)
     try {
       // Quotation has no balance/stock effect, so edit is a simple
@@ -121,16 +157,28 @@ export default function EditQuotationScreen() {
       await db.transaction(async (tx) => {
         await tx.delete(schema.quotationItem).where(eq(schema.quotationItem.quotationId, id))
         await tx.insert(schema.quotationItem).values(
-          lines.map((l) => ({
-            quotationId: id,
-            itemId: l.itemId,
-            quantity: l.qty,
-            rate: l.rate,
-            discount: l.discount,
-            taxRate: l.taxRate,
-            total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-            taxableAmount: l.qty * l.rate - l.discount,
-          })),
+          lines.map((l, idx) => {
+            const g = gst.items[idx]
+            return {
+              quotationId: id,
+              itemId: l.itemId,
+              quantity: l.qty,
+              rate: l.rate,
+              discount: l.discount,
+              taxRate: l.taxRate,
+              total: g.total,
+              hsnCode: g.hsnCode || null,
+              taxableAmount: g.taxableAmount,
+              cgstRate: g.cgstRate,
+              cgstAmount: g.cgstAmount,
+              sgstRate: g.sgstRate,
+              sgstAmount: g.sgstAmount,
+              igstRate: g.igstRate,
+              igstAmount: g.igstAmount,
+              cessRate: g.cessRate,
+              cessAmount: g.cessAmount,
+            }
+          }),
         )
         await tx
           .update(schema.quotation)
@@ -139,9 +187,17 @@ export default function EditQuotationScreen() {
             invoiceDate: qDate,
             dueDate: parseDate(expiryDate),
             deliveryTime: parseDate(deliveryTime),
-            subtotal,
-            taxAmount,
-            totalAmount: total,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
+            supplyType: gst.supplyType,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
           })

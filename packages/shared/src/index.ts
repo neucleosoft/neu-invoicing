@@ -1,5 +1,6 @@
 export * from './schema'
 export * from './gstValidation'
+export * from './gstCompute'
 export * from './paymentLogic'
 export * from './convertToInvoice'
 export * from './pdf'

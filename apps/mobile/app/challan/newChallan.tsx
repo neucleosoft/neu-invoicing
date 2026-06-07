@@ -13,6 +13,8 @@ import {
   type TextInputProps,
 } from 'react-native'
 
+import { computeGstValues } from '@neu/shared'
+
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
@@ -20,6 +22,7 @@ import { generateChallanNumber } from '@/utils/docNumber'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
+type Company = typeof schema.company.$inferSelect
 
 type LineRow = {
   itemId: string
@@ -56,6 +59,9 @@ export default function NewChallanScreen() {
   const db = useDb()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
+  // The seller's company — its state code drives the inter-state (IGST vs
+  // CGST/SGST) decision when computing the GST split at save time.
+  const [company, setCompany] = useState<Company | null>(null)
 
   const [challanNumber, setChallanNumber] = useState('…')
   const [customerId, setCustomerId] = useState<string | null>(null)
@@ -76,6 +82,7 @@ export default function NewChallanScreen() {
   useEffect(() => {
     db.select().from(schema.customer).then(setCustomers)
     db.select().from(schema.item).then(setItems)
+    db.select().from(schema.company).limit(1).then((r) => setCompany(r[0] ?? null))
     generateChallanNumber(db).then(setChallanNumber)
   }, [db])
 
@@ -112,6 +119,36 @@ export default function NewChallanScreen() {
     setSaving(true)
     try {
       const number = await generateChallanNumber(db)
+
+      // Compute the GST split the SAME way desktop/invoices do — via the shared
+      // computeGstValues — so the stored totals and per-line HSN match the GST
+      // reports + PDF tax tables. NOTE: the DeliveryChallan/DeliveryChallanItem
+      // tables only carry subtotal/taxAmount/totalAmount on the header and hsnCode
+      // on the line; they have no place-of-supply / inter-state / CGST/SGST/IGST/
+      // cess columns, so only those existing fields are persisted (the rest of the
+      // computed split is dropped). HSN falls back to the catalog item.
+      const gst = computeGstValues({
+        company: company
+          ? { stateCode: company.stateCode, stateName: company.stateName }
+          : null,
+        party: {
+          taxId: selectedCustomer?.taxId,
+          stateCode: selectedCustomer?.stateCode,
+          stateName: selectedCustomer?.stateName,
+        },
+        items: lines.map((l) => {
+          const cat = items.find((i) => i.id === l.itemId)
+          return {
+            quantity: l.qty,
+            rate: l.rate,
+            discount: l.discount,
+            taxRate: l.taxRate,
+            catalogHsnCode: cat?.hsnCode,
+            catalogSkuHsn: cat?.skuHsn,
+          }
+        }),
+      })
+
       // A challan moves goods out, so stock + audit rows happen here. It never
       // touches the customer balance (no receivable). All side-effects in one tx.
       await db.transaction(async (tx) => {
@@ -122,9 +159,9 @@ export default function NewChallanScreen() {
             customerId,
             status,
             challanDate: cDate,
-            subtotal,
-            taxAmount,
-            totalAmount: total,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
             transportMode: transportMode || null,
             vehicleNumber: vehicleNumber.trim() || null,
             notes: notes.trim() || null,
@@ -133,15 +170,19 @@ export default function NewChallanScreen() {
           .returning({ id: schema.deliveryChallan.id })
 
         await tx.insert(schema.deliveryChallanItem).values(
-          lines.map((l) => ({
-            deliveryChallanId: inserted.id,
-            itemId: l.itemId,
-            quantity: l.qty,
-            rate: l.rate,
-            discount: l.discount,
-            taxRate: l.taxRate,
-            total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-          })),
+          lines.map((l, idx) => {
+            const g = gst.items[idx]
+            return {
+              deliveryChallanId: inserted.id,
+              itemId: l.itemId,
+              quantity: l.qty,
+              rate: l.rate,
+              discount: l.discount,
+              taxRate: l.taxRate,
+              total: g.total,
+              hsnCode: g.hsnCode || null,
+            }
+          }),
         )
 
         // Goods leave: decrement tracked items' stock and log a DELIVERY movement.

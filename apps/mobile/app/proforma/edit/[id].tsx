@@ -13,11 +13,15 @@ import {
   type TextInputProps,
 } from 'react-native'
 
+import { computeGstValues } from '@neu/shared'
+
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 
 type Item = typeof schema.item.$inferSelect
+type Customer = typeof schema.customer.$inferSelect
+type Company = typeof schema.company.$inferSelect
 type LineRow = { itemId: string; itemName: string; qty: number; rate: number; discount: number; taxRate: number }
 
 const STATUS_OPTIONS = ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED', 'EXPIRED'] as const
@@ -45,6 +49,10 @@ export default function EditProformaScreen() {
   const [found, setFound] = useState(true)
   const [items, setItems] = useState<Item[]>([])
   const [customerName, setCustomerName] = useState('')
+  // Full customer + own company records: needed to recompute the GST split
+  // (place of supply / inter-state) on save, the same way invoices do.
+  const [customer, setCustomer] = useState<Customer | null>(null)
+  const [company, setCompany] = useState<Company | null>(null)
 
   const [docNumber, setDocNumber] = useState('')
   const [status, setStatus] = useState<StatusOption>('DRAFT')
@@ -72,8 +80,11 @@ export default function EditProformaScreen() {
       setDeliveryTime(toIso(d.deliveryTime))
       setNotes(d.notes ?? '')
       setTermsConditions(d.termsConditions ?? '')
-      const [c] = await db.select({ name: schema.customer.name }).from(schema.customer).where(eq(schema.customer.id, d.customerId)).limit(1)
+      const [c] = await db.select().from(schema.customer).where(eq(schema.customer.id, d.customerId)).limit(1)
+      setCustomer(c ?? null)
       setCustomerName(c?.name ?? 'Unknown')
+      const [co] = await db.select().from(schema.company).limit(1)
+      setCompany(co ?? null)
       const its = await db.select().from(schema.proformaInvoiceItem).where(eq(schema.proformaInvoiceItem.proformaInvoiceId, id))
       const allItems = await db.select().from(schema.item)
       setItems(allItems)
@@ -97,25 +108,66 @@ export default function EditProformaScreen() {
     if (lines.length === 0) { Alert.alert('Validation', 'Add at least one line item'); return }
     const dDate = parseDate(docDate)
     if (!dDate) { Alert.alert('Validation', 'Invalid date (YYYY-MM-DD)'); return }
+    // Recompute the GST split for the edited lines (same shared path as create)
+    // so the stored CGST/SGST/IGST + place of supply stay correct after an edit.
+    // Proforma is non-binding: NO customer-balance or stock effect.
+    const gst = computeGstValues({
+      company: company
+        ? { stateCode: company.stateCode, stateName: company.stateName }
+        : null,
+      party: {
+        taxId: customer?.taxId,
+        stateCode: customer?.stateCode,
+        stateName: customer?.stateName,
+      },
+      items: lines.map((l) => {
+        const cat = items.find((i) => i.id === l.itemId)
+        return {
+          quantity: l.qty,
+          rate: l.rate,
+          discount: l.discount,
+          taxRate: l.taxRate,
+          catalogHsnCode: cat?.hsnCode,
+          catalogSkuHsn: cat?.skuHsn,
+        }
+      }),
+    })
+
     setSaving(true)
     try {
       await db.transaction(async (tx) => {
         await tx.delete(schema.proformaInvoiceItem).where(eq(schema.proformaInvoiceItem.proformaInvoiceId, id))
         await tx.insert(schema.proformaInvoiceItem).values(
-          lines.map((l) => ({
-            proformaInvoiceId: id,
-            itemId: l.itemId,
-            quantity: l.qty,
-            rate: l.rate,
-            discount: l.discount,
-            taxRate: l.taxRate,
-            total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-            taxableAmount: l.qty * l.rate - l.discount,
-          })),
+          lines.map((l, idx) => {
+            const g = gst.items[idx]
+            return {
+              proformaInvoiceId: id,
+              itemId: l.itemId,
+              quantity: l.qty,
+              rate: l.rate,
+              discount: l.discount,
+              taxRate: l.taxRate,
+              total: g.total,
+              hsnCode: g.hsnCode || null,
+              taxableAmount: g.taxableAmount,
+              cgstRate: g.cgstRate,
+              cgstAmount: g.cgstAmount,
+              sgstRate: g.sgstRate,
+              sgstAmount: g.sgstAmount,
+              igstRate: g.igstRate,
+              igstAmount: g.igstAmount,
+              cessRate: g.cessRate,
+              cessAmount: g.cessAmount,
+            }
+          }),
         )
         await tx.update(schema.proformaInvoice).set({
           status, invoiceDate: dDate, dueDate: parseDate(expiryDate), deliveryTime: parseDate(deliveryTime),
-          subtotal, taxAmount, totalAmount: total, notes: notes.trim() || null, termsConditions: termsConditions.trim() || null,
+          subtotal: gst.subtotal, taxAmount: gst.taxAmount, totalAmount: gst.totalAmount,
+          placeOfSupply: gst.placeOfSupply || null, placeOfSupplyName: gst.placeOfSupplyName || null,
+          isInterState: gst.isInterState, cgstAmount: gst.totalCgst, sgstAmount: gst.totalSgst,
+          igstAmount: gst.totalIgst, cessAmount: gst.totalCess, supplyType: gst.supplyType,
+          notes: notes.trim() || null, termsConditions: termsConditions.trim() || null,
         }).where(eq(schema.proformaInvoice.id, id))
       })
       router.back()

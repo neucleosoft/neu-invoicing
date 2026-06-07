@@ -13,7 +13,7 @@ import {
   type TextInputProps,
 } from 'react-native'
 
-import { applyPayment } from '@neu/shared'
+import { applyPayment, computeGstValues } from '@neu/shared'
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
@@ -22,6 +22,7 @@ import { generateInvoiceNumber } from '@/utils/invoiceNumber'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
+type Company = typeof schema.company.$inferSelect
 
 type LineRow = {
   itemId: string
@@ -74,6 +75,9 @@ export default function NewInvoiceScreen() {
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
+  // The seller's company — its state code drives the inter-state (IGST vs
+  // CGST/SGST) decision when computing the GST split at save time.
+  const [company, setCompany] = useState<Company | null>(null)
 
   // Sequential FY-scoped number (NS/SL/{FY}/NN), generated on mount to mirror
   // desktop. Shown read-only as a preview; re-resolved at save time so a number
@@ -105,6 +109,7 @@ export default function NewInvoiceScreen() {
   useEffect(() => {
     db.select().from(schema.customer).then(setCustomers)
     db.select().from(schema.item).then(setItems)
+    db.select().from(schema.company).limit(1).then((r) => setCompany(r[0] ?? null))
     generateInvoiceNumber(db).then(setInvoiceNumber)
   }, [db])
 
@@ -169,6 +174,33 @@ export default function NewInvoiceScreen() {
       // the truly-next number and avoid a unique-constraint collision.
       const finalNumber = await generateInvoiceNumber(db)
 
+      // Compute the GST split (place of supply, inter-state, per-line CGST/SGST
+      // or IGST, supply type) the SAME way desktop does — via the shared
+      // computeGstValues. Without this every mobile-created invoice would store 0
+      // for the split, and the GST reports + PDF tax tables would read zero. HSN
+      // falls back to the catalog item's hsnCode/skuHsn.
+      const gst = computeGstValues({
+        company: company
+          ? { stateCode: company.stateCode, stateName: company.stateName }
+          : null,
+        party: {
+          taxId: selectedCustomer?.taxId,
+          stateCode: selectedCustomer?.stateCode,
+          stateName: selectedCustomer?.stateName,
+        },
+        items: lines.map((l) => {
+          const cat = items.find((i) => i.id === l.itemId)
+          return {
+            quantity: l.qty,
+            rate: l.rate,
+            discount: l.discount,
+            taxRate: l.taxRate,
+            catalogHsnCode: cat?.hsnCode,
+            catalogSkuHsn: cat?.skuHsn,
+          }
+        }),
+      })
+
       // Everything below is one transaction so the invoice, its lines, the
       // customer-balance bump, and the stock decrements all commit together — a
       // half-write must never leave the customer balance out of sync with the
@@ -187,13 +219,21 @@ export default function NewInvoiceScreen() {
             status: 'DRAFT',
             invoiceDate: invDate,
             dueDate: due,
-            subtotal,
-            taxAmount,
-            totalAmount: total,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
             amountPaid: 0,
-            balanceDue: total,
+            balanceDue: gst.totalAmount,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
+            supplyType: gst.supplyType,
             poNumber: poNumber.trim() || null,
             ewayBillNo: ewayBillNo.trim() || null,
             vehicleNumber: vehicleNumber.trim() || null,
@@ -203,15 +243,28 @@ export default function NewInvoiceScreen() {
           .returning()
 
         await tx.insert(schema.salesInvoiceItem).values(
-          lines.map((l) => ({
-            salesInvoiceId: inserted.id,
-            itemId: l.itemId,
-            quantity: l.qty,
-            rate: l.rate,
-            discount: l.discount,
-            taxRate: l.taxRate,
-            total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-          })),
+          lines.map((l, idx) => {
+            const g = gst.items[idx]
+            return {
+              salesInvoiceId: inserted.id,
+              itemId: l.itemId,
+              quantity: l.qty,
+              rate: l.rate,
+              discount: l.discount,
+              taxRate: l.taxRate,
+              total: g.total,
+              hsnCode: g.hsnCode || null,
+              taxableAmount: g.taxableAmount,
+              cgstRate: g.cgstRate,
+              cgstAmount: g.cgstAmount,
+              sgstRate: g.sgstRate,
+              sgstAmount: g.sgstAmount,
+              igstRate: g.igstRate,
+              igstAmount: g.igstAmount,
+              cessRate: g.cessRate,
+              cessAmount: g.cessAmount,
+            }
+          }),
         )
 
         // Raise what the customer owes by the FULL invoice total — they owe all
