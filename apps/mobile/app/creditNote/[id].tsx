@@ -1,0 +1,259 @@
+import { eq, sql } from 'drizzle-orm'
+import { router, useLocalSearchParams } from 'expo-router'
+import { useEffect, useRef, useState } from 'react'
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+
+import { HiddenPdfWebView, type HiddenPdfWebViewHandle } from '@/components/HiddenPdfWebView'
+import { Row, Section } from '@/components/DetailSection'
+import { ThemedText } from '@/components/themed-text'
+import { ThemedView } from '@/components/themed-view'
+import { schema, useDb } from '@/db'
+import { buildCreditNotePdfPayload } from '@/utils/creditNotePdf'
+import { formatCurrency } from '@/utils/currency'
+import { formatDate } from '@/utils/date'
+import { saveAndSharePdf } from '@/utils/pdfShare'
+
+type Note = typeof schema.creditDebitNote.$inferSelect
+type NoteItem = typeof schema.creditDebitNoteItem.$inferSelect
+
+export default function CreditNoteDetailScreen() {
+  const { id } = useLocalSearchParams<{ id: string }>()
+  const db = useDb()
+  const onEdit = () => router.push({ pathname: '/creditNote/edit/[id]', params: { id } })
+
+  const [note, setNote] = useState<Note | null>(null)
+  const [customerName, setCustomerName] = useState('')
+  const [refInvoiceNumber, setRefInvoiceNumber] = useState<string | null>(null)
+  const [lines, setLines] = useState<(NoteItem & { name: string })[]>([])
+  const [loading, setLoading] = useState(true)
+  const pdfRef = useRef<HiddenPdfWebViewHandle>(null)
+  const [sharing, setSharing] = useState(false)
+
+  async function handleSharePdf() {
+    if (!id || sharing) return
+    setSharing(true)
+    try {
+      const payload = await buildCreditNotePdfPayload(db, id)
+      if (!payload) {
+        Alert.alert('Error', 'Could not load this note.')
+        return
+      }
+      const base64 = await pdfRef.current!.generate(payload.builder, payload.data)
+      await saveAndSharePdf(base64, payload.filename)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to generate PDF'
+      Alert.alert(
+        'PDF failed',
+        // The WebView + sharing are native modules — a fresh `npx expo run:android`
+        // is required after adding them, or generation can't run.
+        `${msg}\n\nIf this is the first run after adding PDF support, rebuild the app (expo run:android).`,
+      )
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!id) {
+      setLoading(false)
+      return
+    }
+    async function load() {
+      const [n] = await db.select().from(schema.creditDebitNote).where(eq(schema.creditDebitNote.id, id)).limit(1)
+      if (!n) {
+        setLoading(false)
+        return
+      }
+      setNote(n)
+      const [c] = await db.select({ name: schema.customer.name }).from(schema.customer).where(eq(schema.customer.id, n.customerId)).limit(1)
+      setCustomerName(c?.name ?? 'Unknown')
+      if (n.referenceInvoiceId) {
+        const [inv] = await db.select({ num: schema.salesInvoice.invoiceNumber }).from(schema.salesInvoice).where(eq(schema.salesInvoice.id, n.referenceInvoiceId)).limit(1)
+        setRefInvoiceNumber(inv?.num ?? null)
+      }
+      const its = await db.select().from(schema.creditDebitNoteItem).where(eq(schema.creditDebitNoteItem.creditDebitNoteId, id))
+      const items = await db.select().from(schema.item)
+      const nameById = new Map(items.map((i) => [i.id, i.name]))
+      setLines(its.map((it) => ({ ...it, name: nameById.get(it.itemId) ?? 'Item' })))
+      setLoading(false)
+    }
+    load()
+  }, [id, db])
+
+  function handleDelete() {
+    if (!id) return
+    Alert.alert(
+      'Delete note',
+      'This reverses the customer balance (and any linked invoice) before deleting. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Reverse-then-delete: undo the balance effect this note applied,
+              // then remove items + note. The reverse sign is the OPPOSITE of
+              // what create applied (create used -1 for CREDIT, +1 for DEBIT).
+              await db.transaction(async (tx) => {
+                const [existing] = await tx.select().from(schema.creditDebitNote).where(eq(schema.creditDebitNote.id, id)).limit(1)
+                if (!existing) throw new Error('Note not found')
+                const reverseSign = existing.type === 'CREDIT_NOTE' ? 1 : -1
+                await tx
+                  .update(schema.customer)
+                  .set({ currentBalance: sql`${schema.customer.currentBalance} + ${reverseSign * existing.totalAmount}` })
+                  .where(eq(schema.customer.id, existing.customerId))
+                if (existing.referenceInvoiceId) {
+                  await tx
+                    .update(schema.salesInvoice)
+                    .set({ balanceDue: sql`${schema.salesInvoice.balanceDue} + ${reverseSign * existing.totalAmount}` })
+                    .where(eq(schema.salesInvoice.id, existing.referenceInvoiceId))
+                }
+                await tx.delete(schema.creditDebitNoteItem).where(eq(schema.creditDebitNoteItem.creditDebitNoteId, id))
+                await tx.delete(schema.creditDebitNote).where(eq(schema.creditDebitNote.id, id))
+              })
+              router.back()
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete')
+            }
+          },
+        },
+      ],
+    )
+  }
+
+  if (loading) {
+    return (
+      <ThemedView style={styles.container}>
+        <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!note} />
+        <ThemedText style={styles.centered}>Loading…</ThemedText>
+      </ThemedView>
+    )
+  }
+  if (!note) {
+    return (
+      <ThemedView style={styles.container}>
+        <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={false} />
+        <View style={styles.centeredBlock}>
+          <ThemedText type="subtitle">Note not found</ThemedText>
+        </View>
+      </ThemedView>
+    )
+  }
+
+  const typeLabel = note.type === 'CREDIT_NOTE' ? 'Credit Note' : 'Debit Note'
+
+  return (
+    <ThemedView style={styles.container}>
+      <Header onBack={() => router.back()} onEdit={onEdit} editEnabled />
+      <ScrollView contentContainerStyle={styles.content}>
+        <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
+          <View style={styles.heroLeft}>
+            <ThemedText type="title">{note.noteNumber}</ThemedText>
+            <ThemedText style={styles.muted}>{customerName}</ThemedText>
+            <ThemedText style={styles.muted}>{typeLabel}</ThemedText>
+          </View>
+          <View style={styles.heroRight}>
+            <ThemedText type="defaultSemiBold" style={styles.heroTotal}>{formatCurrency(note.totalAmount)}</ThemedText>
+          </View>
+        </ThemedView>
+
+        <Pressable
+          style={[styles.shareButton, sharing && styles.shareButtonDisabled]}
+          onPress={handleSharePdf}
+          disabled={sharing}
+        >
+          {sharing ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <ThemedText style={styles.shareButtonText}>Share PDF</ThemedText>
+          )}
+        </Pressable>
+
+        <Section title="Note">
+          <Row label="Type" value={typeLabel} />
+          <Row label="Date" value={formatDate(note.noteDate)} />
+          <Row label="Status" value={note.status} />
+          {refInvoiceNumber ? <Row label="Reference Invoice" value={refInvoiceNumber} /> : null}
+          {note.reason ? <Row label="Reason" value={note.reason} /> : null}
+        </Section>
+
+        <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.itemsCard}>
+          <ThemedText type="defaultSemiBold" style={styles.itemsTitle}>Items ({lines.length})</ThemedText>
+          {lines.map((l, idx) => (
+            <View key={l.id} style={[styles.itemRow, idx > 0 && styles.itemRowDivider]}>
+              <View style={styles.itemLeft}>
+                <ThemedText numberOfLines={2}>{l.name}</ThemedText>
+                <ThemedText style={styles.itemMeta}>{l.quantity} × {formatCurrency(l.rate)}{l.discount ? ` − ${formatCurrency(l.discount)}` : ''} · {l.taxRate}% tax</ThemedText>
+              </View>
+              <ThemedText type="defaultSemiBold">{formatCurrency(l.total)}</ThemedText>
+            </View>
+          ))}
+        </ThemedView>
+
+        <Section title="Totals">
+          <Row label="Subtotal" value={formatCurrency(note.subtotal)} />
+          <Row label="Tax" value={formatCurrency(note.taxAmount)} />
+          <Row label="Total" value={formatCurrency(note.totalAmount)} />
+        </Section>
+
+        {note.notes ? <Section title="Notes"><ThemedText style={styles.notesText}>{note.notes}</ThemedText></Section> : null}
+
+        <Pressable style={styles.deleteButton} onPress={handleDelete}>
+          <ThemedText style={styles.deleteButtonText}>Delete note</ThemedText>
+        </Pressable>
+      </ScrollView>
+      {/* Off-screen pdfmake host — boots in the background, generates on demand. */}
+      <HiddenPdfWebView ref={pdfRef} />
+    </ThemedView>
+  )
+}
+
+function Header({ onBack, onEdit, editEnabled }: { onBack: () => void; onEdit: () => void; editEnabled: boolean }) {
+  return (
+    <View style={styles.header}>
+      <Pressable onPress={onBack} style={styles.headerButton} hitSlop={8}><ThemedText style={styles.headerArrow}>←</ThemedText></Pressable>
+      <ThemedText type="defaultSemiBold" style={styles.headerTitle}>Note</ThemedText>
+      <Pressable onPress={onEdit} disabled={!editEnabled} style={[styles.headerButton, !editEnabled && styles.headerButtonDisabled]}>
+        <ThemedText style={styles.headerButtonText}>Edit</ThemedText>
+      </Pressable>
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, paddingTop: 60 },
+  header: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 12, gap: 8 },
+  headerButton: { paddingVertical: 6, paddingHorizontal: 10 },
+  headerButtonDisabled: { opacity: 0.3 },
+  headerButtonText: { fontSize: 16 },
+  headerArrow: { fontSize: 28, fontWeight: '500', lineHeight: 30 },
+  headerTitle: { flex: 1, textAlign: 'center' },
+  content: { paddingHorizontal: 16, paddingBottom: 32, gap: 16 },
+  centered: { textAlign: 'center', marginTop: 64 },
+  centeredBlock: { alignItems: 'center', marginTop: 64, gap: 8, paddingHorizontal: 32 },
+  hero: { flexDirection: 'row', alignItems: 'flex-start', padding: 16, borderRadius: 12, gap: 12 },
+  heroLeft: { flex: 1, gap: 4 },
+  heroRight: { alignItems: 'flex-end' },
+  heroTotal: { fontSize: 22 },
+  muted: { opacity: 0.6, fontSize: 13 },
+  itemsCard: { borderRadius: 12, padding: 14, gap: 4 },
+  itemsTitle: { marginBottom: 8 },
+  itemRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, gap: 12 },
+  itemRowDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#d1d5db' },
+  itemLeft: { flex: 1, gap: 2 },
+  itemMeta: { fontSize: 12, opacity: 0.6 },
+  notesText: { fontSize: 14, lineHeight: 20, paddingVertical: 4 },
+  deleteButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: '#FF3B30' },
+  deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  shareButton: {
+    backgroundColor: '#0a7ea4',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  shareButtonDisabled: { opacity: 0.6 },
+  shareButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+})
