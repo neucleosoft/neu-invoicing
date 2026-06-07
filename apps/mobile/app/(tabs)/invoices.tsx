@@ -76,6 +76,10 @@ export default function InvoicesScreen() {
         <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
           <ThemedText style={styles.countText}>{rows.length}</ThemedText>
         </ThemedView>
+        <View style={{ flex: 1 }} />
+        <Pressable onPress={() => router.push('/sales')} hitSlop={8}>
+          <ThemedText style={styles.docsLink}>Documents ▸</ThemedText>
+        </Pressable>
       </View>
 
       <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.searchWrap}>
@@ -179,6 +183,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 60, paddingHorizontal: 16 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
   countChip: { paddingHorizontal: 10, paddingVertical: 2, borderRadius: 12 },
+  docsLink: { color: '#007AFF', fontWeight: '600', fontSize: 14 },
   countText: { fontSize: 12, fontWeight: '500', opacity: 0.7 },
   searchWrap: { borderRadius: 10, marginBottom: 12 },
   searchInput: { paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: '#111827' },
