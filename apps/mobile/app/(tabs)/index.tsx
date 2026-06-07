@@ -142,9 +142,9 @@ export default function DashboardScreen() {
             onPress={() => router.push('/item/newItem')}
           />
           <ActionTile
-            iconName="cube.fill"
-            label="All Items"
-            onPress={() => router.push('/(tabs)/items')}
+            iconName="chart.line.uptrend.xyaxis"
+            label="Reports"
+            onPress={() => router.push('/reports' as never)}
           />
         </View>
       </View>
