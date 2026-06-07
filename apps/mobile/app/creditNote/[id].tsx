@@ -1,9 +1,9 @@
 import { eq, sql } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { useEffect, useState } from 'react'
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
-import { HiddenPdfWebView, type HiddenPdfWebViewHandle } from '@/components/HiddenPdfWebView'
+import { PdfActions } from '@/components/PdfActions'
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
@@ -11,7 +11,6 @@ import { schema, useDb } from '@/db'
 import { buildCreditNotePdfPayload } from '@/utils/creditNotePdf'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
-import { saveAndSharePdf } from '@/utils/pdfShare'
 
 type Note = typeof schema.creditDebitNote.$inferSelect
 type NoteItem = typeof schema.creditDebitNoteItem.$inferSelect
@@ -26,32 +25,6 @@ export default function CreditNoteDetailScreen() {
   const [refInvoiceNumber, setRefInvoiceNumber] = useState<string | null>(null)
   const [lines, setLines] = useState<(NoteItem & { name: string })[]>([])
   const [loading, setLoading] = useState(true)
-  const pdfRef = useRef<HiddenPdfWebViewHandle>(null)
-  const [sharing, setSharing] = useState(false)
-
-  async function handleSharePdf() {
-    if (!id || sharing) return
-    setSharing(true)
-    try {
-      const payload = await buildCreditNotePdfPayload(db, id)
-      if (!payload) {
-        Alert.alert('Error', 'Could not load this note.')
-        return
-      }
-      const base64 = await pdfRef.current!.generate(payload.builder, payload.data)
-      await saveAndSharePdf(base64, payload.filename)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to generate PDF'
-      Alert.alert(
-        'PDF failed',
-        // The WebView + sharing are native modules — a fresh `npx expo run:android`
-        // is required after adding them, or generation can't run.
-        `${msg}\n\nIf this is the first run after adding PDF support, rebuild the app (expo run:android).`,
-      )
-    } finally {
-      setSharing(false)
-    }
-  }
 
   useEffect(() => {
     if (!id) {
@@ -158,17 +131,7 @@ export default function CreditNoteDetailScreen() {
           </View>
         </ThemedView>
 
-        <Pressable
-          style={[styles.shareButton, sharing && styles.shareButtonDisabled]}
-          onPress={handleSharePdf}
-          disabled={sharing}
-        >
-          {sharing ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <ThemedText style={styles.shareButtonText}>Share PDF</ThemedText>
-          )}
-        </Pressable>
+        <PdfActions buildPayload={() => buildCreditNotePdfPayload(db, id)} />
 
         <Section title="Note">
           <Row label="Type" value={typeLabel} />
@@ -203,8 +166,6 @@ export default function CreditNoteDetailScreen() {
           <ThemedText style={styles.deleteButtonText}>Delete note</ThemedText>
         </Pressable>
       </ScrollView>
-      {/* Off-screen pdfmake host — boots in the background, generates on demand. */}
-      <HiddenPdfWebView ref={pdfRef} />
     </ThemedView>
   )
 }
@@ -246,14 +207,4 @@ const styles = StyleSheet.create({
   notesText: { fontSize: 14, lineHeight: 20, paddingVertical: 4 },
   deleteButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: '#FF3B30' },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
-  shareButton: {
-    backgroundColor: '#0a7ea4',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
-  },
-  shareButtonDisabled: { opacity: 0.6 },
-  shareButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 })

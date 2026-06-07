@@ -1,9 +1,9 @@
 import { eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
+import { useEffect, useState } from 'react'
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 
-import { HiddenPdfWebView, type HiddenPdfWebViewHandle } from '@/components/HiddenPdfWebView'
+import { PdfActions } from '@/components/PdfActions'
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
@@ -11,7 +11,6 @@ import { schema, useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
 import { buildPurchaseOrderPdfPayload } from '@/utils/purchaseOrderPdf'
-import { saveAndSharePdf } from '@/utils/pdfShare'
 import { deletePurchaseOrder, markPoReceived } from '@/utils/poSave'
 
 type PurchaseOrder = typeof schema.purchaseOrder.$inferSelect
@@ -39,33 +38,6 @@ export default function PurchaseOrderDetailScreen() {
   const [showReceive, setShowReceive] = useState(false)
   const [received, setReceived] = useState<Record<string, string>>({})
   const [savingReceive, setSavingReceive] = useState(false)
-
-  const pdfRef = useRef<HiddenPdfWebViewHandle>(null)
-  const [sharing, setSharing] = useState(false)
-
-  async function handleSharePdf() {
-    if (!id || sharing) return
-    setSharing(true)
-    try {
-      const payload = await buildPurchaseOrderPdfPayload(db, id)
-      if (!payload) {
-        Alert.alert('Error', 'Could not load this purchase order.')
-        return
-      }
-      const base64 = await pdfRef.current!.generate(payload.builder, payload.data)
-      await saveAndSharePdf(base64, payload.filename)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to generate PDF'
-      Alert.alert(
-        'PDF failed',
-        // The WebView + sharing are native modules — a fresh `npx expo run:android`
-        // is required after adding them, or generation can't run.
-        `${msg}\n\nIf this is the first run after adding PDF support, rebuild the app (expo run:android).`,
-      )
-    } finally {
-      setSharing(false)
-    }
-  }
 
   const load = async () => {
     if (!id) { setLoading(false); return }
@@ -158,23 +130,10 @@ export default function PurchaseOrderDetailScreen() {
 
         {po.notes ? <Section title="Notes"><ThemedText style={styles.notesText}>{po.notes}</ThemedText></Section> : null}
 
-        <Pressable
-          style={[styles.shareButton, sharing && styles.shareButtonDisabled]}
-          onPress={handleSharePdf}
-          disabled={sharing}
-        >
-          {sharing ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <ThemedText style={styles.shareButtonText}>Share PDF</ThemedText>
-          )}
-        </Pressable>
+        <PdfActions buildPayload={() => buildPurchaseOrderPdfPayload(db, id)} />
         <Pressable style={styles.receiveButton} onPress={openReceive}><ThemedText style={styles.receiveButtonText}>Mark Received</ThemedText></Pressable>
         <Pressable style={styles.deleteButton} onPress={handleDelete}><ThemedText style={styles.deleteButtonText}>Delete order</ThemedText></Pressable>
       </ScrollView>
-
-      {/* Off-screen pdfmake host — boots in the background, generates on demand. */}
-      <HiddenPdfWebView ref={pdfRef} />
 
       <Modal visible={showReceive} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
@@ -242,17 +201,6 @@ const styles = StyleSheet.create({
   itemLeft: { flex: 1, gap: 2 },
   itemMeta: { fontSize: 12, opacity: 0.6 },
   notesText: { fontSize: 14, lineHeight: 20, paddingVertical: 4 },
-  shareButton: {
-    backgroundColor: '#0a7ea4',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
-    marginTop: 8,
-  },
-  shareButtonDisabled: { opacity: 0.6 },
-  shareButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   receiveButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, backgroundColor: '#007AFF' },
   receiveButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
   deleteButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: '#FF3B30' },

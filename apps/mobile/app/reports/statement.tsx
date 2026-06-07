@@ -1,8 +1,7 @@
 import { asc } from 'drizzle-orm'
 import { router, useFocusEffect } from 'expo-router'
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useState } from 'react'
 import {
-  ActivityIndicator,
   Alert,
   FlatList,
   Modal,
@@ -13,8 +12,8 @@ import {
   View,
 } from 'react-native'
 
-import { HiddenPdfWebView, type HiddenPdfWebViewHandle } from '@/components/HiddenPdfWebView'
 import LedgerView from '@/components/LedgerView'
+import { PdfActions } from '@/components/PdfActions'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
@@ -22,7 +21,6 @@ import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
 import { buildCustomerLedger, sliceToDateRange, type LedgerData } from '@/utils/ledger'
 import { buildStatementPdfPayload } from '@/utils/statementPdf'
-import { saveAndSharePdf } from '@/utils/pdfShare'
 
 // Customer Statement — a customer ledger constrained to a [from, to] date range.
 // Transactions before `from` fold into the carried-forward opening balance; only
@@ -57,8 +55,6 @@ export default function CustomerStatementScreen() {
   const [toDate, setToDate] = useState(todayIso())
   const [showPicker, setShowPicker] = useState(false)
   const [loading, setLoading] = useState(false)
-  const pdfRef = useRef<HiddenPdfWebViewHandle>(null)
-  const [sharing, setSharing] = useState(false)
 
   // The generated result (with the customer + period it was generated for, so
   // editing the filters afterwards doesn't relabel a stale result). The party
@@ -125,32 +121,6 @@ export default function CustomerStatementScreen() {
     }
   }
 
-  async function handleSharePdf() {
-    if (!result || sharing) return
-    setSharing(true)
-    try {
-      const payload = await buildStatementPdfPayload(db, {
-        ledger: result.data,
-        party: result.party,
-        title: 'CUSTOMER STATEMENT',
-        fromDate: result.from,
-        toDate: result.to,
-      })
-      const base64 = await pdfRef.current!.generate(payload.builder, payload.data)
-      await saveAndSharePdf(base64, payload.filename)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to generate PDF'
-      Alert.alert(
-        'PDF failed',
-        // The WebView + sharing are native modules — a fresh `npx expo run:android`
-        // is required after adding them, or generation can't run.
-        `${msg}\n\nIf this is the first run after adding PDF support, rebuild the app (expo run:android).`,
-      )
-    } finally {
-      setSharing(false)
-    }
-  }
-
   return (
     <ThemedView style={styles.container}>
       <View style={styles.header}>
@@ -213,17 +183,17 @@ export default function CustomerStatementScreen() {
                 {formatDate(result.from)} — {formatDate(result.to)}
               </ThemedText>
             </View>
-            <Pressable
-              style={[styles.shareButton, sharing && styles.shareButtonDisabled]}
-              onPress={handleSharePdf}
-              disabled={sharing}
-            >
-              {sharing ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <ThemedText style={styles.shareButtonText}>Share PDF</ThemedText>
-              )}
-            </Pressable>
+            <PdfActions
+              buildPayload={() =>
+                buildStatementPdfPayload(db, {
+                  ledger: result.data,
+                  party: result.party,
+                  title: 'CUSTOMER STATEMENT',
+                  fromDate: result.from,
+                  toDate: result.to,
+                })
+              }
+            />
             <LedgerView
               data={result.data}
               summary="cards"
@@ -265,8 +235,6 @@ export default function CustomerStatementScreen() {
           </ThemedView>
         </View>
       </Modal>
-      {/* Off-screen pdfmake host — boots in the background, generates on demand. */}
-      <HiddenPdfWebView ref={pdfRef} />
     </ThemedView>
   )
 }
@@ -333,14 +301,4 @@ const styles = StyleSheet.create({
     borderTopColor: '#ccc',
   },
   modalCloseText: { color: '#FF3B30', fontSize: 16 },
-  shareButton: {
-    backgroundColor: '#0a7ea4',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
-  },
-  shareButtonDisabled: { opacity: 0.6 },
-  shareButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 })

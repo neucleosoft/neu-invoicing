@@ -1,16 +1,15 @@
 import { eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { useEffect, useState } from 'react'
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
-import { HiddenPdfWebView, type HiddenPdfWebViewHandle } from '@/components/HiddenPdfWebView'
 import LedgerView from '@/components/LedgerView'
+import { PdfActions } from '@/components/PdfActions'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 import { buildCustomerLedger, type LedgerData } from '@/utils/ledger'
 import { buildStatementPdfPayload } from '@/utils/statementPdf'
-import { saveAndSharePdf } from '@/utils/pdfShare'
 
 // Customer Ledger — the full running account for one customer (all-time, no date
 // filter; the date-bounded variant is the Customer Statement). Mirrors desktop
@@ -27,38 +26,6 @@ export default function CustomerLedgerScreen() {
   const [ledger, setLedger] = useState<LedgerData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const pdfRef = useRef<HiddenPdfWebViewHandle>(null)
-  const [sharing, setSharing] = useState(false)
-
-  async function handleSharePdf() {
-    if (!ledger || !customer || sharing) return
-    setSharing(true)
-    try {
-      const payload = await buildStatementPdfPayload(db, {
-        ledger,
-        party: {
-          name: customer.name,
-          email: customer.email ?? undefined,
-          phone: customer.phone ?? undefined,
-          billingAddress: customer.billingAddress ?? undefined,
-          taxId: customer.taxId ?? undefined,
-        },
-        title: 'CUSTOMER LEDGER',
-      })
-      const base64 = await pdfRef.current!.generate(payload.builder, payload.data)
-      await saveAndSharePdf(base64, payload.filename)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to generate PDF'
-      Alert.alert(
-        'PDF failed',
-        // The WebView + sharing are native modules — a fresh `npx expo run:android`
-        // is required after adding them, or generation can't run.
-        `${msg}\n\nIf this is the first run after adding PDF support, rebuild the app (expo run:android).`,
-      )
-    } finally {
-      setSharing(false)
-    }
-  }
 
   useEffect(() => {
     if (!id) {
@@ -116,17 +83,24 @@ export default function CustomerLedgerScreen() {
         </View>
       ) : ledger ? (
         <ScrollView contentContainerStyle={styles.content}>
-          <Pressable
-            style={[styles.shareButton, sharing && styles.shareButtonDisabled]}
-            onPress={handleSharePdf}
-            disabled={sharing}
-          >
-            {sharing ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <ThemedText style={styles.shareButtonText}>Share PDF</ThemedText>
-            )}
-          </Pressable>
+          <PdfActions
+            disabled={!ledger || !customer}
+            buildPayload={async () =>
+              ledger && customer
+                ? buildStatementPdfPayload(db, {
+                    ledger,
+                    party: {
+                      name: customer.name,
+                      email: customer.email ?? undefined,
+                      phone: customer.phone ?? undefined,
+                      billingAddress: customer.billingAddress ?? undefined,
+                      taxId: customer.taxId ?? undefined,
+                    },
+                    title: 'CUSTOMER LEDGER',
+                  })
+                : null
+            }
+          />
           <LedgerView
             data={ledger}
             summary="balance"
@@ -136,8 +110,6 @@ export default function CustomerLedgerScreen() {
           />
         </ScrollView>
       ) : null}
-      {/* Off-screen pdfmake host — boots in the background, generates on demand. */}
-      <HiddenPdfWebView ref={pdfRef} />
     </ThemedView>
   )
 }
@@ -160,15 +132,4 @@ const styles = StyleSheet.create({
   errorText: { color: '#dc2626' },
   centeredBlock: { alignItems: 'center', marginTop: 64, gap: 8, paddingHorizontal: 32 },
   muted: { opacity: 0.6, textAlign: 'center' },
-  shareButton: {
-    backgroundColor: '#0a7ea4',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
-    marginBottom: 16,
-  },
-  shareButtonDisabled: { opacity: 0.6 },
-  shareButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 })
