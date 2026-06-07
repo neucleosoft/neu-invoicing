@@ -79,7 +79,10 @@ function RootLayoutInner() {
   useEffect(() => {
     if (loading) return;
     const inLoginRoute = segments[0] === 'login';
-    const inCompanySetup = segments[0] === 'company';
+    // Specifically the SETUP screen, NOT the whole company/ folder. The edit
+    // screen (company/edit) also lives under `company`, and conflating them was
+    // bouncing a user who tapped "Edit company profile" straight back to home.
+    const inCompanySetup = segments[0] === 'company' && segments[1] === 'setup';
 
     if (!user && !inLoginRoute) {
       router.replace('/login');
@@ -94,7 +97,8 @@ function RootLayoutInner() {
     if (user && hasCompany === false && !inCompanySetup) {
       router.replace('/company/setup');
     } else if (user && hasCompany === true && inCompanySetup) {
-      // Company got created — leave the setup screen.
+      // Company got created → leave the SETUP screen for the app. (Editing an
+      // existing company is on company/edit, which this no longer matches.)
       router.replace('/(tabs)');
     }
   }, [user, segments, loading, hasCompany, router]);
