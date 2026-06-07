@@ -70,49 +70,57 @@ export const emptyCompanyForm: CompanyFormState = {
   signaturePath: '',
 }
 
-// Pick an image and return it as a base64 data-URI. Lazy-loads the native
-// picker (same pattern as the bill scanner) so the module isn't required at
-// screen-load on a binary built before expo-image-picker was added.
-async function pickImageAsDataUri(): Promise<string | null> {
-  let Picker: typeof import('expo-image-picker')
+// Guess an image mime from a filename or uri extension.
+function mimeFromName(name?: string | null): string | null {
+  if (!name) return null
+  const l = name.toLowerCase()
+  if (l.endsWith('.png')) return 'image/png'
+  if (/\.jpe?g(\?|$)/.test(l)) return 'image/jpeg'
+  if (l.endsWith('.webp')) return 'image/webp'
+  return null
+}
+
+// Read a local file's ORIGINAL bytes as a base64 data-URI. Reading the raw file
+// (rather than a picker's re-encoded base64) keeps the original format — so a
+// transparent PNG stays a transparent PNG instead of being flattened to JPEG.
+async function readAsDataUri(uri: string, mime: string): Promise<string | null> {
   try {
-    Picker = await import('expo-image-picker')
+    const FS = await import('expo-file-system/legacy')
+    const base64 = await FS.readAsStringAsync(uri, { encoding: FS.EncodingType.Base64 })
+    return `data:${mime};base64,${base64}`
   } catch {
-    Alert.alert(
-      'Rebuild needed',
-      'Picking an image needs a fresh app build to add the image module. Run "npx expo run:android" once.',
-    )
     return null
   }
-  // The JS module can load even when the NATIVE module isn't in this binary
-  // (e.g. expo-image-picker was added after the last native build) — in that
-  // case import() resolves but the functions are undefined. Detect that and
-  // show the rebuild message instead of crashing on an undefined call.
-  if (typeof Picker.requestMediaLibraryPermissionsAsync !== 'function') {
-    Alert.alert(
-      'Rebuild needed',
-      'The image picker isn’t in this build yet. Run "npx expo run:android" once, then logo/signature picking will work. (All other fields work now.)',
-    )
+}
+
+// Pick a logo / signature and return it as a base64 data-URI. Opens the device
+// FILE browser (Recents / Downloads / Drive / gallery) via the document picker —
+// a logo is usually a PNG file, and this reaches it wherever it lives. Reads the
+// ORIGINAL bytes so the PNG (and its transparency) survives untouched. Native
+// module → guarded so it degrades to a clear message on an older binary.
+async function pickImageAsDataUri(): Promise<string | null> {
+  let DocPicker: typeof import('expo-document-picker')
+  try {
+    DocPicker = await import('expo-document-picker')
+  } catch {
+    Alert.alert('Rebuild needed', 'Browsing files needs a fresh app build (EAS / expo run:android) to add the file-picker module.')
     return null
   }
-  const perm = await Picker.requestMediaLibraryPermissionsAsync()
-  if (!perm.granted) {
-    Alert.alert('Permission needed', 'Allow photo access to pick a logo or signature.')
+  if (typeof DocPicker.getDocumentAsync !== 'function') {
+    Alert.alert('Rebuild needed', 'The file picker isn’t in this build yet. Rebuild the app (EAS / expo run:android) once.')
     return null
   }
-  const result = await Picker.launchImageLibraryAsync({
-    mediaTypes: ['images'],
-    base64: true,
-    quality: 0.8,
+  const res = await DocPicker.getDocumentAsync({
+    type: ['image/png', 'image/jpeg', 'image/webp'],
+    copyToCacheDirectory: true, // copy SAF content:// → a readable file:// in cache
+    multiple: false,
   })
-  if (result.canceled || !result.assets?.length) return null
-  const asset = result.assets[0]
-  if (!asset.base64) {
-    Alert.alert('Error', 'Could not read the image. Try another.')
-    return null
-  }
-  const mime = asset.mimeType || 'image/jpeg'
-  return `data:${mime};base64,${asset.base64}`
+  if (res.canceled || !res.assets?.length) return null
+  const asset = res.assets[0]
+  const mime = asset.mimeType || mimeFromName(asset.name) || 'image/png'
+  const data = await readAsDataUri(asset.uri, mime)
+  if (!data) Alert.alert('Error', 'Could not read that file. Try another.')
+  return data
 }
 
 export function CompanyForm({
