@@ -1,15 +1,18 @@
 import { eq } from 'drizzle-orm'
 import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { useEffect, useRef, useState } from 'react'
+import { ActivityIndicator, Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
+import { HiddenPdfWebView, type HiddenPdfWebViewHandle } from '@/components/HiddenPdfWebView'
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
+import { buildPurchaseBillPdfPayload } from '@/utils/purchaseBillPdf'
+import { saveAndSharePdf } from '@/utils/pdfShare'
 import { deletePurchaseBill } from '@/utils/purchaseSave'
 
 type PurchaseBill = typeof schema.purchaseBill.$inferSelect
@@ -35,6 +38,32 @@ export default function PurchaseDetailScreen() {
   // Data URI of the attached bill photo, built once from the stored blob.
   const [photoUri, setPhotoUri] = useState<string | null>(null)
   const [showPhoto, setShowPhoto] = useState(false)
+  const pdfRef = useRef<HiddenPdfWebViewHandle>(null)
+  const [sharing, setSharing] = useState(false)
+
+  async function handleSharePdf() {
+    if (!id || sharing) return
+    setSharing(true)
+    try {
+      const payload = await buildPurchaseBillPdfPayload(db, id)
+      if (!payload) {
+        Alert.alert('Error', 'Could not load this purchase bill.')
+        return
+      }
+      const base64 = await pdfRef.current!.generate(payload.builder, payload.data)
+      await saveAndSharePdf(base64, payload.filename)
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Failed to generate PDF'
+      Alert.alert(
+        'PDF failed',
+        // The WebView + sharing are native modules — a fresh `npx expo run:android`
+        // is required after adding them, or generation can't run.
+        `${msg}\n\nIf this is the first run after adding PDF support, rebuild the app (expo run:android).`,
+      )
+    } finally {
+      setSharing(false)
+    }
+  }
 
   useEffect(() => {
     if (!id) {
@@ -149,6 +178,18 @@ export default function PurchaseDetailScreen() {
           </View>
         </ThemedView>
 
+        <Pressable
+          style={[styles.shareButton, sharing && styles.shareButtonDisabled]}
+          onPress={handleSharePdf}
+          disabled={sharing}
+        >
+          {sharing ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <ThemedText style={styles.shareButtonText}>Share PDF</ThemedText>
+          )}
+        </Pressable>
+
         <Section title="Bill">
           <Row label="Bill Date" value={formatDate(bill.billDate)} />
           <Row label="Supplier Inv. #" value={bill.supplierInvoiceNumber || '—'} />
@@ -208,6 +249,8 @@ export default function PurchaseDetailScreen() {
           </Pressable>
         </Modal>
       ) : null}
+      {/* Off-screen pdfmake host — boots in the background, generates on demand. */}
+      <HiddenPdfWebView ref={pdfRef} />
     </ThemedView>
   )
 }
@@ -286,6 +329,16 @@ const styles = StyleSheet.create({
   itemLeft: { flex: 1, gap: 2 },
   itemMeta: { fontSize: 12, opacity: 0.6 },
   notesText: { fontSize: 14, lineHeight: 20, paddingVertical: 4 },
+  shareButton: {
+    backgroundColor: '#0a7ea4',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 48,
+  },
+  shareButtonDisabled: { opacity: 0.6 },
+  shareButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   photoButton: {
     paddingVertical: 14,
     borderRadius: 8,

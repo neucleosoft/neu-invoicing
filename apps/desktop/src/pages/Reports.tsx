@@ -149,14 +149,14 @@ const Reports = () => {
             ) : (
               <div className="space-y-4">
                 <h3 className="text-lg font-semibold">Report Results</h3>
-                {activeReport === 'sales' && reportData && (
+                {activeReport === 'sales' && reportData?.totals && (
                   <div className="space-y-2">
-                    <p><strong>Total Sales:</strong> {formatCurrency(reportData.totalSales || 0)}</p>
-                    <p><strong>Total Tax:</strong> {formatCurrency(reportData.totalTax || 0)}</p>
-                    <p><strong>Invoice Count:</strong> {reportData.invoiceCount || 0}</p>
+                    <p><strong>Total Sales:</strong> {formatCurrency(reportData.totals.totalAmount || 0)}</p>
+                    <p><strong>Total Tax:</strong> {formatCurrency(reportData.totals.taxAmount || 0)}</p>
+                    <p><strong>Invoice Count:</strong> {reportData.invoices?.length || 0}</p>
                   </div>
                 )}
-                {activeReport === 'stock' && Array.isArray(reportData) && (
+                {activeReport === 'stock' && Array.isArray(reportData?.items) && (
                   <div className="overflow-auto max-h-[calc(100vh-280px)]">
                     <table className="table w-full">
                       <thead>
@@ -168,7 +168,7 @@ const Reports = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {reportData.map((item: any, index: number) => (
+                        {reportData.items.map((item: any, index: number) => (
                           <tr key={item.id} className="border-t">
                             <td className="table-cell">{index + 1}</td>
                             <td className="table-cell">{item.name}</td>
@@ -180,7 +180,7 @@ const Reports = () => {
                     </table>
                   </div>
                 )}
-                {activeReport === 'receivables' && Array.isArray(reportData) && (
+                {activeReport === 'receivables' && Array.isArray(reportData?.parties) && (
                   <div className="overflow-auto max-h-[calc(100vh-280px)]">
                     <table className="table w-full">
                       <thead>
@@ -191,7 +191,7 @@ const Reports = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {reportData.map((party: any, index: number) => (
+                        {reportData.parties.map((party: any, index: number) => (
                           <tr key={party.id} className="border-t">
                             <td className="table-cell">{index + 1}</td>
                             <td className="table-cell">{party.name}</td>
@@ -202,7 +202,7 @@ const Reports = () => {
                     </table>
                   </div>
                 )}
-                {activeReport === 'payables' && Array.isArray(reportData) && (
+                {activeReport === 'payables' && Array.isArray(reportData?.parties) && (
                   <div className="overflow-auto max-h-[calc(100vh-280px)]">
                     <table className="table w-full">
                       <thead>
@@ -213,7 +213,7 @@ const Reports = () => {
                         </tr>
                       </thead>
                       <tbody>
-                        {reportData.map((party: any, index: number) => (
+                        {reportData.parties.map((party: any, index: number) => (
                           <tr key={party.id} className="border-t">
                             <td className="table-cell">{index + 1}</td>
                             <td className="table-cell">{party.name}</td>
@@ -226,9 +226,9 @@ const Reports = () => {
                 )}
                 {activeReport === 'tax' && reportData && (
                   <div className="space-y-2">
-                    <p><strong>Total Tax Collected:</strong> {formatCurrency(reportData.totalTaxCollected || 0)}</p>
-                    <p><strong>Total Tax Paid:</strong> {formatCurrency(reportData.totalTaxPaid || 0)}</p>
-                    <p><strong>Net Tax:</strong> {formatCurrency((reportData.totalTaxCollected - reportData.totalTaxPaid) || 0)}</p>
+                    <p><strong>Total Tax Collected:</strong> {formatCurrency(reportData.taxCollected || 0)}</p>
+                    <p><strong>Total Tax Paid:</strong> {formatCurrency(reportData.taxPaid || 0)}</p>
+                    <p><strong>Net Tax:</strong> {formatCurrency(reportData.netTax || 0)}</p>
                   </div>
                 )}
               </div>

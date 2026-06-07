@@ -162,6 +162,16 @@ export default function NewPurchaseScreen() {
       )
       return
     }
+    // The JS module can load even when the NATIVE module isn't in this binary
+    // (import() resolves but the functions are undefined). Catch that here so we
+    // show the rebuild message instead of crashing on an undefined call.
+    if (typeof Picker.launchCameraAsync !== 'function') {
+      Alert.alert(
+        'Rebuild needed',
+        'The camera module isn’t in this build yet. Run "npx expo run:android" once, then bill scanning will work. Manual entry works now.',
+      )
+      return
+    }
 
     try {
       // Permission first — Expo returns granted:false rather than throwing.

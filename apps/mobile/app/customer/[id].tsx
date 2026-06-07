@@ -139,6 +139,13 @@ export default function CustomerDetailScreen() {
           </View>
         </ThemedView>
 
+        <Pressable
+          style={styles.ledgerButton}
+          onPress={() => router.push({ pathname: '/ledger/customer/[id]', params: { id } })}
+        >
+          <ThemedText style={styles.ledgerButtonText}>View Ledger</ThemedText>
+        </Pressable>
+
         <Section title="Contact">
           <Row label="Phone" value={customer.phone || '—'} />
           <Row label="Email" value={customer.email || '—'} />
@@ -252,4 +259,12 @@ const styles = StyleSheet.create({
     borderColor: '#FF3B30',
   },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  ledgerButton: {
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#0a7ea4',
+  },
+  ledgerButtonText: { color: '#0a7ea4', fontSize: 16, fontWeight: '600' },
 })
