@@ -6,7 +6,7 @@ import { ThemedView } from '@/components/themed-view'
 import { useAuth } from '@/auth'
 
 export default function LoginScreen() {
-  const { signIn, loading } = useAuth()
+  const { signIn, enterOfflineMode, loading } = useAuth()
   const [signingIn, setSigningIn] = useState(false)
 
   async function handleSignIn() {
@@ -43,8 +43,17 @@ export default function LoginScreen() {
         </ThemedText>
       </Pressable>
 
+      <Pressable
+        style={styles.secondaryButton}
+        onPress={() => enterOfflineMode()}
+        disabled={signingIn}
+      >
+        <ThemedText style={styles.secondaryButtonText}>Use without an account</ThemedText>
+      </Pressable>
+
       <ThemedText style={styles.footer}>
-        We only use your Google account to identify you.
+        Signing in lets you back up to Google Drive later. You can use the app fully
+        offline — your data stays on this device.
       </ThemedText>
     </ThemedView>
   )
@@ -70,5 +79,12 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: { opacity: 0.5 },
   buttonText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  secondaryButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    minWidth: 240,
+    alignItems: 'center',
+  },
+  secondaryButtonText: { color: '#007AFF', fontSize: 15, fontWeight: '600' },
   footer: { fontSize: 12, opacity: 0.5, textAlign: 'center', marginTop: 24 },
 })

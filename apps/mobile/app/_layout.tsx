@@ -38,7 +38,7 @@ export default function RootLayout() {
 
 function RootLayoutInner() {
   const colorScheme = useColorScheme();
-  const { user, loading } = useAuth();
+  const { user, offlineMode, loading } = useAuth();
   const db = useDb();
   const segments = useSegments();
   const router = useRouter();
@@ -84,24 +84,28 @@ function RootLayoutInner() {
     // bouncing a user who tapped "Edit company profile" straight back to home.
     const inCompanySetup = segments[0] === 'company' && segments[1] === 'setup';
 
-    if (!user && !inLoginRoute) {
+    // Offline mode counts as "allowed in", same as desktop where offlineMode is
+    // accepted alongside a real Google session.
+    const authed = !!user || offlineMode;
+
+    if (!authed && !inLoginRoute) {
       router.replace('/login');
       return;
     }
-    if (user && inLoginRoute) {
+    if (authed && inLoginRoute) {
       router.replace('/(tabs)');
       return;
     }
     // Auth is settled and the user is in. Now gate on company — but only once
-    // the company check has resolved.
-    if (user && hasCompany === false && !inCompanySetup) {
+    // the company check has resolved. (Offline users still need a company too.)
+    if (authed && hasCompany === false && !inCompanySetup) {
       router.replace('/company/setup');
-    } else if (user && hasCompany === true && inCompanySetup) {
+    } else if (authed && hasCompany === true && inCompanySetup) {
       // Company got created → leave the SETUP screen for the app. (Editing an
       // existing company is on company/edit, which this no longer matches.)
       router.replace('/(tabs)');
     }
-  }, [user, segments, loading, hasCompany, router]);
+  }, [user, offlineMode, segments, loading, hasCompany, router]);
 
   if (loading) {
     return (
