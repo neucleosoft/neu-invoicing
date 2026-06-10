@@ -6,6 +6,19 @@ import { Suspense, useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 
+// useFonts from expo-font (runs on the app's React) — NOT from the Inter
+// package, whose 0.4.x build bundles its own React 18 and would trigger an
+// "Invalid hook call" against the app's React 19. We import only the font
+// assets (plain .ttf refs, no React) from @expo-google-fonts/inter.
+import { useFonts } from 'expo-font';
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  Inter_800ExtraBold,
+} from '@expo-google-fonts/inter';
+
 // Hermes has no global Buffer, but Drizzle's blob(buffer) column reads via
 // Buffer.from(). Any purchase bill carrying a scanned-image attachment would
 // crash on read without this. Install it once, before anything touches the db.
@@ -19,6 +32,24 @@ import { runMigrations, schema, useDb } from '@/db';
 import { AuthProvider, useAuth } from '@/auth';
 
 export default function RootLayout() {
+  // Hold the app until Inter is ready so text doesn't flash in the system font
+  // and then re-layout. Loads from a bundled asset (no native rebuild).
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Inter_800ExtraBold,
+  });
+
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
   return (
     <Suspense
       fallback={
@@ -38,7 +69,7 @@ export default function RootLayout() {
 
 function RootLayoutInner() {
   const colorScheme = useColorScheme();
-  const { user, loading } = useAuth();
+  const { user, offlineMode, loading } = useAuth();
   const db = useDb();
   const segments = useSegments();
   const router = useRouter();
@@ -84,24 +115,28 @@ function RootLayoutInner() {
     // bouncing a user who tapped "Edit company profile" straight back to home.
     const inCompanySetup = segments[0] === 'company' && segments[1] === 'setup';
 
-    if (!user && !inLoginRoute) {
+    // Offline mode counts as "allowed in", same as desktop where offlineMode is
+    // accepted alongside a real Google session.
+    const authed = !!user || offlineMode;
+
+    if (!authed && !inLoginRoute) {
       router.replace('/login');
       return;
     }
-    if (user && inLoginRoute) {
+    if (authed && inLoginRoute) {
       router.replace('/(tabs)');
       return;
     }
     // Auth is settled and the user is in. Now gate on company — but only once
-    // the company check has resolved.
-    if (user && hasCompany === false && !inCompanySetup) {
+    // the company check has resolved. (Offline users still need a company too.)
+    if (authed && hasCompany === false && !inCompanySetup) {
       router.replace('/company/setup');
-    } else if (user && hasCompany === true && inCompanySetup) {
+    } else if (authed && hasCompany === true && inCompanySetup) {
       // Company got created → leave the SETUP screen for the app. (Editing an
       // existing company is on company/edit, which this no longer matches.)
       router.replace('/(tabs)');
     }
-  }, [user, segments, loading, hasCompany, router]);
+  }, [user, offlineMode, segments, loading, hasCompany, router]);
 
   if (loading) {
     return (

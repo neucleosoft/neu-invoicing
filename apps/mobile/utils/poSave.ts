@@ -1,5 +1,7 @@
 import { eq } from 'drizzle-orm'
 
+import { computeGstValues } from '@neu/shared'
+
 import { schema, useDb } from '@/db'
 
 // Purchase Order save logic. A PO is an INTENT to buy — unlike a Purchase Bill,
@@ -70,25 +72,56 @@ async function resolveSupplierItem(tx: any, supplierId: string, line: PoLineInpu
   return created
 }
 
-function computeTotals(lines: { quantity: number; rate: number; discount: number; taxRate: number }[]) {
-  let subtotal = 0
-  let taxAmount = 0
-  for (const l of lines) {
-    const t = l.quantity * l.rate - l.discount
-    subtotal += t
-    taxAmount += (t * l.taxRate) / 100
-  }
-  return { subtotal, taxAmount, total: subtotal + taxAmount }
+// Compute the GST split the SAME way desktop / the bill flow does, via the shared
+// computeGstValues. For a PO the PARTY is the SUPPLIER (we're buying from them),
+// so place-of-supply / inter-state are driven by the supplier's state vs our own
+// company's state. HSN falls back to the resolved supplierItem.hsnCode (supplierItem
+// has no skuHsn). Returned totals (subtotal/taxAmount/totalAmount) are identical to
+// the previous flat computeTotals — discount reduces the taxable base before tax —
+// so PO header/line amounts are unchanged; we ADD the CGST/SGST/IGST/cess split.
+async function computePoGst(
+  tx: any,
+  supplierId: string,
+  resolved: { supplierItem: any; line: PoLineInput }[],
+) {
+  const [company] = await tx.select().from(schema.company).limit(1)
+  const [supplier] = await tx
+    .select()
+    .from(schema.supplier)
+    .where(eq(schema.supplier.id, supplierId))
+    .limit(1)
+  return computeGstValues({
+    company: company
+      ? { stateCode: company.stateCode, stateName: company.stateName }
+      : null,
+    party: {
+      taxId: supplier?.taxId,
+      stateCode: supplier?.stateCode,
+      stateName: supplier?.stateName,
+    },
+    items: resolved.map(({ supplierItem, line }) => ({
+      quantity: line.quantity,
+      rate: line.rate,
+      discount: line.discount,
+      taxRate: line.taxRate,
+      hsnCode: line.hsnCode,
+      catalogHsnCode: supplierItem?.hsnCode,
+    })),
+  })
 }
 
 export async function createPurchaseOrder(db: Db, header: PoHeaderInput, lines: PoLineInput[]): Promise<string> {
   return db.transaction(async (tx) => {
-    const resolved: { supplierItemId: string; line: PoLineInput }[] = []
+    // Resolve each line to its SupplierItem first — we keep the resolved catalog
+    // rows so we can source the HSN fallback (supplierItem.hsnCode) for the GST
+    // split below, exactly mirroring how newInvoice.tsx pulls item.hsnCode.
+    const resolved: { supplierItem: any; line: PoLineInput }[] = []
     for (const line of lines) {
       const si = await resolveSupplierItem(tx, header.supplierId, line)
-      resolved.push({ supplierItemId: si.id, line })
+      resolved.push({ supplierItem: si, line })
     }
-    const { subtotal, taxAmount, total } = computeTotals(lines)
+
+    const gst = await computePoGst(tx, header.supplierId, resolved)
 
     const [po] = await tx
       .insert(schema.purchaseOrder)
@@ -97,28 +130,42 @@ export async function createPurchaseOrder(db: Db, header: PoHeaderInput, lines: 
         orderDate: header.orderDate,
         expectedDate: header.expectedDate,
         supplierId: header.supplierId,
-        subtotal,
-        taxAmount,
-        totalAmount: total,
+        subtotal: gst.subtotal,
+        taxAmount: gst.taxAmount,
+        totalAmount: gst.totalAmount,
         status: 'DRAFT',
         notes: header.notes,
         termsConditions: header.termsConditions,
+        placeOfSupply: gst.placeOfSupply || null,
+        placeOfSupplyName: gst.placeOfSupplyName || null,
+        isInterState: gst.isInterState,
+        cgstAmount: gst.totalCgst,
+        sgstAmount: gst.totalSgst,
+        igstAmount: gst.totalIgst,
+        cessAmount: gst.totalCess,
       })
       .returning({ id: schema.purchaseOrder.id })
 
-    for (const { supplierItemId, line } of resolved) {
-      const taxable = line.quantity * line.rate - line.discount
+    for (let idx = 0; idx < resolved.length; idx++) {
+      const { supplierItem: si, line } = resolved[idx]
+      const g = gst.items[idx]
       await tx.insert(schema.purchaseOrderItem).values({
         purchaseOrderId: po.id,
-        supplierItemId,
+        supplierItemId: si.id,
         quantity: line.quantity,
         receivedQuantity: 0,
         rate: line.rate,
         discount: line.discount,
         taxRate: line.taxRate,
-        total: taxable + (taxable * line.taxRate) / 100,
-        hsnCode: line.hsnCode || null,
-        taxableAmount: taxable,
+        total: g.total,
+        hsnCode: g.hsnCode || null,
+        taxableAmount: g.taxableAmount,
+        cgstRate: g.cgstRate,
+        cgstAmount: g.cgstAmount,
+        sgstRate: g.sgstRate,
+        sgstAmount: g.sgstAmount,
+        igstRate: g.igstRate,
+        igstAmount: g.igstAmount,
       })
     }
     return po.id
@@ -134,12 +181,13 @@ export async function updatePurchaseOrder(db: Db, id: string, header: PoHeaderIn
       .limit(1)
     if (!existing) throw new Error('Purchase order not found')
 
-    const resolved: { supplierItemId: string; line: PoLineInput }[] = []
+    const resolved: { supplierItem: any; line: PoLineInput }[] = []
     for (const line of lines) {
       const si = await resolveSupplierItem(tx, header.supplierId, line)
-      resolved.push({ supplierItemId: si.id, line })
+      resolved.push({ supplierItem: si, line })
     }
-    const { subtotal, taxAmount, total } = computeTotals(lines)
+
+    const gst = await computePoGst(tx, header.supplierId, resolved)
 
     await tx.delete(schema.purchaseOrderItem).where(eq(schema.purchaseOrderItem.purchaseOrderId, id))
     await tx
@@ -148,26 +196,40 @@ export async function updatePurchaseOrder(db: Db, id: string, header: PoHeaderIn
         orderDate: header.orderDate,
         expectedDate: header.expectedDate,
         supplierId: header.supplierId,
-        subtotal,
-        taxAmount,
-        totalAmount: total,
+        subtotal: gst.subtotal,
+        taxAmount: gst.taxAmount,
+        totalAmount: gst.totalAmount,
         notes: header.notes,
         termsConditions: header.termsConditions,
+        placeOfSupply: gst.placeOfSupply || null,
+        placeOfSupplyName: gst.placeOfSupplyName || null,
+        isInterState: gst.isInterState,
+        cgstAmount: gst.totalCgst,
+        sgstAmount: gst.totalSgst,
+        igstAmount: gst.totalIgst,
+        cessAmount: gst.totalCess,
       })
       .where(eq(schema.purchaseOrder.id, id))
-    for (const { supplierItemId, line } of resolved) {
-      const taxable = line.quantity * line.rate - line.discount
+    for (let idx = 0; idx < resolved.length; idx++) {
+      const { supplierItem: si, line } = resolved[idx]
+      const g = gst.items[idx]
       await tx.insert(schema.purchaseOrderItem).values({
         purchaseOrderId: id,
-        supplierItemId,
+        supplierItemId: si.id,
         quantity: line.quantity,
         receivedQuantity: 0,
         rate: line.rate,
         discount: line.discount,
         taxRate: line.taxRate,
-        total: taxable + (taxable * line.taxRate) / 100,
-        hsnCode: line.hsnCode || null,
-        taxableAmount: taxable,
+        total: g.total,
+        hsnCode: g.hsnCode || null,
+        taxableAmount: g.taxableAmount,
+        cgstRate: g.cgstRate,
+        cgstAmount: g.cgstAmount,
+        sgstRate: g.sgstRate,
+        sgstAmount: g.sgstAmount,
+        igstRate: g.igstRate,
+        igstAmount: g.igstAmount,
       })
     }
   })

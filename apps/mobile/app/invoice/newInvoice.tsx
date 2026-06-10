@@ -6,22 +6,27 @@ import {
   FlatList,
   Modal,
   Pressable,
-  ScrollView,
   StyleSheet,
+  Text,
   TextInput,
   View,
   type TextInputProps,
 } from 'react-native'
 
-import { applyPayment } from '@neu/shared'
+import { applyPayment, computeGstValues } from '@neu/shared'
 
-import { ThemedText } from '@/components/themed-text'
-import { ThemedView } from '@/components/themed-view'
+import { Button } from '@/components/ui/Button'
+import { Card } from '@/components/ui/Card'
+import { Screen } from '@/components/ui/Screen'
+import { SectionHeader } from '@/components/ui/SectionHeader'
+import { useColors } from '@/hooks/use-colors'
+import { Radius, Spacing, Type } from '@/constants/tokens'
 import { schema, useDb } from '@/db'
 import { generateInvoiceNumber } from '@/utils/invoiceNumber'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
+type Company = typeof schema.company.$inferSelect
 
 type LineRow = {
   itemId: string
@@ -71,9 +76,13 @@ function lineAmount(qty: number, rate: number, discount: number, taxRate: number
 
 export default function NewInvoiceScreen() {
   const db = useDb()
+  const c = useColors()
 
   const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
+  // The seller's company — its state code drives the inter-state (IGST vs
+  // CGST/SGST) decision when computing the GST split at save time.
+  const [company, setCompany] = useState<Company | null>(null)
 
   // Sequential FY-scoped number (NS/SL/{FY}/NN), generated on mount to mirror
   // desktop. Shown read-only as a preview; re-resolved at save time so a number
@@ -105,6 +114,7 @@ export default function NewInvoiceScreen() {
   useEffect(() => {
     db.select().from(schema.customer).then(setCustomers)
     db.select().from(schema.item).then(setItems)
+    db.select().from(schema.company).limit(1).then((r) => setCompany(r[0] ?? null))
     generateInvoiceNumber(db).then(setInvoiceNumber)
   }, [db])
 
@@ -169,6 +179,33 @@ export default function NewInvoiceScreen() {
       // the truly-next number and avoid a unique-constraint collision.
       const finalNumber = await generateInvoiceNumber(db)
 
+      // Compute the GST split (place of supply, inter-state, per-line CGST/SGST
+      // or IGST, supply type) the SAME way desktop does — via the shared
+      // computeGstValues. Without this every mobile-created invoice would store 0
+      // for the split, and the GST reports + PDF tax tables would read zero. HSN
+      // falls back to the catalog item's hsnCode/skuHsn.
+      const gst = computeGstValues({
+        company: company
+          ? { stateCode: company.stateCode, stateName: company.stateName }
+          : null,
+        party: {
+          taxId: selectedCustomer?.taxId,
+          stateCode: selectedCustomer?.stateCode,
+          stateName: selectedCustomer?.stateName,
+        },
+        items: lines.map((l) => {
+          const cat = items.find((i) => i.id === l.itemId)
+          return {
+            quantity: l.qty,
+            rate: l.rate,
+            discount: l.discount,
+            taxRate: l.taxRate,
+            catalogHsnCode: cat?.hsnCode,
+            catalogSkuHsn: cat?.skuHsn,
+          }
+        }),
+      })
+
       // Everything below is one transaction so the invoice, its lines, the
       // customer-balance bump, and the stock decrements all commit together — a
       // half-write must never leave the customer balance out of sync with the
@@ -187,13 +224,21 @@ export default function NewInvoiceScreen() {
             status: 'DRAFT',
             invoiceDate: invDate,
             dueDate: due,
-            subtotal,
-            taxAmount,
-            totalAmount: total,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
             amountPaid: 0,
-            balanceDue: total,
+            balanceDue: gst.totalAmount,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
+            supplyType: gst.supplyType,
             poNumber: poNumber.trim() || null,
             ewayBillNo: ewayBillNo.trim() || null,
             vehicleNumber: vehicleNumber.trim() || null,
@@ -203,15 +248,28 @@ export default function NewInvoiceScreen() {
           .returning()
 
         await tx.insert(schema.salesInvoiceItem).values(
-          lines.map((l) => ({
-            salesInvoiceId: inserted.id,
-            itemId: l.itemId,
-            quantity: l.qty,
-            rate: l.rate,
-            discount: l.discount,
-            taxRate: l.taxRate,
-            total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-          })),
+          lines.map((l, idx) => {
+            const g = gst.items[idx]
+            return {
+              salesInvoiceId: inserted.id,
+              itemId: l.itemId,
+              quantity: l.qty,
+              rate: l.rate,
+              discount: l.discount,
+              taxRate: l.taxRate,
+              total: g.total,
+              hsnCode: g.hsnCode || null,
+              taxableAmount: g.taxableAmount,
+              cgstRate: g.cgstRate,
+              cgstAmount: g.cgstAmount,
+              sgstRate: g.sgstRate,
+              sgstAmount: g.sgstAmount,
+              igstRate: g.igstRate,
+              igstAmount: g.igstAmount,
+              cessRate: g.cessRate,
+              cessAmount: g.cessAmount,
+            }
+          }),
         )
 
         // Raise what the customer owes by the FULL invoice total — they owe all
@@ -283,29 +341,50 @@ export default function NewInvoiceScreen() {
   }
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <ThemedText type="title" style={styles.title}>
-        New Invoice
-      </ThemedText>
+    <Screen contentStyle={styles.content}>
+      <Text style={[Type.title, { color: c.text }]}>New Invoice</Text>
 
-      <SectionHeader>Invoice Details</SectionHeader>
+      <SectionHeader title="Invoice Details" />
 
-      <ThemedText style={styles.label}>Invoice #</ThemedText>
-      <ThemedView style={styles.readOnly}>
-        <ThemedText>{invoiceNumber}</ThemedText>
-      </ThemedView>
+      <View style={styles.fieldGroup}>
+        <Text style={[styles.label, { color: c.muted }]}>Invoice #</Text>
+        <View
+          style={[
+            styles.readOnly,
+            { backgroundColor: c.surfaceAlt, borderColor: c.border },
+          ]}
+        >
+          <Text style={[Type.body, { color: c.text }]}>{invoiceNumber}</Text>
+        </View>
+      </View>
 
-      <ThemedText style={styles.label}>Customer *</ThemedText>
-      <Pressable style={styles.picker} onPress={() => setShowCustomerPicker(true)}>
-        <ThemedText style={selectedCustomer ? undefined : styles.placeholder}>
-          {selectedCustomer ? selectedCustomer.name : 'Tap to select customer'}
-        </ThemedText>
-      </Pressable>
+      <View style={styles.fieldGroup}>
+        <Text style={[styles.label, { color: c.muted }]}>Customer *</Text>
+        <Pressable
+          style={[
+            styles.picker,
+            { backgroundColor: c.surfaceAlt, borderColor: c.border },
+          ]}
+          onPress={() => setShowCustomerPicker(true)}
+        >
+          <Text style={[Type.body, { color: selectedCustomer ? c.text : c.muted }]}>
+            {selectedCustomer ? selectedCustomer.name : 'Tap to select customer'}
+          </Text>
+        </Pressable>
+      </View>
 
-      <ThemedText style={styles.label}>Status</ThemedText>
-      <Pressable style={styles.picker} onPress={() => setShowStatusPicker(true)}>
-        <ThemedText>{STATUS_LABELS[status]}</ThemedText>
-      </Pressable>
+      <View style={styles.fieldGroup}>
+        <Text style={[styles.label, { color: c.muted }]}>Status</Text>
+        <Pressable
+          style={[
+            styles.picker,
+            { backgroundColor: c.surfaceAlt, borderColor: c.border },
+          ]}
+          onPress={() => setShowStatusPicker(true)}
+        >
+          <Text style={[Type.body, { color: c.text }]}>{STATUS_LABELS[status]}</Text>
+        </Pressable>
+      </View>
 
       <Field
         label="Invoice Date"
@@ -320,115 +399,121 @@ export default function NewInvoiceScreen() {
         placeholder="YYYY-MM-DD (optional)"
       />
 
-      <SectionHeader>Line Items</SectionHeader>
+      <SectionHeader title="Line Items" />
       {lines.map((l, i) => (
-        <ThemedView
-          key={i}
-          lightColor="#f9fafb"
-          darkColor="#1f2937"
-          style={styles.lineCard}
-        >
+        <Card key={i} style={styles.lineCard}>
           <View style={styles.lineTop}>
-            <ThemedText type="defaultSemiBold" style={styles.lineName} numberOfLines={2}>
+            <Text style={[Type.bodySemibold, styles.lineName, { color: c.text }]} numberOfLines={2}>
               {l.itemName}
-            </ThemedText>
+            </Text>
             <Pressable style={styles.removeButton} onPress={() => removeLine(i)}>
-              <ThemedText style={styles.removeText}>×</ThemedText>
+              <Text style={[styles.removeText, { color: c.danger }]}>×</Text>
             </Pressable>
           </View>
 
           <View style={styles.lineFieldsRow}>
             <View style={styles.lineFieldSmall}>
-              <ThemedText style={styles.lineFieldLabel}>Qty</ThemedText>
+              <Text style={[styles.lineFieldLabel, { color: c.muted }]}>Qty</Text>
               <TextInput
-                style={styles.lineInput}
+                style={[styles.lineInput, { backgroundColor: c.surfaceAlt, borderColor: c.border, color: c.text }]}
                 value={String(l.qty)}
                 onChangeText={(v) => updateLine(i, { qty: parseFloat(v) || 0 })}
                 keyboardType="numeric"
-                placeholderTextColor="#999"
+                placeholderTextColor={c.muted}
               />
             </View>
             <View style={styles.lineField}>
-              <ThemedText style={styles.lineFieldLabel}>Rate</ThemedText>
+              <Text style={[styles.lineFieldLabel, { color: c.muted }]}>Rate</Text>
               <TextInput
-                style={styles.lineInput}
+                style={[styles.lineInput, { backgroundColor: c.surfaceAlt, borderColor: c.border, color: c.text }]}
                 value={String(l.rate)}
                 onChangeText={(v) => updateLine(i, { rate: parseFloat(v) || 0 })}
                 keyboardType="numeric"
-                placeholderTextColor="#999"
+                placeholderTextColor={c.muted}
               />
             </View>
           </View>
 
           <View style={styles.lineFieldsRow}>
             <View style={styles.lineField}>
-              <ThemedText style={styles.lineFieldLabel}>Discount</ThemedText>
+              <Text style={[styles.lineFieldLabel, { color: c.muted }]}>Discount</Text>
               <TextInput
-                style={styles.lineInput}
+                style={[styles.lineInput, { backgroundColor: c.surfaceAlt, borderColor: c.border, color: c.text }]}
                 value={String(l.discount)}
                 onChangeText={(v) => updateLine(i, { discount: parseFloat(v) || 0 })}
                 keyboardType="numeric"
-                placeholderTextColor="#999"
+                placeholderTextColor={c.muted}
               />
             </View>
             <View style={styles.lineFieldSmall}>
-              <ThemedText style={styles.lineFieldLabel}>Tax %</ThemedText>
+              <Text style={[styles.lineFieldLabel, { color: c.muted }]}>Tax %</Text>
               <TextInput
-                style={styles.lineInput}
+                style={[styles.lineInput, { backgroundColor: c.surfaceAlt, borderColor: c.border, color: c.text }]}
                 value={String(l.taxRate)}
                 onChangeText={(v) => updateLine(i, { taxRate: parseFloat(v) || 0 })}
                 keyboardType="numeric"
-                placeholderTextColor="#999"
+                placeholderTextColor={c.muted}
               />
             </View>
           </View>
 
-          <View style={styles.lineAmountRow}>
-            <ThemedText style={styles.lineMeta}>Amount</ThemedText>
-            <ThemedText type="defaultSemiBold">
+          <View style={[styles.lineAmountRow, { borderTopColor: c.border }]}>
+            <Text style={[styles.lineMeta, { color: c.muted }]}>Amount</Text>
+            <Text style={[Type.bodySemibold, { color: c.text }]}>
               ₹{lineAmount(l.qty, l.rate, l.discount, l.taxRate).toFixed(2)}
-            </ThemedText>
+            </Text>
           </View>
-        </ThemedView>
+        </Card>
       ))}
-      <Pressable style={styles.addLineButton} onPress={() => setShowItemPicker(true)}>
-        <ThemedText style={styles.addLineButtonText}>+ Add Line Item</ThemedText>
+      <Pressable
+        style={[styles.addLineButton, { borderColor: c.accent }]}
+        onPress={() => setShowItemPicker(true)}
+      >
+        <Text style={[styles.addLineButtonText, { color: c.accent }]}>+ Add Line Item</Text>
       </Pressable>
 
-      <ThemedView style={styles.totals}>
+      <Card style={styles.totals}>
         <View style={styles.totalsRow}>
-          <ThemedText>Subtotal</ThemedText>
-          <ThemedText>₹{subtotal.toFixed(2)}</ThemedText>
+          <Text style={[Type.body, { color: c.muted }]}>Subtotal</Text>
+          <Text style={[Type.body, { color: c.text }]}>₹{subtotal.toFixed(2)}</Text>
         </View>
         <View style={styles.totalsRow}>
-          <ThemedText>Tax</ThemedText>
-          <ThemedText>₹{taxAmount.toFixed(2)}</ThemedText>
+          <Text style={[Type.body, { color: c.muted }]}>Tax</Text>
+          <Text style={[Type.body, { color: c.text }]}>₹{taxAmount.toFixed(2)}</Text>
         </View>
         <View style={styles.totalsRow}>
-          <ThemedText type="defaultSemiBold">Total</ThemedText>
-          <ThemedText type="defaultSemiBold">₹{total.toFixed(2)}</ThemedText>
+          <Text style={[Type.bodySemibold, { color: c.text }]}>Total</Text>
+          <Text style={[Type.bodySemibold, { color: c.text }]}>₹{total.toFixed(2)}</Text>
         </View>
         {paid > 0 && (
           <View style={styles.totalsRow}>
-            <ThemedText>Balance Due</ThemedText>
-            <ThemedText>₹{balanceDue.toFixed(2)}</ThemedText>
+            <Text style={[Type.body, { color: c.muted }]}>Balance Due</Text>
+            <Text style={[Type.body, { color: c.text }]}>₹{balanceDue.toFixed(2)}</Text>
           </View>
         )}
-      </ThemedView>
+      </Card>
 
-      <SectionHeader>Payment</SectionHeader>
+      <SectionHeader title="Payment" />
       <Field
         label="Amount Paid (₹)"
         value={amountPaid}
         onChangeText={setAmountPaid}
         keyboardType="numeric"
       />
-      <ThemedText style={styles.label}>Payment Mode</ThemedText>
-      <Pressable style={styles.picker} onPress={() => setShowPaymentModePicker(true)}>
-        <ThemedText>{paymentMode}</ThemedText>
-      </Pressable>
+      <View style={styles.fieldGroup}>
+        <Text style={[styles.label, { color: c.muted }]}>Payment Mode</Text>
+        <Pressable
+          style={[
+            styles.picker,
+            { backgroundColor: c.surfaceAlt, borderColor: c.border },
+          ]}
+          onPress={() => setShowPaymentModePicker(true)}
+        >
+          <Text style={[Type.body, { color: c.text }]}>{paymentMode}</Text>
+        </Pressable>
+      </View>
 
-      <SectionHeader>Notes & Terms</SectionHeader>
+      <SectionHeader title="Notes & Terms" />
       <Field
         label="Notes"
         value={notes}
@@ -444,10 +529,13 @@ export default function NewInvoiceScreen() {
         multiline
       />
 
-      <Pressable style={styles.collapseHeader} onPress={() => setShowAdditional(!showAdditional)}>
-        <ThemedText type="defaultSemiBold">
+      <Pressable
+        style={[styles.collapseHeader, { borderColor: c.border }]}
+        onPress={() => setShowAdditional(!showAdditional)}
+      >
+        <Text style={[Type.bodySemibold, { color: c.text }]}>
           {showAdditional ? '▼' : '▶'} Additional Fields
-        </ThemedText>
+        </Text>
       </Pressable>
       {showAdditional && (
         <>
@@ -480,275 +568,271 @@ export default function NewInvoiceScreen() {
         </>
       )}
 
-      <Pressable
-        style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+      <Button
+        title="Save Invoice"
+        variant="primary"
+        loading={saving}
         onPress={handleSave}
-        disabled={saving}
-      >
-        <ThemedText style={styles.saveButtonText}>{saving ? 'Saving…' : 'Save Invoice'}</ThemedText>
-      </Pressable>
+        style={styles.saveButton}
+      />
 
       <Modal visible={showCustomerPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <ThemedView style={styles.modalContent}>
-            <ThemedText type="title" style={styles.modalTitle}>
+          <View style={[styles.modalContent, { backgroundColor: c.surface }]}>
+            <Text style={[Type.title, styles.modalTitle, { color: c.text }]}>
               Select Customer
-            </ThemedText>
+            </Text>
             <FlatList
               data={customers}
               keyExtractor={(c) => c.id}
               ListEmptyComponent={
-                <ThemedText style={styles.modalEmpty}>
+                <Text style={[styles.modalEmpty, { color: c.muted }]}>
                   No customers yet. Add one from the Customers tab.
-                </ThemedText>
+                </Text>
               }
               renderItem={({ item }) => (
                 <Pressable
-                  style={styles.modalRow}
+                  style={[styles.modalRow, { borderBottomColor: c.border }]}
                   onPress={() => {
                     setCustomerId(item.id)
                     setShowCustomerPicker(false)
                   }}
                 >
-                  <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
-                  {item.phone && <ThemedText style={styles.modalRowSub}>{item.phone}</ThemedText>}
+                  <Text style={[Type.bodySemibold, { color: c.text }]}>{item.name}</Text>
+                  {item.phone && <Text style={[styles.modalRowSub, { color: c.muted }]}>{item.phone}</Text>}
                 </Pressable>
               )}
             />
-            <Pressable style={styles.modalClose} onPress={() => setShowCustomerPicker(false)}>
-              <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
+            <Pressable
+              style={[styles.modalClose, { borderTopColor: c.border }]}
+              onPress={() => setShowCustomerPicker(false)}
+            >
+              <Text style={[styles.modalCloseText, { color: c.danger }]}>Cancel</Text>
             </Pressable>
-          </ThemedView>
+          </View>
         </View>
       </Modal>
 
       <Modal visible={showItemPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <ThemedView style={styles.modalContent}>
-            <ThemedText type="title" style={styles.modalTitle}>
+          <View style={[styles.modalContent, { backgroundColor: c.surface }]}>
+            <Text style={[Type.title, styles.modalTitle, { color: c.text }]}>
               Select Item
-            </ThemedText>
+            </Text>
             <FlatList
               data={items}
               keyExtractor={(it) => it.id}
               ListEmptyComponent={
-                <ThemedText style={styles.modalEmpty}>
+                <Text style={[styles.modalEmpty, { color: c.muted }]}>
                   No items yet. Add one from the Items tab.
-                </ThemedText>
+                </Text>
               }
               renderItem={({ item }) => (
-                <Pressable style={styles.modalRow} onPress={() => pickItem(item)}>
-                  <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
-                  <ThemedText style={styles.modalRowSub}>
+                <Pressable
+                  style={[styles.modalRow, { borderBottomColor: c.border }]}
+                  onPress={() => pickItem(item)}
+                >
+                  <Text style={[Type.bodySemibold, { color: c.text }]}>{item.name}</Text>
+                  <Text style={[styles.modalRowSub, { color: c.muted }]}>
                     ₹{item.salePrice.toFixed(2)} / {item.unit} · {item.taxRate}% GST
-                  </ThemedText>
+                  </Text>
                 </Pressable>
               )}
             />
-            <Pressable style={styles.modalClose} onPress={() => setShowItemPicker(false)}>
-              <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
+            <Pressable
+              style={[styles.modalClose, { borderTopColor: c.border }]}
+              onPress={() => setShowItemPicker(false)}
+            >
+              <Text style={[styles.modalCloseText, { color: c.danger }]}>Cancel</Text>
             </Pressable>
-          </ThemedView>
+          </View>
         </View>
       </Modal>
 
       <Modal visible={showStatusPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <ThemedView style={styles.modalContent}>
-            <ThemedText type="title" style={styles.modalTitle}>
+          <View style={[styles.modalContent, { backgroundColor: c.surface }]}>
+            <Text style={[Type.title, styles.modalTitle, { color: c.text }]}>
               Invoice Status
-            </ThemedText>
+            </Text>
             <FlatList
               data={STATUS_OPTIONS}
               keyExtractor={(opt) => opt}
               renderItem={({ item }) => (
                 <Pressable
-                  style={styles.modalRow}
+                  style={[styles.modalRow, { borderBottomColor: c.border }]}
                   onPress={() => {
                     setStatus(item)
                     setShowStatusPicker(false)
                   }}
                 >
-                  <ThemedText type={item === status ? 'defaultSemiBold' : undefined}>
+                  <Text
+                    style={[
+                      item === status ? Type.bodySemibold : Type.body,
+                      { color: item === status ? c.accentDeep : c.text },
+                    ]}
+                  >
                     {item === status ? `✓ ${STATUS_LABELS[item]}` : STATUS_LABELS[item]}
-                  </ThemedText>
+                  </Text>
                 </Pressable>
               )}
             />
-            <Pressable style={styles.modalClose} onPress={() => setShowStatusPicker(false)}>
-              <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
+            <Pressable
+              style={[styles.modalClose, { borderTopColor: c.border }]}
+              onPress={() => setShowStatusPicker(false)}
+            >
+              <Text style={[styles.modalCloseText, { color: c.danger }]}>Cancel</Text>
             </Pressable>
-          </ThemedView>
+          </View>
         </View>
       </Modal>
 
       <Modal visible={showPaymentModePicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
-          <ThemedView style={styles.modalContent}>
-            <ThemedText type="title" style={styles.modalTitle}>
+          <View style={[styles.modalContent, { backgroundColor: c.surface }]}>
+            <Text style={[Type.title, styles.modalTitle, { color: c.text }]}>
               Payment Mode
-            </ThemedText>
+            </Text>
             <FlatList
               data={PAYMENT_MODE_OPTIONS}
               keyExtractor={(opt) => opt}
               renderItem={({ item }) => (
                 <Pressable
-                  style={styles.modalRow}
+                  style={[styles.modalRow, { borderBottomColor: c.border }]}
                   onPress={() => {
                     setPaymentMode(item)
                     setShowPaymentModePicker(false)
                   }}
                 >
-                  <ThemedText type={item === paymentMode ? 'defaultSemiBold' : undefined}>
+                  <Text
+                    style={[
+                      item === paymentMode ? Type.bodySemibold : Type.body,
+                      { color: item === paymentMode ? c.accentDeep : c.text },
+                    ]}
+                  >
                     {item === paymentMode ? `✓ ${item}` : item}
-                  </ThemedText>
+                  </Text>
                 </Pressable>
               )}
             />
-            <Pressable style={styles.modalClose} onPress={() => setShowPaymentModePicker(false)}>
-              <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
+            <Pressable
+              style={[styles.modalClose, { borderTopColor: c.border }]}
+              onPress={() => setShowPaymentModePicker(false)}
+            >
+              <Text style={[styles.modalCloseText, { color: c.danger }]}>Cancel</Text>
             </Pressable>
-          </ThemedView>
+          </View>
         </View>
       </Modal>
-    </ScrollView>
+    </Screen>
   )
 }
 
-function SectionHeader({ children }: { children: React.ReactNode }) {
-  return <ThemedText style={styles.sectionHeader}>{children}</ThemedText>
-}
-
 function Field({ label, ...inputProps }: { label: string } & TextInputProps) {
+  const c = useColors()
   return (
-    <ThemedView style={styles.fieldGroup}>
-      <ThemedText style={styles.label}>{label}</ThemedText>
-      <TextInput style={styles.input} placeholderTextColor="#999" {...inputProps} />
-    </ThemedView>
+    <View style={styles.fieldGroup}>
+      <Text style={[styles.label, { color: c.muted }]}>{label}</Text>
+      <TextInput
+        style={[
+          styles.input,
+          { backgroundColor: c.surfaceAlt, borderColor: c.border, color: c.text },
+        ]}
+        placeholderTextColor={c.muted}
+        {...inputProps}
+      />
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 20, paddingTop: 60, paddingBottom: 100, gap: 12 },
-  title: { marginBottom: 8 },
-  sectionHeader: {
-    fontSize: 13,
-    fontWeight: '700',
-    opacity: 0.5,
-    textTransform: 'uppercase',
-    marginTop: 16,
-    marginBottom: 4,
-    letterSpacing: 0.5,
-  },
-  fieldGroup: { gap: 4 },
+  content: { gap: Spacing.md },
+  fieldGroup: { gap: Spacing.xs },
   label: { fontSize: 14, fontWeight: '600' },
   input: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
     fontSize: 16,
-    color: '#000',
-    backgroundColor: '#f5f5f5',
   },
   readOnly: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    borderRadius: Radius.sm,
     borderWidth: 1,
-    borderColor: '#ddd',
-    backgroundColor: '#f9f9f9',
   },
   picker: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderRadius: 8,
+    paddingHorizontal: Spacing.md,
+    paddingVertical: Spacing.md,
+    borderRadius: Radius.sm,
     borderWidth: 1,
-    borderColor: '#007AFF',
   },
-  placeholder: { opacity: 0.5 },
   lineCard: {
-    padding: 12,
-    borderRadius: 10,
-    gap: 8,
-    marginTop: 4,
+    gap: Spacing.sm,
+    marginTop: Spacing.xs,
   },
-  lineTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  lineTop: { flexDirection: 'row', alignItems: 'flex-start', gap: Spacing.sm },
   lineName: { flex: 1 },
-  lineFieldsRow: { flexDirection: 'row', gap: 8 },
-  lineField: { flex: 1, gap: 4 },
-  lineFieldSmall: { width: 80, gap: 4 },
-  lineFieldLabel: { fontSize: 12, opacity: 0.6 },
+  lineFieldsRow: { flexDirection: 'row', gap: Spacing.sm },
+  lineField: { flex: 1, gap: Spacing.xs },
+  lineFieldSmall: { width: 80, gap: Spacing.xs },
+  lineFieldLabel: { fontSize: 12 },
   lineInput: {
     borderWidth: 1,
-    borderColor: '#ccc',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: Spacing.sm,
     fontSize: 15,
-    color: '#000',
-    backgroundColor: '#fff',
   },
   lineAmountRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 4,
+    paddingTop: Spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  lineMeta: { fontSize: 13, opacity: 0.6 },
-  removeButton: { paddingHorizontal: 8, paddingVertical: 2 },
-  removeText: { fontSize: 22, color: '#FF3B30' },
+  lineMeta: { fontSize: 13 },
+  removeButton: { paddingHorizontal: Spacing.sm, paddingVertical: 2 },
+  removeText: { fontSize: 22 },
   addLineButton: {
     borderWidth: 1,
-    borderColor: '#007AFF',
     borderStyle: 'dashed',
-    borderRadius: 8,
-    paddingVertical: 12,
+    borderRadius: Radius.sm,
+    paddingVertical: Spacing.md,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: Spacing.sm,
   },
-  addLineButtonText: { color: '#007AFF', fontWeight: '600' },
-  totals: { padding: 12, borderRadius: 8, marginTop: 16, gap: 6 },
+  addLineButtonText: { fontWeight: '600' },
+  totals: { marginTop: Spacing.lg, gap: Spacing.sm },
   totalsRow: { flexDirection: 'row', justifyContent: 'space-between' },
   collapseHeader: {
-    paddingVertical: 12,
-    marginTop: 8,
+    paddingVertical: Spacing.md,
+    marginTop: Spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderColor: '#ccc',
   },
-  saveButton: {
-    backgroundColor: '#007AFF',
-    paddingVertical: 14,
-    borderRadius: 8,
-    marginTop: 24,
-    alignItems: 'center',
-  },
-  saveButtonDisabled: { opacity: 0.5 },
-  saveButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  saveButton: { marginTop: Spacing.xxl },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: {
     maxHeight: '80%',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    padding: 16,
+    borderTopLeftRadius: Radius.lg,
+    borderTopRightRadius: Radius.lg,
+    padding: Spacing.lg,
   },
-  modalTitle: { marginBottom: 12 },
+  modalTitle: { marginBottom: Spacing.md },
   modalRow: {
-    paddingVertical: 14,
-    paddingHorizontal: 8,
+    paddingVertical: Spacing.lg,
+    paddingHorizontal: Spacing.sm,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: '#ccc',
   },
-  modalRowSub: { fontSize: 13, opacity: 0.6, marginTop: 2 },
-  modalEmpty: { padding: 20, textAlign: 'center', opacity: 0.6 },
+  modalRowSub: { fontSize: 13, marginTop: 2 },
+  modalEmpty: { padding: Spacing.xl, textAlign: 'center' },
   modalClose: {
-    paddingVertical: 14,
+    paddingVertical: Spacing.lg,
     alignItems: 'center',
-    marginTop: 8,
+    marginTop: Spacing.sm,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#ccc',
   },
-  modalCloseText: { color: '#FF3B30', fontSize: 16 },
+  modalCloseText: { fontSize: 16 },
 })

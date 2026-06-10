@@ -20,6 +20,9 @@ const ANDROID_CLIENT_ID = '1088283723953-4akf58d2nbomhu6um42hp4malbdoampg.apps.g
 const REDIRECT_URI =
   'com.googleusercontent.apps.1088283723953-4akf58d2nbomhu6um42hp4malbdoampg:/oauthredirect'
 const STORAGE_KEY = 'neu.auth.accessToken'
+// Set when the user chooses to use the app without a Google account. The gate in
+// _layout treats (user || offlineMode) as "allowed in"; cleared on real sign-in.
+const OFFLINE_KEY = 'neu.auth.offlineMode'
 
 export type AuthUser = {
   sub: string
@@ -31,9 +34,13 @@ export type AuthUser = {
 type AuthContextValue = {
   user: AuthUser | null
   accessToken: string | null
+  /** True when using the app without a Google account. */
+  offlineMode: boolean
   loading: boolean
   signIn: () => Promise<void>
   signOut: () => Promise<void>
+  /** Continue without signing in (data stays local; no cloud backup). */
+  enterOfflineMode: () => Promise<void>
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -41,6 +48,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [accessToken, setAccessToken] = useState<string | null>(null)
+  const [offlineMode, setOfflineMode] = useState(false)
   const [loading, setLoading] = useState(true)
 
   const [, response, promptAsync] = Google.useAuthRequest({
@@ -58,9 +66,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     extraParams: { prompt: 'select_account' },
   })
 
-  // Restore session on boot.
+  // Restore session (and the offline-mode choice) on boot.
   useEffect(() => {
-    SecureStore.getItemAsync(STORAGE_KEY).then(async (token) => {
+    void (async () => {
+      const [token, offline] = await Promise.all([
+        SecureStore.getItemAsync(STORAGE_KEY),
+        SecureStore.getItemAsync(OFFLINE_KEY),
+      ])
+      if (offline === 'true') setOfflineMode(true)
       if (token) {
         try {
           const userInfo = await fetchUserInfo(token)
@@ -71,7 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       }
       setLoading(false)
-    })
+    })()
   }, [])
 
   // expo-auth-session handles the code → token exchange internally; when it
@@ -84,7 +97,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then((userInfo) => {
           setUser(userInfo)
           setAccessToken(token)
-          return SecureStore.setItemAsync(STORAGE_KEY, token)
+          // A real sign-in supersedes offline mode.
+          setOfflineMode(false)
+          return Promise.all([
+            SecureStore.setItemAsync(STORAGE_KEY, token),
+            SecureStore.deleteItemAsync(OFFLINE_KEY),
+          ])
         })
         .catch((e) => {
           console.error('Failed to fetch user info after sign-in', e)
@@ -96,15 +114,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await promptAsync()
   }
 
+  // Use the app without a Google account. Persisted so it survives a relaunch;
+  // the gate then lets the user in (a company profile is still required).
+  async function enterOfflineMode() {
+    await SecureStore.setItemAsync(OFFLINE_KEY, 'true')
+    setOfflineMode(true)
+  }
+
   async function signOut() {
     setUser(null)
     setAccessToken(null)
-    await SecureStore.deleteItemAsync(STORAGE_KEY)
+    setOfflineMode(false)
+    await Promise.all([
+      SecureStore.deleteItemAsync(STORAGE_KEY),
+      SecureStore.deleteItemAsync(OFFLINE_KEY),
+    ])
   }
 
   return createElement(
     AuthContext.Provider,
-    { value: { user, accessToken, loading, signIn, signOut } },
+    {
+      value: {
+        user,
+        accessToken,
+        offlineMode,
+        loading,
+        signIn,
+        signOut,
+        enterOfflineMode,
+      },
+    },
     children
   )
 }

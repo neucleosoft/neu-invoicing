@@ -27,6 +27,8 @@ const MAPPING = {
   'exclamationmark.triangle.fill': 'warning',
   'clock.fill': 'schedule',
   'cart.fill': 'shopping-cart',
+  'line.3.horizontal': 'menu',
+  'plus': 'add',
 } as IconMapping;
 
 /**

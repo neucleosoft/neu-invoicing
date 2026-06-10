@@ -106,7 +106,15 @@ function buildCompanySection(ch: ChallanData, logo: string): Content {
     companyStack.push({ text: [{ text: 'Email: ', bold: true }, company.email], fontSize: 10 })
   }
 
-  // Challan No. + Challan Date — single row, no P.O. concept for challans
+  // Challan No. + Challan Date on the first row; the returnable / non-returnable
+  // type sits on the second row in the right-hand slot — the exact position an
+  // invoice prints its P.O. No.
+  const statusLabel =
+    ch.status === 'NON_RETURNABLE'
+      ? 'Non-Returnable'
+      : ch.status === 'CONVERTED'
+        ? 'Converted'
+        : 'Returnable'
   const gridBody: TableCell[][] = [
     [
       { stack: [
@@ -116,6 +124,13 @@ function buildCompanySection(ch: ChallanData, logo: string): Content {
       { stack: [
         { text: 'Challan Date', bold: true, fontSize: 10 },
         { text: formatDate(ch.challanDate), fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
+      ] },
+    ],
+    [
+      { text: '' },
+      { stack: [
+        { text: 'Type', bold: true, fontSize: 10 },
+        { text: statusLabel, fontSize: 10, margin: [0, 3, 0, 0] as [number, number, number, number] },
       ] },
     ],
   ]
@@ -136,12 +151,12 @@ function buildCompanySection(ch: ChallanData, logo: string): Content {
           // Right: challan number grid (single row)
           {
             table: {
-              heights: [70],
+              heights: [35, 35],
               widths: ['*', '*'],
               body: gridBody,
             },
             layout: {
-              hLineWidth: () => 0,
+              hLineWidth: (i: number) => (i === 1 ? 0.5 : 0),
               vLineWidth: () => 0,
               hLineColor: () => '#000',
               vLineColor: () => '#000',

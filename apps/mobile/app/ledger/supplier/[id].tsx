@@ -1,16 +1,15 @@
 import { eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useRef, useState } from 'react'
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { useEffect, useState } from 'react'
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
-import { HiddenPdfWebView, type HiddenPdfWebViewHandle } from '@/components/HiddenPdfWebView'
 import LedgerView from '@/components/LedgerView'
+import { PdfActions } from '@/components/PdfActions'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 import { buildSupplierLedger, type LedgerData } from '@/utils/ledger'
 import { buildStatementPdfPayload } from '@/utils/statementPdf'
-import { saveAndSharePdf } from '@/utils/pdfShare'
 
 // Supplier Ledger — the full running account for one supplier (all-time). Twin of
 // the customer ledger; the debit side is purchase bills and the credit side is
@@ -26,40 +25,6 @@ export default function SupplierLedgerScreen() {
   const [ledger, setLedger] = useState<LedgerData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(false)
-  const pdfRef = useRef<HiddenPdfWebViewHandle>(null)
-  const [sharing, setSharing] = useState(false)
-
-  async function handleSharePdf() {
-    if (!ledger || !supplier || sharing) return
-    setSharing(true)
-    try {
-      const payload = await buildStatementPdfPayload(db, {
-        ledger,
-        // The statement builder reads the party from `customer` even for a
-        // supplier — put the supplier's details there.
-        party: {
-          name: supplier.name,
-          email: supplier.email ?? undefined,
-          phone: supplier.phone ?? undefined,
-          billingAddress: supplier.billingAddress ?? undefined,
-          taxId: supplier.taxId ?? undefined,
-        },
-        title: 'SUPPLIER LEDGER',
-      })
-      const base64 = await pdfRef.current!.generate(payload.builder, payload.data)
-      await saveAndSharePdf(base64, payload.filename)
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : 'Failed to generate PDF'
-      Alert.alert(
-        'PDF failed',
-        // The WebView + sharing are native modules — a fresh `npx expo run:android`
-        // is required after adding them, or generation can't run.
-        `${msg}\n\nIf this is the first run after adding PDF support, rebuild the app (expo run:android).`,
-      )
-    } finally {
-      setSharing(false)
-    }
-  }
 
   useEffect(() => {
     if (!id) {
@@ -117,17 +82,26 @@ export default function SupplierLedgerScreen() {
         </View>
       ) : ledger ? (
         <ScrollView contentContainerStyle={styles.content}>
-          <Pressable
-            style={[styles.shareButton, sharing && styles.shareButtonDisabled]}
-            onPress={handleSharePdf}
-            disabled={sharing}
-          >
-            {sharing ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <ThemedText style={styles.shareButtonText}>Share PDF</ThemedText>
-            )}
-          </Pressable>
+          <PdfActions
+            disabled={!ledger || !supplier}
+            buildPayload={async () =>
+              ledger && supplier
+                ? buildStatementPdfPayload(db, {
+                    ledger,
+                    // The statement builder reads the party from `customer` even for a
+                    // supplier — put the supplier's details there.
+                    party: {
+                      name: supplier.name,
+                      email: supplier.email ?? undefined,
+                      phone: supplier.phone ?? undefined,
+                      billingAddress: supplier.billingAddress ?? undefined,
+                      taxId: supplier.taxId ?? undefined,
+                    },
+                    title: 'SUPPLIER LEDGER',
+                  })
+                : null
+            }
+          />
           <LedgerView
             data={ledger}
             summary="balance"
@@ -137,8 +111,6 @@ export default function SupplierLedgerScreen() {
           />
         </ScrollView>
       ) : null}
-      {/* Off-screen pdfmake host — boots in the background, generates on demand. */}
-      <HiddenPdfWebView ref={pdfRef} />
     </ThemedView>
   )
 }
@@ -161,15 +133,4 @@ const styles = StyleSheet.create({
   errorText: { color: '#dc2626' },
   centeredBlock: { alignItems: 'center', marginTop: 64, gap: 8, paddingHorizontal: 32 },
   muted: { opacity: 0.6, textAlign: 'center' },
-  shareButton: {
-    backgroundColor: '#0a7ea4',
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
-    marginBottom: 16,
-  },
-  shareButtonDisabled: { opacity: 0.6 },
-  shareButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 })

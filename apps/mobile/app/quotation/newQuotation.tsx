@@ -12,6 +12,8 @@ import {
   type TextInputProps,
 } from 'react-native'
 
+import { computeGstValues } from '@neu/shared'
+
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
@@ -19,6 +21,7 @@ import { generateQuotationNumber } from '@/utils/docNumber'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
+type Company = typeof schema.company.$inferSelect
 
 type LineRow = {
   itemId: string
@@ -51,6 +54,9 @@ export default function NewQuotationScreen() {
   const db = useDb()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [items, setItems] = useState<Item[]>([])
+  // The seller's company — its state code drives the inter-state (IGST vs
+  // CGST/SGST) decision when computing the GST split at save time.
+  const [company, setCompany] = useState<Company | null>(null)
 
   const [quoteNumber, setQuoteNumber] = useState('…')
   const [customerId, setCustomerId] = useState<string | null>(null)
@@ -70,6 +76,7 @@ export default function NewQuotationScreen() {
   useEffect(() => {
     db.select().from(schema.customer).then(setCustomers)
     db.select().from(schema.item).then(setItems)
+    db.select().from(schema.company).limit(1).then((r) => setCompany(r[0] ?? null))
     generateQuotationNumber(db).then(setQuoteNumber)
   }, [db])
 
@@ -106,6 +113,34 @@ export default function NewQuotationScreen() {
     setSaving(true)
     try {
       const number = await generateQuotationNumber(db)
+
+      // Compute the GST split (place of supply, inter-state, per-line CGST/SGST
+      // or IGST, supply type) the SAME way invoices do — via the shared
+      // computeGstValues. Without this every mobile-created quotation would store
+      // 0 for the split, and the GST reports + PDF tax tables would read zero. HSN
+      // falls back to the catalog item's hsnCode/skuHsn.
+      const gst = computeGstValues({
+        company: company
+          ? { stateCode: company.stateCode, stateName: company.stateName }
+          : null,
+        party: {
+          taxId: selectedCustomer?.taxId,
+          stateCode: selectedCustomer?.stateCode,
+          stateName: selectedCustomer?.stateName,
+        },
+        items: lines.map((l) => {
+          const cat = items.find((i) => i.id === l.itemId)
+          return {
+            quantity: l.qty,
+            rate: l.rate,
+            discount: l.discount,
+            taxRate: l.taxRate,
+            catalogHsnCode: cat?.hsnCode,
+            catalogSkuHsn: cat?.skuHsn,
+          }
+        }),
+      })
+
       // Pure write — NO balance, NO stock (a quote is non-binding).
       const [inserted] = await db
         .insert(schema.quotation)
@@ -116,25 +151,45 @@ export default function NewQuotationScreen() {
           invoiceDate: qDate,
           dueDate: parseDate(expiryDate),
           deliveryTime: parseDate(deliveryTime),
-          subtotal,
-          taxAmount,
-          totalAmount: total,
+          subtotal: gst.subtotal,
+          taxAmount: gst.taxAmount,
+          totalAmount: gst.totalAmount,
           notes: notes.trim() || null,
           termsConditions: termsConditions.trim() || null,
+          placeOfSupply: gst.placeOfSupply || null,
+          placeOfSupplyName: gst.placeOfSupplyName || null,
+          isInterState: gst.isInterState,
+          cgstAmount: gst.totalCgst,
+          sgstAmount: gst.totalSgst,
+          igstAmount: gst.totalIgst,
+          cessAmount: gst.totalCess,
+          supplyType: gst.supplyType,
         })
         .returning({ id: schema.quotation.id })
 
       await db.insert(schema.quotationItem).values(
-        lines.map((l) => ({
-          quotationId: inserted.id,
-          itemId: l.itemId,
-          quantity: l.qty,
-          rate: l.rate,
-          discount: l.discount,
-          taxRate: l.taxRate,
-          total: lineAmount(l.qty, l.rate, l.discount, l.taxRate),
-          taxableAmount: l.qty * l.rate - l.discount,
-        })),
+        lines.map((l, idx) => {
+          const g = gst.items[idx]
+          return {
+            quotationId: inserted.id,
+            itemId: l.itemId,
+            quantity: l.qty,
+            rate: l.rate,
+            discount: l.discount,
+            taxRate: l.taxRate,
+            total: g.total,
+            hsnCode: g.hsnCode || null,
+            taxableAmount: g.taxableAmount,
+            cgstRate: g.cgstRate,
+            cgstAmount: g.cgstAmount,
+            sgstRate: g.sgstRate,
+            sgstAmount: g.sgstAmount,
+            igstRate: g.igstRate,
+            igstAmount: g.igstAmount,
+            cessRate: g.cessRate,
+            cessAmount: g.cessAmount,
+          }
+        }),
       )
       router.back()
     } catch (e) {

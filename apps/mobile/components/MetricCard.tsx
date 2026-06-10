@@ -2,34 +2,33 @@ import { router } from 'expo-router'
 import type { ComponentProps } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
 
+import { useColors } from '@/hooks/use-colors'
+import { Radius, Spacing } from '@/constants/tokens'
 import { IconSymbol } from './ui/icon-symbol'
 import { ThemedText } from './themed-text'
 
 // Mirrors apps/desktop/src/components/MetricCard.tsx. Same six tones with the
 // same semantic intent (green = receivables/positive, red = payables, blue =
-// invoiced, orange = warnings, indigo = bank, rose = overdue), but resolved
-// to literal hex pairs because RN has no Tailwind. Desktop uses gradient
-// backgrounds; mobile uses solid tints to avoid adding expo-linear-gradient
-// as a dependency. Light-mode only for now — dark mode would need a parallel
-// TONE_DARK map.
+// invoiced, orange = warnings, indigo = bank, rose = overdue). Resolved to
+// theme tokens via useColors() so it is dark-mode safe: every card shares the
+// neutral surface bg + border, and each tone only drives the icon tile + value
+// accent colour (accent/success/danger/warning/accentDeep). Desktop uses
+// gradient backgrounds; mobile keeps a calm single-surface card.
 
 type Tone = 'green' | 'red' | 'blue' | 'orange' | 'indigo' | 'rose'
 
-interface ToneColors {
-  bg: string
-  label: string
-  value: string
-  iconBg: string
-  iconFg: string
-}
-
-const TONE: Record<Tone, ToneColors> = {
-  green: { bg: '#f0fdf4', label: '#15803d', value: '#166534', iconBg: '#bbf7d0', iconFg: '#15803d' },
-  red: { bg: '#fef2f2', label: '#b91c1c', value: '#991b1b', iconBg: '#fecaca', iconFg: '#b91c1c' },
-  blue: { bg: '#eff6ff', label: '#1d4ed8', value: '#1e3a8a', iconBg: '#bfdbfe', iconFg: '#1d4ed8' },
-  orange: { bg: '#fff7ed', label: '#c2410c', value: '#9a3412', iconBg: '#fed7aa', iconFg: '#c2410c' },
-  indigo: { bg: '#eef2ff', label: '#4338ca', value: '#3730a3', iconBg: '#c7d2fe', iconFg: '#4338ca' },
-  rose: { bg: '#fff1f2', label: '#be123c', value: '#9f1239', iconBg: '#fecdd3', iconFg: '#be123c' },
+// Maps each tone key to a token accent. The card surface/border come from the
+// shared neutral tokens (so the card stays calm in both themes); the accent
+// here tints the icon tile and the value text only.
+function toneAccent(c: ReturnType<typeof useColors>): Record<Tone, string> {
+  return {
+    green: c.success,
+    red: c.danger,
+    blue: c.accent,
+    orange: c.warning,
+    indigo: c.accentDeep,
+    rose: c.danger,
+  }
 }
 
 // Shrinks the value font when long currency strings (₹12,34,567.00) would
@@ -59,23 +58,27 @@ export default function MetricCard({
   to,
   hint,
 }: MetricCardProps) {
-  const t = TONE[tone]
+  const c = useColors()
+  const accent = toneAccent(c)[tone]
+
   const inner = (
-    <View style={[styles.card, { backgroundColor: t.bg }]}>
-      <View style={[styles.iconWrap, { backgroundColor: t.iconBg }]}>
-        <IconSymbol name={iconName} size={18} color={t.iconFg} />
+    <View style={[styles.card, { backgroundColor: c.surface, borderColor: c.border }]}>
+      {/* Icon tile carries the tone accent on a faint surfaceAlt backing so it
+          reads in both themes without a coloured fill behind the whole card. */}
+      <View style={[styles.iconWrap, { backgroundColor: c.surfaceAlt }]}>
+        <IconSymbol name={iconName} size={18} color={accent} />
       </View>
-      <ThemedText style={[styles.label, { color: t.label }]} numberOfLines={2}>
+      <ThemedText style={[styles.label, { color: c.muted }]} numberOfLines={2}>
         {label}
       </ThemedText>
       <ThemedText
-        style={[styles.value, { color: t.value, fontSize: valueFontSize(value) }]}
+        style={[styles.value, { color: accent, fontSize: valueFontSize(value) }]}
         numberOfLines={1}
       >
         {value}
       </ThemedText>
       {hint ? (
-        <ThemedText style={[styles.hint, { color: t.label }]} numberOfLines={1}>
+        <ThemedText style={[styles.hint, { color: c.muted }]} numberOfLines={1}>
           {hint}
         </ThemedText>
       ) : null}
@@ -97,8 +100,9 @@ export default function MetricCard({
 
 const styles = StyleSheet.create({
   card: {
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: Radius.lg,
+    borderWidth: StyleSheet.hairlineWidth,
+    padding: Spacing.md,
     minHeight: 110,
     justifyContent: 'flex-start',
   },
@@ -106,7 +110,7 @@ const styles = StyleSheet.create({
   iconWrap: {
     width: 32,
     height: 32,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 10,

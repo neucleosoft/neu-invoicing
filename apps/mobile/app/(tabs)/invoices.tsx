@@ -76,10 +76,6 @@ export default function InvoicesScreen() {
         <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
           <ThemedText style={styles.countText}>{rows.length}</ThemedText>
         </ThemedView>
-        <View style={{ flex: 1 }} />
-        <Pressable onPress={() => router.push('/sales')} hitSlop={8}>
-          <ThemedText style={styles.docsLink}>Documents ▸</ThemedText>
-        </Pressable>
       </View>
 
       <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.searchWrap}>

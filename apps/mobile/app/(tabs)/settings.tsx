@@ -11,7 +11,7 @@ import { checkCloudBackup, restoreFromCloud, type CloudBackupInfo } from '@/sync
 import { getOpenRouterKey, setOpenRouterKey } from '@/utils/billOcr';
 
 export default function SettingsScreen() {
-  const { user, accessToken, signOut } = useAuth();
+  const { user, accessToken, signOut, signIn } = useAuth();
   const liveDb = useSQLiteContext();
   const db = useDb();
 
@@ -148,10 +148,15 @@ export default function SettingsScreen() {
             <View style={[styles.avatar, styles.avatarPlaceholder]} />
           )}
           <View style={styles.profileText}>
-            <ThemedText type="defaultSemiBold">{user?.name ?? 'Signed out'}</ThemedText>
-            <ThemedText>{user?.email ?? ''}</ThemedText>
+            <ThemedText type="defaultSemiBold">{user?.name ?? 'Using offline'}</ThemedText>
+            <ThemedText>{user?.email ?? 'Not signed in'}</ThemedText>
           </View>
         </View>
+        {!user && (
+          <Pressable onPress={() => signIn()} style={styles.keyButton}>
+            <ThemedText style={styles.keyButtonText}>Sign in with Google</ThemedText>
+          </Pressable>
+        )}
       </ThemedView>
 
       <ThemedView style={styles.section}>
@@ -180,6 +185,11 @@ export default function SettingsScreen() {
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Backup & Restore</ThemedText>
 
+        {!accessToken && (
+          <ThemedText style={styles.businessHint}>
+            Sign in with Google to enable cloud backup &amp; restore.
+          </ThemedText>
+        )}
         {backupLoading && <ThemedText>Checking cloud…</ThemedText>}
         {backupError && (
           <ThemedText style={styles.error}>Couldn&apos;t reach cloud: {backupError}</ThemedText>
@@ -259,11 +269,13 @@ export default function SettingsScreen() {
         </Pressable>
       </ThemedView>
 
-      <ThemedView style={styles.section}>
-        <Pressable onPress={handleSignOut} style={styles.signOutButton}>
-          <ThemedText style={styles.signOutText}>Sign out</ThemedText>
-        </Pressable>
-      </ThemedView>
+      {user && (
+        <ThemedView style={styles.section}>
+          <Pressable onPress={handleSignOut} style={styles.signOutButton}>
+            <ThemedText style={styles.signOutText}>Sign out</ThemedText>
+          </Pressable>
+        </ThemedView>
+      )}
     </ScrollView>
   );
 }
