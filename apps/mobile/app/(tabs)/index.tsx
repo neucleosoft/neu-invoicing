@@ -1,13 +1,17 @@
 import { router, useFocusEffect } from 'expo-router'
 import { type ComponentProps, useCallback, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 
 import MetricCard from '@/components/MetricCard'
-import { ThemedText } from '@/components/themed-text'
-import { ThemedView } from '@/components/themed-view'
+import { Card } from '@/components/ui/Card'
+import { Chip } from '@/components/ui/Chip'
+import { Screen } from '@/components/ui/Screen'
+import { SectionHeader } from '@/components/ui/SectionHeader'
 import { IconSymbol } from '@/components/ui/icon-symbol'
 import { useAuth } from '@/auth'
+import { Radius, Spacing, Type } from '@/constants/tokens'
 import { useDb } from '@/db'
+import { useColors } from '@/hooks/use-colors'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
 import {
@@ -28,6 +32,7 @@ import {
 export default function DashboardScreen() {
   const { user } = useAuth()
   const db = useDb()
+  const c = useColors()
   const [receivables, setReceivables] = useState(0)
   const [invoicedFY, setInvoicedFY] = useState(0)
   const [overdueCount, setOverdueCount] = useState(0)
@@ -58,10 +63,12 @@ export default function DashboardScreen() {
   const firstName = user?.name?.split(' ')[0] ?? 'there'
 
   return (
-    <ScrollView contentContainerStyle={styles.content}>
+    <Screen>
       <View style={styles.greeting}>
-        <ThemedText type="title">Hi {firstName}</ThemedText>
-        <ThemedText style={styles.dateText}>{formatDate(new Date())}</ThemedText>
+        <Text style={[Type.title, { color: c.text }]}>Hi {firstName}</Text>
+        <Text style={[Type.caption, { color: c.muted }]}>
+          {formatDate(new Date())}
+        </Text>
       </View>
 
       <View style={styles.metricGrid}>
@@ -105,26 +112,33 @@ export default function DashboardScreen() {
         </View>
       </View>
 
-      <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <ThemedText type="subtitle">Recent Invoices</ThemedText>
-          <Pressable onPress={() => router.push('/(tabs)/invoices')}>
-            <ThemedText style={styles.viewAll}>View all →</ThemedText>
-          </Pressable>
-        </View>
-        <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.sectionBody}>
-          {recent.length === 0 ? (
-            <ThemedText style={styles.emptyText}>No invoices yet.</ThemedText>
-          ) : (
-            recent.map((inv, idx) => (
-              <RecentInvoiceRow key={inv.id} row={inv} divider={idx > 0} />
-            ))
-          )}
-        </ThemedView>
-      </View>
+      <Card>
+        <SectionHeader
+          title="Recent Invoices"
+          action={
+            <Pressable
+              onPress={() => router.push('/(tabs)/invoices')}
+              hitSlop={8}
+            >
+              <Text style={[Type.label, { color: c.accentDeep }]}>
+                View all →
+              </Text>
+            </Pressable>
+          }
+        />
+        {recent.length === 0 ? (
+          <Text style={[Type.body, styles.emptyText, { color: c.muted }]}>
+            No invoices yet.
+          </Text>
+        ) : (
+          recent.map((inv, idx) => (
+            <RecentInvoiceRow key={inv.id} row={inv} divider={idx > 0} />
+          ))
+        )}
+      </Card>
 
       <View style={styles.section}>
-        <ThemedText type="subtitle">Quick Actions</ThemedText>
+        <Text style={[Type.subtitle, { color: c.text }]}>Quick Actions</Text>
         <View style={styles.actionGrid}>
           <ActionTile
             iconName="doc.text.fill"
@@ -148,7 +162,7 @@ export default function DashboardScreen() {
           />
         </View>
       </View>
-    </ScrollView>
+    </Screen>
   )
 }
 
@@ -159,6 +173,7 @@ function RecentInvoiceRow({
   row: RecentInvoice
   divider: boolean
 }) {
+  const c = useColors()
   const displayStatus = deriveDisplayStatus(
     row.status,
     row.dueDate,
@@ -174,27 +189,33 @@ function RecentInvoiceRow({
       }
       style={({ pressed }) => [
         styles.recentRow,
-        divider && styles.recentRowDivider,
+        divider && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
         pressed && styles.pressedRow,
       ]}
     >
       <View style={styles.recentLeft}>
-        <ThemedText type="defaultSemiBold" numberOfLines={1}>
+        <Text
+          style={[Type.bodySemibold, { color: c.text }]}
+          numberOfLines={1}
+        >
           {row.invoiceNumber}
-        </ThemedText>
-        <ThemedText numberOfLines={1} style={styles.recentCustomer}>
+        </Text>
+        <Text
+          numberOfLines={1}
+          style={[Type.caption, { color: c.muted }]}
+        >
           {row.customerName ?? 'Unknown customer'}
-        </ThemedText>
+        </Text>
       </View>
       <View style={styles.recentRight}>
-        <ThemedText type="defaultSemiBold">
+        <Text style={[Type.bodySemibold, { color: c.text }]}>
           {formatCurrency(row.totalAmount)}
-        </ThemedText>
-        <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-          <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>
-            {formatInvoiceStatus(displayStatus)}
-          </ThemedText>
-        </View>
+        </Text>
+        <Chip
+          bg={badge.bg}
+          color={badge.text}
+          label={formatInvoiceStatus(displayStatus)}
+        />
       </View>
     </Pressable>
   )
@@ -209,60 +230,61 @@ function ActionTile({
   label: string
   onPress: () => void
 }) {
+  const c = useColors()
   return (
     <Pressable
       onPress={onPress}
       style={({ pressed }) => [styles.tile, pressed && styles.pressedRow]}
     >
-      <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.tileInner}>
-        <IconSymbol name={iconName} size={24} color="#0a7ea4" />
-        <ThemedText style={styles.tileLabel}>{label}</ThemedText>
-      </ThemedView>
+      <View
+        style={[
+          styles.tileInner,
+          {
+            backgroundColor: c.surface,
+            borderColor: c.border,
+          },
+        ]}
+      >
+        <View style={[styles.tileIcon, { backgroundColor: c.accent }]}>
+          <IconSymbol name={iconName} size={22} color={c.accentInk} />
+        </View>
+        <Text style={[Type.label, { color: c.text }]}>{label}</Text>
+      </View>
     </Pressable>
   )
 }
 
 const styles = StyleSheet.create({
-  content: { paddingHorizontal: 16, paddingTop: 60, paddingBottom: 32, gap: 20 },
-  greeting: { gap: 4 },
-  dateText: { opacity: 0.6, fontSize: 13 },
+  greeting: { gap: Spacing.xs },
   // Negative horizontal margin on the grid + positive padding on each col gives
-  // a clean 12px gutter between cards without padding the grid container itself.
-  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 },
-  metricCol: { width: '50%', paddingHorizontal: 6, marginBottom: 12 },
-  section: { gap: 12 },
-  sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  viewAll: { color: '#0a7ea4', fontWeight: '500' },
-  sectionBody: { borderRadius: 12, paddingVertical: 4 },
-  emptyText: { textAlign: 'center', paddingVertical: 20, opacity: 0.6 },
+  // a clean gutter between cards without padding the grid container itself.
+  metricGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -Spacing.xs },
+  metricCol: { width: '50%', paddingHorizontal: Spacing.xs, marginBottom: Spacing.md },
+  section: { gap: Spacing.md },
+  emptyText: { textAlign: 'center', paddingVertical: Spacing.xl },
   recentRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    gap: 12,
-  },
-  recentRowDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#d1d5db',
+    paddingVertical: Spacing.md,
+    gap: Spacing.md,
   },
   pressedRow: { opacity: 0.7 },
-  recentLeft: { flex: 1, gap: 2 },
-  recentRight: { alignItems: 'flex-end', gap: 4 },
-  recentCustomer: { fontSize: 12, opacity: 0.6 },
-  statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  statusBadgeText: { fontSize: 10, fontWeight: '600' },
-  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 },
-  tile: { width: '50%', paddingHorizontal: 6, marginBottom: 12 },
+  recentLeft: { flex: 1, gap: Spacing.xs / 2 },
+  recentRight: { alignItems: 'flex-end', gap: Spacing.xs },
+  actionGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -Spacing.xs },
+  tile: { width: '50%', paddingHorizontal: Spacing.xs, marginBottom: Spacing.md },
   tileInner: {
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: Radius.lg,
+    padding: Spacing.lg,
     alignItems: 'center',
-    gap: 8,
+    gap: Spacing.md,
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  tileLabel: { fontSize: 13, fontWeight: '500' },
+  tileIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 })

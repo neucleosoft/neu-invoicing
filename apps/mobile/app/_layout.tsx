@@ -6,6 +6,19 @@ import { Suspense, useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 
+// useFonts from expo-font (runs on the app's React) — NOT from the Inter
+// package, whose 0.4.x build bundles its own React 18 and would trigger an
+// "Invalid hook call" against the app's React 19. We import only the font
+// assets (plain .ttf refs, no React) from @expo-google-fonts/inter.
+import { useFonts } from 'expo-font';
+import {
+  Inter_400Regular,
+  Inter_500Medium,
+  Inter_600SemiBold,
+  Inter_700Bold,
+  Inter_800ExtraBold,
+} from '@expo-google-fonts/inter';
+
 // Hermes has no global Buffer, but Drizzle's blob(buffer) column reads via
 // Buffer.from(). Any purchase bill carrying a scanned-image attachment would
 // crash on read without this. Install it once, before anything touches the db.
@@ -19,6 +32,24 @@ import { runMigrations, schema, useDb } from '@/db';
 import { AuthProvider, useAuth } from '@/auth';
 
 export default function RootLayout() {
+  // Hold the app until Inter is ready so text doesn't flash in the system font
+  // and then re-layout. Loads from a bundled asset (no native rebuild).
+  const [fontsLoaded] = useFonts({
+    Inter_400Regular,
+    Inter_500Medium,
+    Inter_600SemiBold,
+    Inter_700Bold,
+    Inter_800ExtraBold,
+  });
+
+  if (!fontsLoaded) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+
   return (
     <Suspense
       fallback={

@@ -6,7 +6,11 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { PdfActions } from '@/components/PdfActions'
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
-import { ThemedView } from '@/components/themed-view'
+import { Card } from '@/components/ui/Card'
+import { Chip } from '@/components/ui/Chip'
+import { MoneyText } from '@/components/ui/MoneyText'
+import { Radius, Spacing, Type } from '@/constants/tokens'
+import { useColors, type AppColors } from '@/hooks/use-colors'
 import { schema, useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
@@ -27,6 +31,7 @@ type LineRow = LineItem & { itemName: string | null }
 export default function InvoiceDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const db = useDb()
+  const c = useColors()
   const onEdit = () =>
     router.push({ pathname: '/invoice/edit/[id]', params: { id } })
   const [invoice, setInvoice] = useState<Invoice | null>(null)
@@ -71,24 +76,24 @@ export default function InvoiceDetailScreen() {
 
   if (loading) {
     return (
-      <ThemedView style={styles.container}>
-        <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!invoice} />
-        <ThemedText style={styles.centered}>Loading…</ThemedText>
-      </ThemedView>
+      <View style={[styles.container, { backgroundColor: c.background }]}>
+        <Header c={c} onBack={() => router.back()} onEdit={onEdit} editEnabled={!!invoice} />
+        <ThemedText style={[styles.centered, { color: c.muted }]}>Loading…</ThemedText>
+      </View>
     )
   }
 
   if (!invoice) {
     return (
-      <ThemedView style={styles.container}>
-        <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!invoice} />
+      <View style={[styles.container, { backgroundColor: c.background }]}>
+        <Header c={c} onBack={() => router.back()} onEdit={onEdit} editEnabled={!!invoice} />
         <View style={styles.centeredBlock}>
-          <ThemedText type="subtitle">Invoice not found</ThemedText>
-          <ThemedText style={styles.muted}>
+          <ThemedText style={[Type.subtitle, { color: c.text }]}>Invoice not found</ThemedText>
+          <ThemedText style={[Type.body, { color: c.muted }]}>
             This invoice may have been deleted.
           </ThemedText>
         </View>
-      </ThemedView>
+      </View>
     )
   }
 
@@ -112,39 +117,37 @@ export default function InvoiceDetailScreen() {
   const hasBalance = invoice.balanceDue > 0
 
   return (
-    <ThemedView style={styles.container}>
-      <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!invoice} />
+    <View style={[styles.container, { backgroundColor: c.background }]}>
+      <Header c={c} onBack={() => router.back()} onEdit={onEdit} editEnabled={!!invoice} />
       <ScrollView contentContainerStyle={styles.content}>
-        <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
+        <Card style={styles.hero}>
           <View style={styles.heroLeft}>
-            <ThemedText type="title" numberOfLines={1}>
+            <ThemedText style={[Type.title, { color: c.text }]} numberOfLines={1}>
               {invoice.invoiceNumber}
             </ThemedText>
-            <ThemedText style={styles.muted} numberOfLines={1}>
+            <ThemedText style={[Type.body, { color: c.muted }]} numberOfLines={1}>
               {customer?.name ?? 'Unknown customer'}
             </ThemedText>
-            <ThemedText style={styles.muted}>
+            <ThemedText style={[Type.body, { color: c.muted }]}>
               {formatDate(invoice.invoiceDate)}
             </ThemedText>
           </View>
           <View style={styles.heroRight}>
-            <ThemedText type="defaultSemiBold" style={styles.heroAmount}>
-              {formatCurrency(invoice.totalAmount)}
-            </ThemedText>
-            <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-              <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>
-                {formatInvoiceStatus(displayStatus)}
-              </ThemedText>
-            </View>
+            <MoneyText value={invoice.totalAmount} style={styles.heroAmount} />
+            <Chip
+              label={formatInvoiceStatus(displayStatus)}
+              bg={badge.bg}
+              color={badge.text}
+            />
             {countdown ? (
               <ThemedText
-                style={[styles.countdownText, { color: dueCountdownColor[countdown.tone] }]}
+                style={[Type.caption, { color: dueCountdownColor[countdown.tone] }]}
               >
                 {countdown.text}
               </ThemedText>
             ) : null}
           </View>
-        </ThemedView>
+        </Card>
 
         <PdfActions buildPayload={() => buildInvoicePdfPayload(db, id)} />
 
@@ -161,7 +164,7 @@ export default function InvoiceDetailScreen() {
             <Row
               label="Name"
               value={
-                <ThemedText style={styles.linkValue}>
+                <ThemedText style={[styles.linkValue, { color: c.accentDeep }]}>
                   {customer?.name ?? 'Unknown'}
                 </ThemedText>
               }
@@ -180,12 +183,12 @@ export default function InvoiceDetailScreen() {
         </Section>
 
         <View style={styles.section}>
-          <ThemedText type="subtitle" style={styles.sectionTitle}>
+          <ThemedText style={[Type.subtitle, styles.sectionTitle, { color: c.text }]}>
             Items ({lines.length})
           </ThemedText>
-          <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.itemsBody}>
+          <View style={[styles.itemsBody, { backgroundColor: c.surface, borderColor: c.border }]}>
             {lines.length === 0 ? (
-              <ThemedText style={[styles.muted, styles.emptyItems]}>
+              <ThemedText style={[Type.body, styles.emptyItems, { color: c.muted }]}>
                 No line items.
               </ThemedText>
             ) : (
@@ -194,23 +197,23 @@ export default function InvoiceDetailScreen() {
                   key={line.id}
                   style={[
                     styles.lineItem,
-                    idx > 0 && styles.lineItemDivider,
+                    idx > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: c.border },
                   ]}
                 >
                   <View style={styles.lineItemTop}>
-                    <ThemedText type="defaultSemiBold" style={styles.lineItemName} numberOfLines={2}>
+                    <ThemedText style={[Type.bodySemibold, styles.lineItemName, { color: c.text }]} numberOfLines={2}>
                       {line.itemName ?? 'Deleted item'}
                     </ThemedText>
-                    <ThemedText type="defaultSemiBold">
+                    <ThemedText style={[Type.bodySemibold, { color: c.text }]}>
                       {formatCurrency(line.total)}
                     </ThemedText>
                   </View>
                   <View style={styles.lineItemBottom}>
-                    <ThemedText style={styles.muted}>
+                    <ThemedText style={[Type.caption, { color: c.muted }]}>
                       {line.quantity} × {formatCurrency(line.rate)}
                     </ThemedText>
                     {line.taxRate > 0 ? (
-                      <ThemedText style={styles.muted}>
+                      <ThemedText style={[Type.caption, { color: c.muted }]}>
                         GST {line.taxRate}%
                       </ThemedText>
                     ) : null}
@@ -218,7 +221,7 @@ export default function InvoiceDetailScreen() {
                 </View>
               ))
             )}
-          </ThemedView>
+          </View>
         </View>
 
         <Section title="Totals">
@@ -240,7 +243,7 @@ export default function InvoiceDetailScreen() {
           <Row
             label="Total"
             value={
-              <ThemedText type="defaultSemiBold">
+              <ThemedText style={[Type.bodySemibold, { color: c.text }]}>
                 {formatCurrency(invoice.totalAmount)}
               </ThemedText>
             }
@@ -253,8 +256,7 @@ export default function InvoiceDetailScreen() {
               label="Balance Due"
               value={
                 <ThemedText
-                  type="defaultSemiBold"
-                  style={{ color: '#b91c1c' }}
+                  style={[Type.bodySemibold, { color: c.danger }]}
                 >
                   {formatCurrency(invoice.balanceDue)}
                 </ThemedText>
@@ -271,15 +273,17 @@ export default function InvoiceDetailScreen() {
           <Row label="Updated" value={formatDate(invoice.updatedAt)} />
         </Section>
       </ScrollView>
-    </ThemedView>
+    </View>
   )
 }
 
 function Header({
+  c,
   onBack,
   onEdit,
   editEnabled,
 }: {
+  c: AppColors
   onBack: () => void
   onEdit: () => void
   editEnabled: boolean
@@ -287,9 +291,9 @@ function Header({
   return (
     <View style={styles.header}>
       <Pressable onPress={onBack} style={styles.headerButton} hitSlop={8}>
-        <ThemedText style={styles.headerArrow}>←</ThemedText>
+        <ThemedText style={[styles.headerArrow, { color: c.text }]}>←</ThemedText>
       </Pressable>
-      <ThemedText type="defaultSemiBold" style={styles.headerTitle}>
+      <ThemedText style={[Type.subtitle, styles.headerTitle, { color: c.text }]}>
         Invoice
       </ThemedText>
       <Pressable
@@ -297,7 +301,7 @@ function Header({
         disabled={!editEnabled}
         style={[styles.headerButton, !editEnabled && styles.headerButtonDisabled]}
       >
-        <ThemedText style={styles.headerButtonText}>Edit</ThemedText>
+        <ThemedText style={[styles.headerButtonText, { color: c.accentDeep }]}>Edit</ThemedText>
       </Pressable>
     </View>
   )
@@ -308,40 +312,37 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    gap: 8,
+    paddingHorizontal: Spacing.lg,
+    paddingBottom: Spacing.md,
+    gap: Spacing.sm,
   },
   headerButton: { paddingVertical: 6, paddingHorizontal: 10 },
   headerButtonDisabled: { opacity: 0.3 },
-  headerButtonText: { fontSize: 16 },
+  headerButtonText: { fontSize: 16, fontWeight: '600' },
   headerArrow: { fontSize: 28, fontWeight: '500', lineHeight: 30 },
   headerTitle: { flex: 1, textAlign: 'center' },
-  content: { paddingHorizontal: 16, paddingBottom: 32, gap: 16 },
+  content: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xxxl, gap: Spacing.lg },
   centered: { textAlign: 'center', marginTop: 64 },
-  centeredBlock: { alignItems: 'center', marginTop: 64, gap: 8, paddingHorizontal: 32 },
+  centeredBlock: { alignItems: 'center', marginTop: 64, gap: Spacing.sm, paddingHorizontal: Spacing.xxxl },
   hero: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    padding: 16,
-    borderRadius: 12,
-    gap: 12,
+    gap: Spacing.md,
   },
-  heroLeft: { flex: 1, gap: 4 },
-  heroRight: { alignItems: 'flex-end', gap: 4 },
+  heroLeft: { flex: 1, gap: Spacing.xs },
+  heroRight: { alignItems: 'flex-end', gap: Spacing.xs },
   heroAmount: { fontSize: 22 },
-  muted: { opacity: 0.6, fontSize: 13 },
-  statusBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4 },
-  statusBadgeText: { fontSize: 10, fontWeight: '600' },
-  countdownText: { fontSize: 11, fontWeight: '500' },
-  linkValue: { color: '#0a7ea4', fontWeight: '500', textAlign: 'right' },
-  section: { gap: 8 },
-  sectionTitle: { paddingHorizontal: 4 },
-  itemsBody: { borderRadius: 12, paddingVertical: 4 },
-  emptyItems: { textAlign: 'center', paddingVertical: 16 },
-  lineItem: { paddingVertical: 10, paddingHorizontal: 14, gap: 4 },
-  lineItemDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: '#d1d5db' },
-  lineItemTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 },
+  section: { gap: Spacing.sm },
+  sectionTitle: { paddingHorizontal: Spacing.xs },
+  linkValue: { fontWeight: '500', textAlign: 'right' },
+  itemsBody: {
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.xs,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  emptyItems: { textAlign: 'center', paddingVertical: Spacing.lg },
+  lineItem: { paddingVertical: 10, paddingHorizontal: 14, gap: Spacing.xs },
+  lineItemTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: Spacing.md },
   lineItemName: { flex: 1 },
-  lineItemBottom: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
+  lineItemBottom: { flexDirection: 'row', justifyContent: 'space-between', gap: Spacing.md },
 })

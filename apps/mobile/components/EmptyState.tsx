@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, View } from 'react-native'
 
-import { useThemeColor } from '@/hooks/use-theme-color'
+import { useColors } from '@/hooks/use-colors'
+import { Radius, Spacing } from '@/constants/tokens'
 import { ThemedText } from './themed-text'
 
 interface EmptyStateProps {
@@ -28,28 +29,32 @@ export default function EmptyState({
   action,
   secondaryAction,
 }: EmptyStateProps) {
-  const tint = useThemeColor({}, 'tint')
+  const c = useColors()
 
   return (
     <View style={styles.container}>
-      <View style={[styles.iconCircle, { backgroundColor: tint }]} />
+      <View style={[styles.iconCircle, { backgroundColor: c.accent }]} />
       <ThemedText type="subtitle" style={styles.title}>
         {title}
       </ThemedText>
       {description ? (
-        <ThemedText style={styles.description}>{description}</ThemedText>
+        <ThemedText style={[styles.description, { color: c.muted }]}>
+          {description}
+        </ThemedText>
       ) : null}
       {action ? (
         <Pressable
           onPress={action.onPress}
-          style={[styles.actionButton, { backgroundColor: tint }]}
+          style={[styles.actionButton, { backgroundColor: c.accent }]}
         >
-          <ThemedText style={styles.actionButtonText}>{action.label}</ThemedText>
+          <ThemedText style={[styles.actionButtonText, { color: c.accentInk }]}>
+            {action.label}
+          </ThemedText>
         </Pressable>
       ) : null}
       {secondaryAction ? (
         <Pressable onPress={secondaryAction.onPress} style={styles.secondaryButton}>
-          <ThemedText style={styles.secondaryButtonText}>
+          <ThemedText style={[styles.secondaryButtonText, { color: c.muted }]}>
             {secondaryAction.label}
           </ThemedText>
         </Pressable>
@@ -64,28 +69,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 64,
-    paddingHorizontal: 32,
-    gap: 12,
+    paddingHorizontal: Spacing.xxxl,
+    gap: Spacing.md,
   },
   iconCircle: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    marginBottom: 8,
+    marginBottom: Spacing.sm,
     opacity: 0.15,
   },
   title: { textAlign: 'center' },
-  description: { textAlign: 'center', opacity: 0.6 },
+  description: { textAlign: 'center' },
   actionButton: {
-    marginTop: 16,
-    paddingHorizontal: 24,
+    marginTop: Spacing.lg,
+    paddingHorizontal: Spacing.xxl,
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: Radius.sm,
   },
-  actionButtonText: { color: 'white', fontWeight: '600' },
+  actionButtonText: { fontWeight: '600' },
   secondaryButton: {
-    paddingHorizontal: 24,
+    paddingHorizontal: Spacing.xxl,
     paddingVertical: 10,
   },
-  secondaryButtonText: { opacity: 0.6 },
+  secondaryButtonText: {},
 })

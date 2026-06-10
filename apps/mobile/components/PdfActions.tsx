@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react'
-import { ActivityIndicator, Alert, Pressable, StyleSheet, View } from 'react-native'
+import { Alert, StyleSheet, View } from 'react-native'
 
 import { HiddenPdfWebView, type HiddenPdfWebViewHandle } from '@/components/HiddenPdfWebView'
-import { ThemedText } from '@/components/themed-text'
+import { Button } from '@/components/ui/Button'
+import { Spacing } from '@/constants/tokens'
 import { saveAndSharePdf, viewAndDownloadPdf } from '@/utils/pdfShare'
 
 // Shared PDF action bar: a "Share PDF" button + a "View / Save" button, plus the
@@ -51,28 +52,22 @@ export function PdfActions({ buildPayload, disabled }: PdfActionsProps) {
   return (
     <View>
       <View style={styles.row}>
-        <Pressable
-          style={[styles.btn, styles.share, blocked && styles.disabled]}
+        <Button
+          title="Share PDF"
+          variant="secondary"
           onPress={() => run('share')}
+          loading={busy === 'share'}
           disabled={blocked}
-        >
-          {busy === 'share' ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <ThemedText style={styles.btnText}>Share PDF</ThemedText>
-          )}
-        </Pressable>
-        <Pressable
-          style={[styles.btn, styles.view, blocked && styles.disabled]}
+          style={styles.btn}
+        />
+        <Button
+          title="View / Save"
+          variant="primary"
           onPress={() => run('view')}
+          loading={busy === 'view'}
           disabled={blocked}
-        >
-          {busy === 'view' ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <ThemedText style={styles.btnText}>View / Save</ThemedText>
-          )}
-        </Pressable>
+          style={styles.btn}
+        />
       </View>
       <HiddenPdfWebView ref={pdfRef} />
     </View>
@@ -80,17 +75,6 @@ export function PdfActions({ buildPayload, disabled }: PdfActionsProps) {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  btn: {
-    flex: 1,
-    paddingVertical: 14,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 48,
-  },
-  share: { backgroundColor: '#0a7ea4' },
-  view: { backgroundColor: '#15803d' },
-  disabled: { opacity: 0.6 },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  row: { flexDirection: 'row', gap: Spacing.sm, marginBottom: Spacing.lg },
+  btn: { flex: 1 },
 })
