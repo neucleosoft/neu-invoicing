@@ -5,9 +5,12 @@
 // desktop app lives in the exact same Drive location this client reads from.
 
 import { Directory, File, Paths } from 'expo-file-system'
+import * as LegacyFS from 'expo-file-system/legacy'
+import * as SecureStore from 'expo-secure-store'
 import * as SQLite from 'expo-sqlite'
 
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
+const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files'
 
 // Must match the databaseName passed to <SQLiteProvider> in app/_layout.tsx.
 const MOBILE_DB_NAME = 'neu-invoicing.db'
@@ -121,5 +124,120 @@ export async function restoreFromCloud(
     await importedDb.closeAsync()
   }
 
+  // We just synced WITH the cloud — its current mtime is now this device's
+  // known-good baseline for the upload overwrite-guard.
+  if (info.modifiedTime) await setLastKnownCloudMtime(info.modifiedTime)
+
   return info
+}
+
+// ─── Backup (upload) ─────────────────────────────────────────────────────────
+
+// Per-device baseline: the cloud file's modifiedTime as of the last time THIS
+// device uploaded or restored. Lets the Back-up button warn before overwriting
+// a cloud backup some OTHER device (e.g. the desktop) wrote since. Mirrors the
+// desktop's last_known_cloud_modified_time tracker in electron-store.
+const LAST_KNOWN_CLOUD_MTIME_KEY = 'neu.sync.lastKnownCloudMtime'
+
+export async function getLastKnownCloudMtime(): Promise<string | null> {
+  return SecureStore.getItemAsync(LAST_KNOWN_CLOUD_MTIME_KEY)
+}
+
+async function setLastKnownCloudMtime(mtime: string): Promise<void> {
+  await SecureStore.setItemAsync(LAST_KNOWN_CLOUD_MTIME_KEY, mtime)
+}
+
+// True when the cloud holds a backup this device hasn't seen — i.e. uploading
+// now would overwrite changes written by another device. The Settings screen
+// uses this to show a confirm dialog before calling backupToCloud.
+export async function cloudIsAheadOfThisDevice(info: CloudBackupInfo): Promise<boolean> {
+  if (!info.exists || !info.modifiedTime) return false
+  const baseline = await getLastKnownCloudMtime()
+  if (!baseline) return true // cloud exists but this device never synced with it
+  return new Date(info.modifiedTime).getTime() > new Date(baseline).getTime()
+}
+
+// Upload the local DB to Drive's appDataFolder as `neuinvoicing.db` — the SAME
+// file desktop syncs, so either app can restore the other's backup.
+//
+// Steps and why each exists:
+//  1. Stamp SyncMetadata so the uploaded snapshot records who/when backed up
+//     (desktop writes the same row via Prisma).
+//  2. PRAGMA wal_checkpoint(TRUNCATE) — expo-sqlite runs in WAL mode, so recent
+//     commits live in the -wal sidecar, NOT the main .db file. Skipping this
+//     would upload a backup missing the newest invoices.
+//  3. Find-or-create the Drive file: metadata-only JSON POST when absent (avoids
+//     hand-building a multipart body), then PATCH the bytes with uploadType=media.
+//  4. Bytes go up via the legacy native uploader (BINARY_CONTENT) — streams from
+//     disk; a base64/arrayBuffer round-trip would OOM on large DBs (same trap
+//     restoreFromCloud's downloader comment documents).
+export async function backupToCloud(
+  accessToken: string,
+  liveDb: SQLite.SQLiteDatabase
+): Promise<CloudBackupInfo> {
+  // (1) Record this backup in the DB itself, before the snapshot is taken.
+  // Raw SQL (not Drizzle) so this module needs no db-layer import; column types
+  // match shared schema's SyncMetadata (ISO-string dates). NOTE: every NOT NULL
+  // column must be set explicitly here — the schema's $defaultFn/$onUpdate
+  // defaults (e.g. updatedAt) are JS-side Drizzle behavior that raw SQL bypasses.
+  const nowIso = new Date().toISOString()
+  await liveDb.runAsync(
+    `INSERT INTO SyncMetadata (id, lastSyncTimestamp, deviceId, syncStatus, updatedAt)
+     VALUES ('main', ?, 'mobile', 'idle', ?)
+     ON CONFLICT(id) DO UPDATE SET
+       lastSyncTimestamp = excluded.lastSyncTimestamp,
+       deviceId = excluded.deviceId,
+       syncStatus = 'idle',
+       updatedAt = excluded.updatedAt`,
+    nowIso,
+    nowIso
+  )
+
+  // (2) Fold the WAL into the main file so the upload is a complete snapshot.
+  await liveDb.getFirstAsync('PRAGMA wal_checkpoint(TRUNCATE)')
+
+  // (3) Find the existing cloud file or create an empty one to PATCH into.
+  let fileId = (await checkCloudBackup(accessToken)).fileId
+  if (!fileId) {
+    const createRes = await fetch(DRIVE_FILES_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ name: CLOUD_DB_FILENAME, parents: ['appDataFolder'] }),
+    })
+    if (!createRes.ok) {
+      throw new Error(`Drive create failed (${createRes.status}): ${await createRes.text()}`)
+    }
+    fileId = ((await createRes.json()) as { id: string }).id
+  }
+
+  // (4) Stream the DB file up. expo-sqlite stores it at documentDirectory/SQLite/.
+  const dbUri = `${LegacyFS.documentDirectory}SQLite/${MOBILE_DB_NAME}`
+  const uploadRes = await LegacyFS.uploadAsync(
+    `${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media&fields=modifiedTime,size`,
+    dbUri,
+    {
+      httpMethod: 'PATCH',
+      uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/x-sqlite3',
+      },
+    }
+  )
+  if (uploadRes.status < 200 || uploadRes.status >= 300) {
+    throw new Error(`Drive upload failed (${uploadRes.status}): ${uploadRes.body}`)
+  }
+
+  const body = JSON.parse(uploadRes.body) as { modifiedTime?: string; size?: string }
+  if (body.modifiedTime) await setLastKnownCloudMtime(body.modifiedTime)
+
+  return {
+    exists: true,
+    fileId,
+    modifiedTime: body.modifiedTime,
+    size: body.size ? Number(body.size) : undefined,
+  }
 }
