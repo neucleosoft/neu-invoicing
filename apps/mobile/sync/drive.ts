@@ -9,6 +9,9 @@ import * as LegacyFS from 'expo-file-system/legacy'
 import * as SecureStore from 'expo-secure-store'
 import * as SQLite from 'expo-sqlite'
 
+import drizzleMigrations from '../drizzle/migrations'
+import { getDeviceId } from './deviceId'
+
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files'
 
@@ -101,11 +104,21 @@ export async function restoreFromCloud(
   )
 
   // The imported file came from Prisma — it has every table our schema
-  // expects, but no __drizzle_migrations table. Without intervention the
-  // next runMigrations() pass will try to CREATE TABLE Item etc. and fail
-  // with "table already exists". Insert a single row dated forward of every
-  // known migration; Drizzle's migrator compares each migration's
-  // folderMillis against the latest created_at and skips anything older.
+  // expects, but no __drizzle_migrations table. Without intervention the next
+  // runMigrations() pass would try to CREATE TABLE Item etc. and fail with
+  // "table already exists". So we pre-seed the migration tracker to record that
+  // every CURRENTLY-bundled migration is already applied.
+  //
+  // CRITICAL — stamp each migration with its REAL folderMillis (the journal
+  // `when`), NOT Date.now(). Drizzle's migrator runs a migration only when its
+  // folderMillis is greater than MAX(created_at) in this table. A single
+  // Date.now() row poisoned that test: any migration authored BEFORE a restore
+  // (every future-shipped migration whose `when` predates the restore moment)
+  // looked "already applied" and was skipped forever — the device booted
+  // without the new table and crashed on first use ("no such table"). Stamping
+  // the real `when` of each shipped migration makes MAX(created_at) equal the
+  // newest shipped migration, so only genuinely newer migrations run, and the
+  // restored DB (which already holds every current table) is left untouched.
   const importedDb = await SQLite.openDatabaseAsync(MOBILE_DB_NAME)
   try {
     await importedDb.execAsync(`
@@ -115,11 +128,14 @@ export async function restoreFromCloud(
         created_at numeric
       );
     `)
-    await importedDb.runAsync(
-      'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
-      'imported_from_cloud',
-      Date.now()
-    )
+    const entries: { tag: string; when: number }[] = drizzleMigrations.journal.entries
+    for (const entry of entries) {
+      await importedDb.runAsync(
+        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+        entry.tag,
+        entry.when,
+      )
+    }
   } finally {
     await importedDb.closeAsync()
   }
@@ -182,15 +198,17 @@ export async function backupToCloud(
   // here — the schema's $defaultFn/$onUpdate defaults (e.g. updatedAt) are
   // JS-side Drizzle behavior that raw SQL bypasses.
   const nowMs = Date.now()
+  const deviceId = await getDeviceId()
   await liveDb.runAsync(
     `INSERT INTO SyncMetadata (id, lastSyncTimestamp, deviceId, syncStatus, updatedAt)
-     VALUES ('main', ?, 'mobile', 'idle', ?)
+     VALUES ('main', ?, ?, 'idle', ?)
      ON CONFLICT(id) DO UPDATE SET
        lastSyncTimestamp = excluded.lastSyncTimestamp,
        deviceId = excluded.deviceId,
        syncStatus = 'idle',
        updatedAt = excluded.updatedAt`,
     nowMs,
+    deviceId,
     nowMs
   )
 

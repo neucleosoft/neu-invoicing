@@ -4,8 +4,25 @@ import { getOAuth2Client, isAuthError, clearStoredCredentials } from './auth'
 import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
 import fs from 'fs'
 import Store from 'electron-store'
+import { randomUUID } from 'crypto'
 
 const store = new Store()
+
+// Stable per-install identity for sync. Each device writes only its own change
+// diary in Drive (changes-<deviceId>.json), so this id MUST be unique and stable.
+// os.hostname() was neither — renaming the PC changes it, and two machines can
+// share a default name → diary collision. Minted once as `desktop-<uuid>` and
+// kept in electron-store (beside the login token) forever after. Mirrors the
+// mobile getDeviceId() in apps/mobile/sync/deviceId.ts.
+const DEVICE_ID_KEY = 'device_id'
+
+const getDeviceId = (): string => {
+  const existing = store.get(DEVICE_ID_KEY) as string | undefined
+  if (existing) return existing
+  const minted = `desktop-${randomUUID()}`
+  store.set(DEVICE_ID_KEY, minted)
+  return minted
+}
 
 let syncStatus = {
   status: 'idle', // idle, syncing, error
@@ -343,7 +360,7 @@ export const syncUpload = async (): Promise<{ success: boolean; error?: string }
     store.set(LAST_UPLOAD_TIMESTAMP_KEY, new Date().toISOString())
 
     const prisma = getPrisma()
-    const deviceId = require('os').hostname()
+    const deviceId = getDeviceId()
     await prisma.syncMetadata.upsert({
       where: { id: 'main' },
       update: { lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
@@ -408,7 +425,7 @@ export const syncDownload = async (): Promise<{ success: boolean; error?: string
     }
 
     const prisma = getPrisma()
-    const deviceId = require('os').hostname()
+    const deviceId = getDeviceId()
     await prisma.syncMetadata.upsert({
       where: { id: 'main' },
       update: { lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
