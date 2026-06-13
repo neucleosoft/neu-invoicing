@@ -69,6 +69,7 @@ export const company = sqliteTable("Company", {
 // =============================================================
 export const customer = sqliteTable("Party", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   name: text("name").notNull(),
   type: text("type").notNull(),
   phone: text("phone"),
@@ -105,6 +106,7 @@ export const customer = sqliteTable("Party", {
 // =============================================================
 export const supplier = sqliteTable("Supplier", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   name: text("name").notNull(),
   phone: text("phone"),
   email: text("email"),
@@ -140,6 +142,7 @@ export const supplier = sqliteTable("Supplier", {
 // =============================================================
 export const item = sqliteTable("Item", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   name: text("name").notNull(),
   skuHsn: text("skuHsn"),
   hsnCode: text("hsnCode"),
@@ -168,6 +171,7 @@ export const item = sqliteTable("Item", {
 // =============================================================
 export const supplierItem = sqliteTable("SupplierItem", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   supplierId: text("supplierId")
     .notNull()
     .references(() => supplier.id, { onDelete: "cascade" }),
@@ -191,6 +195,7 @@ export const supplierItem = sqliteTable("SupplierItem", {
 // =============================================================
 export const salesInvoice = sqliteTable("SalesInvoice", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   invoiceNumber: text("invoiceNumber").notNull().unique(),
   invoiceDate: prismaDate("invoiceDate")
     .notNull()
@@ -272,6 +277,7 @@ export const salesInvoiceItem = sqliteTable("SalesInvoiceItem", {
 // =============================================================
 export const quotation = sqliteTable("Quotation", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   invoiceNumber: text("invoiceNumber").notNull().unique(),
   invoiceDate: prismaDate("invoiceDate")
     .notNull()
@@ -344,6 +350,7 @@ export const quotationItem = sqliteTable("QuotationItem", {
 // =============================================================
 export const proformaInvoice = sqliteTable("ProformaInvoice", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   invoiceNumber: text("invoiceNumber").notNull().unique(),
   invoiceDate: prismaDate("invoiceDate")
     .notNull()
@@ -416,6 +423,7 @@ export const proformaInvoiceItem = sqliteTable("ProformaInvoiceItem", {
 // =============================================================
 export const purchaseOrder = sqliteTable("PurchaseOrder", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   orderNumber: text("orderNumber").notNull().unique(),
   orderDate: prismaDate("orderDate")
     .notNull()
@@ -484,6 +492,7 @@ export const purchaseOrderItem = sqliteTable("PurchaseOrderItem", {
 // =============================================================
 export const purchaseBill = sqliteTable("PurchaseBill", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   billNumber: text("billNumber").notNull().unique(),
   billDate: prismaDate("billDate")
     .notNull()
@@ -561,6 +570,7 @@ export const purchaseBillItem = sqliteTable("PurchaseBillItem", {
 // =============================================================
 export const paymentTransaction = sqliteTable("PaymentTransaction", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   type: text("type").notNull(),
   customerId: text("partyId").references(() => customer.id),
   supplierId: text("supplierId").references(() => supplier.id),
@@ -636,6 +646,7 @@ export const settings = sqliteTable("Settings", {
 // =============================================================
 export const deliveryChallan = sqliteTable("DeliveryChallan", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   challanNumber: text("challanNumber").notNull().unique(),
   challanDate: prismaDate("challanDate")
     .notNull()
@@ -689,6 +700,7 @@ export const deliveryChallanItem = sqliteTable("DeliveryChallanItem", {
 // =============================================================
 export const creditDebitNote = sqliteTable("CreditDebitNote", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   noteNumber: text("noteNumber").notNull().unique(),
   noteDate: prismaDate("noteDate")
     .notNull()
@@ -753,6 +765,7 @@ export const creditDebitNoteItem = sqliteTable("CreditDebitNoteItem", {
 // =============================================================
 export const bankAccount = sqliteTable("BankAccount", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   name: text("name").notNull(),
   type: text("type").notNull(),
   accountNumber: text("accountNumber"),
@@ -805,6 +818,7 @@ export const gstCache = sqliteTable("GstCache", {
 // =============================================================
 export const previousInvoice = sqliteTable("PreviousInvoice", {
   id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
   serialNumber: integer("serialNumber").unique(),
   invoiceNumber: text("invoiceNumber").notNull(),
   invoiceDate: prismaDate("invoiceDate").notNull(),
