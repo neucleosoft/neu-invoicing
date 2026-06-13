@@ -15,6 +15,13 @@
       "when": 1779430957165,
       "tag": "0001_swift_psynapse",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1781362048113,
+      "tag": "0002_romantic_piledriver",
+      "breakpoints": true
     }
   ]
 }
