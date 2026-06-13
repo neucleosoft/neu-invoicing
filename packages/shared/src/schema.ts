@@ -10,17 +10,28 @@ import cuid from "cuid";
 
 const now = () => new Date();
 
-// Stores Date values as ISO-8601 strings in a TEXT column. Matches the
-// on-disk format Prisma uses for SQLite DateTime fields, so a backup file
-// produced by the desktop app can be opened by Drizzle without conversion.
-const isoDate = customType<{ data: Date; driverData: string }>({
+// Stores Date values as Unix-epoch MILLISECOND integers — the format Prisma
+// actually writes for SQLite DateTime columns. (An earlier version wrote
+// ISO-8601 text while claiming to match Prisma; on desktop-born DBs that put
+// two dialects into one column and broke SQL date comparison/sorting.
+// runMigrations' repairLegacyTextDates() converts those old text rows.)
+//
+// dataType stays "text" on purpose: changing the declared type would make
+// drizzle-kit emit table-rebuild migrations for every table. The declared
+// type only affects column affinity in mobile-born DBs; desktop-born DBs use
+// Prisma's DATETIME (numeric affinity) regardless. fromDriver therefore
+// tolerates every dialect ever written: integer ms, digit-string ms (a number
+// stored into a text-affinity column), and legacy ISO text.
+const prismaDate = customType<{ data: Date; driverData: string | number }>({
   dataType() {
     return "text";
   },
-  toDriver(value: Date): string {
-    return value.toISOString();
+  toDriver(value: Date): number {
+    return value.getTime();
   },
-  fromDriver(value: string): Date {
+  fromDriver(value: string | number): Date {
+    if (typeof value === "number") return new Date(value);
+    if (/^\d+$/.test(value)) return new Date(Number(value));
     return new Date(value);
   },
 });
@@ -44,10 +55,10 @@ export const company = sqliteTable("Company", {
   bankDetails: text("bankDetails"),
   stateCode: text("stateCode"),
   stateName: text("stateName"),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -79,11 +90,11 @@ export const customer = sqliteTable("Party", {
   fetchedFromGst: integer("fetchedFromGst", { mode: "boolean" })
     .notNull()
     .default(false),
-  lastGstFetch: isoDate("lastGstFetch"),
-  createdAt: isoDate("createdAt")
+  lastGstFetch: prismaDate("lastGstFetch"),
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -114,11 +125,11 @@ export const supplier = sqliteTable("Supplier", {
   fetchedFromGst: integer("fetchedFromGst", { mode: "boolean" })
     .notNull()
     .default(false),
-  lastGstFetch: isoDate("lastGstFetch"),
-  createdAt: isoDate("createdAt")
+  lastGstFetch: prismaDate("lastGstFetch"),
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -143,10 +154,10 @@ export const item = sqliteTable("Item", {
     .default(false),
   currentStock: real("currentStock").notNull().default(0),
   lowStockWarning: real("lowStockWarning").notNull().default(10),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -166,10 +177,10 @@ export const supplierItem = sqliteTable("SupplierItem", {
   lastPurchasePrice: real("lastPurchasePrice").notNull().default(0),
   defaultTaxRate: real("defaultTaxRate").notNull().default(0),
   linkedItemId: text("linkedItemId").references(() => item.id),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -181,10 +192,10 @@ export const supplierItem = sqliteTable("SupplierItem", {
 export const salesInvoice = sqliteTable("SalesInvoice", {
   id: text("id").primaryKey().$defaultFn(cuid),
   invoiceNumber: text("invoiceNumber").notNull().unique(),
-  invoiceDate: isoDate("invoiceDate")
+  invoiceDate: prismaDate("invoiceDate")
     .notNull()
     .$defaultFn(now),
-  dueDate: isoDate("dueDate"),
+  dueDate: prismaDate("dueDate"),
   type: text("type").notNull().default("INVOICE"),
   customerId: text("partyId")
     .notNull()
@@ -219,10 +230,10 @@ export const salesInvoice = sqliteTable("SalesInvoice", {
   vehicleNumber: text("vehicleNumber"),
   warrantyPeriod: text("warrantyPeriod"),
   dispatchedThrough: text("dispatchedThrough"),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -251,7 +262,7 @@ export const salesInvoiceItem = sqliteTable("SalesInvoiceItem", {
   igstAmount: real("igstAmount").notNull().default(0),
   cessRate: real("cessRate").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -262,10 +273,10 @@ export const salesInvoiceItem = sqliteTable("SalesInvoiceItem", {
 export const quotation = sqliteTable("Quotation", {
   id: text("id").primaryKey().$defaultFn(cuid),
   invoiceNumber: text("invoiceNumber").notNull().unique(),
-  invoiceDate: isoDate("invoiceDate")
+  invoiceDate: prismaDate("invoiceDate")
     .notNull()
     .$defaultFn(now),
-  dueDate: isoDate("dueDate"),
+  dueDate: prismaDate("dueDate"),
   customerId: text("partyId")
     .notNull()
     .references(() => customer.id),
@@ -290,11 +301,11 @@ export const quotation = sqliteTable("Quotation", {
   cessAmount: real("cessAmount").notNull().default(0),
   supplyType: text("supplyType").notNull().default("B2B"),
   ecommerceGstin: text("ecommerceGstin"),
-  deliveryTime: isoDate("deliveryTime"),
-  createdAt: isoDate("createdAt")
+  deliveryTime: prismaDate("deliveryTime"),
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -323,7 +334,7 @@ export const quotationItem = sqliteTable("QuotationItem", {
   igstAmount: real("igstAmount").notNull().default(0),
   cessRate: real("cessRate").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -334,10 +345,10 @@ export const quotationItem = sqliteTable("QuotationItem", {
 export const proformaInvoice = sqliteTable("ProformaInvoice", {
   id: text("id").primaryKey().$defaultFn(cuid),
   invoiceNumber: text("invoiceNumber").notNull().unique(),
-  invoiceDate: isoDate("invoiceDate")
+  invoiceDate: prismaDate("invoiceDate")
     .notNull()
     .$defaultFn(now),
-  dueDate: isoDate("dueDate"),
+  dueDate: prismaDate("dueDate"),
   customerId: text("partyId")
     .notNull()
     .references(() => customer.id),
@@ -362,11 +373,11 @@ export const proformaInvoice = sqliteTable("ProformaInvoice", {
   cessAmount: real("cessAmount").notNull().default(0),
   supplyType: text("supplyType").notNull().default("B2B"),
   ecommerceGstin: text("ecommerceGstin"),
-  deliveryTime: isoDate("deliveryTime"),
-  createdAt: isoDate("createdAt")
+  deliveryTime: prismaDate("deliveryTime"),
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -395,7 +406,7 @@ export const proformaInvoiceItem = sqliteTable("ProformaInvoiceItem", {
   igstAmount: real("igstAmount").notNull().default(0),
   cessRate: real("cessRate").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -406,10 +417,10 @@ export const proformaInvoiceItem = sqliteTable("ProformaInvoiceItem", {
 export const purchaseOrder = sqliteTable("PurchaseOrder", {
   id: text("id").primaryKey().$defaultFn(cuid),
   orderNumber: text("orderNumber").notNull().unique(),
-  orderDate: isoDate("orderDate")
+  orderDate: prismaDate("orderDate")
     .notNull()
     .$defaultFn(now),
-  expectedDate: isoDate("expectedDate"),
+  expectedDate: prismaDate("expectedDate"),
   supplierId: text("supplierId")
     .notNull()
     .references(() => supplier.id),
@@ -432,10 +443,10 @@ export const purchaseOrder = sqliteTable("PurchaseOrder", {
   sgstAmount: real("sgstAmount").notNull().default(0),
   igstAmount: real("igstAmount").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -463,7 +474,7 @@ export const purchaseOrderItem = sqliteTable("PurchaseOrderItem", {
   sgstAmount: real("sgstAmount").notNull().default(0),
   igstRate: real("igstRate").notNull().default(0),
   igstAmount: real("igstAmount").notNull().default(0),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -474,7 +485,7 @@ export const purchaseOrderItem = sqliteTable("PurchaseOrderItem", {
 export const purchaseBill = sqliteTable("PurchaseBill", {
   id: text("id").primaryKey().$defaultFn(cuid),
   billNumber: text("billNumber").notNull().unique(),
-  billDate: isoDate("billDate")
+  billDate: prismaDate("billDate")
     .notNull()
     .$defaultFn(now),
   supplierId: text("supplierId")
@@ -501,17 +512,17 @@ export const purchaseBill = sqliteTable("PurchaseBill", {
   igstAmount: real("igstAmount").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
   supplierInvoiceNumber: text("supplierInvoiceNumber"),
-  supplierInvoiceDate: isoDate("supplierInvoiceDate"),
+  supplierInvoiceDate: prismaDate("supplierInvoiceDate"),
   itcEligibility: text("itcEligibility").notNull().default("ELIGIBLE"),
   attachmentData: blob("attachmentData", { mode: "buffer" }),
   attachmentMimeType: text("attachmentMimeType"),
   purchaseOrderId: text("purchaseOrderId").references(() => purchaseOrder.id, {
     onDelete: "set null",
   }),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -540,7 +551,7 @@ export const purchaseBillItem = sqliteTable("PurchaseBillItem", {
   igstAmount: real("igstAmount").notNull().default(0),
   cessRate: real("cessRate").notNull().default(0),
   cessAmount: real("cessAmount").notNull().default(0),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -555,7 +566,7 @@ export const paymentTransaction = sqliteTable("PaymentTransaction", {
   supplierId: text("supplierId").references(() => supplier.id),
   amount: real("amount").notNull(),
   paymentMode: text("paymentMode").notNull().default("CASH"),
-  paymentDate: isoDate("paymentDate")
+  paymentDate: prismaDate("paymentDate")
     .notNull()
     .$defaultFn(now),
   referenceType: text("referenceType"),
@@ -563,7 +574,7 @@ export const paymentTransaction = sqliteTable("PaymentTransaction", {
   salesInvoiceId: text("salesInvoiceId").references(() => salesInvoice.id),
   purchaseBillId: text("purchaseBillId").references(() => purchaseBill.id),
   notes: text("notes"),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -581,7 +592,7 @@ export const stockMovement = sqliteTable("StockMovement", {
   referenceType: text("referenceType"),
   referenceId: text("referenceId"),
   notes: text("notes"),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -591,14 +602,14 @@ export const stockMovement = sqliteTable("StockMovement", {
 // =============================================================
 export const syncMetadata = sqliteTable("SyncMetadata", {
   id: text("id").primaryKey().$defaultFn(cuid),
-  lastSyncTimestamp: isoDate("lastSyncTimestamp")
+  lastSyncTimestamp: prismaDate("lastSyncTimestamp")
     .notNull()
     .$defaultFn(now),
   deviceId: text("deviceId").notNull(),
   syncStatus: text("syncStatus").notNull().default("idle"),
-  cloudFileModifiedTime: isoDate("cloudFileModifiedTime"),
+  cloudFileModifiedTime: prismaDate("cloudFileModifiedTime"),
   lastError: text("lastError"),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -611,10 +622,10 @@ export const settings = sqliteTable("Settings", {
   id: text("id").primaryKey().$defaultFn(cuid),
   key: text("key").notNull().unique(),
   value: text("value").notNull(),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -626,7 +637,7 @@ export const settings = sqliteTable("Settings", {
 export const deliveryChallan = sqliteTable("DeliveryChallan", {
   id: text("id").primaryKey().$defaultFn(cuid),
   challanNumber: text("challanNumber").notNull().unique(),
-  challanDate: isoDate("challanDate")
+  challanDate: prismaDate("challanDate")
     .notNull()
     .$defaultFn(now),
   customerId: text("partyId")
@@ -645,10 +656,10 @@ export const deliveryChallan = sqliteTable("DeliveryChallan", {
   ewayBillNo: text("ewayBillNo"),
   warrantyPeriod: text("warrantyPeriod"),
   dispatchedThrough: text("dispatchedThrough"),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -668,7 +679,7 @@ export const deliveryChallanItem = sqliteTable("DeliveryChallanItem", {
   discount: real("discount").notNull().default(0),
   total: real("total").notNull(),
   hsnCode: text("hsnCode"),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -679,7 +690,7 @@ export const deliveryChallanItem = sqliteTable("DeliveryChallanItem", {
 export const creditDebitNote = sqliteTable("CreditDebitNote", {
   id: text("id").primaryKey().$defaultFn(cuid),
   noteNumber: text("noteNumber").notNull().unique(),
-  noteDate: isoDate("noteDate")
+  noteDate: prismaDate("noteDate")
     .notNull()
     .$defaultFn(now),
   type: text("type").notNull(),
@@ -702,10 +713,10 @@ export const creditDebitNote = sqliteTable("CreditDebitNote", {
   status: text("status").notNull().default("ACTIVE"),
   notes: text("notes"),
   termsConditions: text("termsConditions"),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -732,7 +743,7 @@ export const creditDebitNoteItem = sqliteTable("CreditDebitNoteItem", {
   sgstAmount: real("sgstAmount").notNull().default(0),
   igstRate: real("igstRate").notNull().default(0),
   igstAmount: real("igstAmount").notNull().default(0),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });
@@ -748,10 +759,10 @@ export const bankAccount = sqliteTable("BankAccount", {
   bankName: text("bankName"),
   ifscCode: text("ifscCode"),
   currentBalance: real("currentBalance").notNull().default(0),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -777,13 +788,13 @@ export const gstCache = sqliteTable("GstCache", {
   pincode: text("pincode"),
   additionalAddresses: text("additionalAddresses"),
   rawResponse: text("rawResponse"),
-  fetchedAt: isoDate("fetchedAt")
+  fetchedAt: prismaDate("fetchedAt")
     .notNull()
     .$defaultFn(now),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -796,7 +807,7 @@ export const previousInvoice = sqliteTable("PreviousInvoice", {
   id: text("id").primaryKey().$defaultFn(cuid),
   serialNumber: integer("serialNumber").unique(),
   invoiceNumber: text("invoiceNumber").notNull(),
-  invoiceDate: isoDate("invoiceDate").notNull(),
+  invoiceDate: prismaDate("invoiceDate").notNull(),
   partyName: text("partyName").notNull(),
   partyGstin: text("partyGstin"),
   totalAmount: real("totalAmount").notNull(),
@@ -804,10 +815,10 @@ export const previousInvoice = sqliteTable("PreviousInvoice", {
   fileData: blob("fileData", { mode: "buffer" }).notNull(),
   fileMimeType: text("fileMimeType").notNull(),
   fileName: text("fileName").notNull(),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
-  updatedAt: isoDate("updatedAt")
+  updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
     .$onUpdate(now),
@@ -826,7 +837,7 @@ export const previousInvoiceItem = sqliteTable("PreviousInvoiceItem", {
   discount: real("discount").notNull().default(0),
   taxRate: real("taxRate").notNull().default(0),
   amount: real("amount").notNull(),
-  createdAt: isoDate("createdAt")
+  createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
 });

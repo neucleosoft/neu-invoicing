@@ -176,11 +176,12 @@ export async function backupToCloud(
   liveDb: SQLite.SQLiteDatabase
 ): Promise<CloudBackupInfo> {
   // (1) Record this backup in the DB itself, before the snapshot is taken.
-  // Raw SQL (not Drizzle) so this module needs no db-layer import; column types
-  // match shared schema's SyncMetadata (ISO-string dates). NOTE: every NOT NULL
-  // column must be set explicitly here — the schema's $defaultFn/$onUpdate
-  // defaults (e.g. updatedAt) are JS-side Drizzle behavior that raw SQL bypasses.
-  const nowIso = new Date().toISOString()
+  // Raw SQL (not Drizzle) so this module needs no db-layer import; dates are
+  // Unix-ms integers matching Prisma's SQLite dialect (and the shared schema's
+  // prismaDate columns). NOTE: every NOT NULL column must be set explicitly
+  // here — the schema's $defaultFn/$onUpdate defaults (e.g. updatedAt) are
+  // JS-side Drizzle behavior that raw SQL bypasses.
+  const nowMs = Date.now()
   await liveDb.runAsync(
     `INSERT INTO SyncMetadata (id, lastSyncTimestamp, deviceId, syncStatus, updatedAt)
      VALUES ('main', ?, 'mobile', 'idle', ?)
@@ -189,8 +190,8 @@ export async function backupToCloud(
        deviceId = excluded.deviceId,
        syncStatus = 'idle',
        updatedAt = excluded.updatedAt`,
-    nowIso,
-    nowIso
+    nowMs,
+    nowMs
   )
 
   // (2) Fold the WAL into the main file so the upload is a complete snapshot.
