@@ -7,7 +7,14 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { useAuth } from '@/auth';
 import { schema, useDb } from '@/db';
-import { checkCloudBackup, restoreFromCloud, type CloudBackupInfo } from '@/sync/drive';
+import { Button } from '@/components/ui/Button';
+import {
+  backupToCloud,
+  checkCloudBackup,
+  cloudIsAheadOfThisDevice,
+  restoreFromCloud,
+  type CloudBackupInfo,
+} from '@/sync/drive';
 import { getOpenRouterKey, setOpenRouterKey } from '@/utils/billOcr';
 
 export default function SettingsScreen() {
@@ -19,6 +26,7 @@ export default function SettingsScreen() {
   const [backupLoading, setBackupLoading] = useState(true);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
 
   // Company name shown in the Business section. null = still loading, '' = no
   // company yet. Reloaded on focus so it updates after editing the profile.
@@ -128,6 +136,57 @@ export default function SettingsScreen() {
     );
   }
 
+  // The actual upload. Owns its busy state so it can also be fired from the
+  // overwrite-confirm dialog's callback.
+  async function performBackup() {
+    if (!accessToken) return;
+    setBackingUp(true);
+    try {
+      const info = await backupToCloud(accessToken, liveDb);
+      setBackupInfo(info);
+      setBackupError(null);
+      Alert.alert('Backed up', 'Your data is safely in Google Drive.');
+    } catch (e) {
+      Alert.alert('Backup failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBackingUp(false);
+    }
+  }
+
+  // Overwrite guard: if the cloud holds a backup this phone hasn't synced with
+  // (e.g. the desktop uploaded since), confirm before replacing it. This is the
+  // exact failure mode that caused a real data-loss incident — never overwrite
+  // another device's newer backup silently.
+  async function handleBackup() {
+    if (!accessToken) {
+      Alert.alert('Not signed in', 'Sign in with Google to back up.');
+      return;
+    }
+    setBackingUp(true);
+    try {
+      const fresh = await checkCloudBackup(accessToken);
+      const cloudAhead = await cloudIsAheadOfThisDevice(fresh);
+      setBackingUp(false);
+
+      if (cloudAhead) {
+        const when = fresh.modifiedTime ? formatBackupDate(fresh.modifiedTime) : 'an unknown time';
+        Alert.alert(
+          'Replace cloud backup?',
+          `The cloud has a backup from ${when} that this phone hasn't synced with — it may be from your desktop. Backing up now will REPLACE it with this phone's data.`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Replace cloud backup', style: 'destructive', onPress: () => void performBackup() },
+          ],
+        );
+        return;
+      }
+      await performBackup();
+    } catch (e) {
+      setBackingUp(false);
+      Alert.alert('Backup failed', e instanceof Error ? e.message : String(e));
+    }
+  }
+
   function handleSignOut() {
     Alert.alert('Sign out?', 'You will need to sign in again to use the app.', [
       { text: 'Cancel', style: 'cancel' },
@@ -211,9 +270,17 @@ export default function SettingsScreen() {
               </View>
             </View>
           ) : (
-            <ThemedText>No cloud backup yet. Sync from desktop first.</ThemedText>
+            <ThemedText>No cloud backup yet — back up now to create one.</ThemedText>
           )
         )}
+
+        <Button
+          title="Back up to Google Drive"
+          variant="primary"
+          onPress={handleBackup}
+          loading={backingUp}
+          disabled={!accessToken || restoring}
+        />
 
         <View style={styles.warningBox}>
           <ThemedText style={styles.warningText}>

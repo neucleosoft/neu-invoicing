@@ -16,7 +16,7 @@ import { schema, useDb } from '@/db'
 
 type Db = ReturnType<typeof useDb>
 
-// One movement in the account. `date` stays a Date (Drizzle's isoDate columns
+// One movement in the account. `date` stays a Date (Drizzle's prismaDate columns
 // hand back Date objects) so the screen can sort and formatDate() it directly.
 export interface LedgerLine {
   date: Date
