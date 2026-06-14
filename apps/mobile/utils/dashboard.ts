@@ -18,6 +18,7 @@ import {
 } from 'drizzle-orm'
 
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 
 // Reuse useDb's inferred return type so callers and helpers stay in sync.
 type Db = ReturnType<typeof useDb>
@@ -43,7 +44,12 @@ export async function getTotalReceivables(db: Db): Promise<number> {
       total: sql<number>`COALESCE(SUM(${schema.salesInvoice.balanceDue}), 0)`,
     })
     .from(schema.salesInvoice)
-    .where(ne(schema.salesInvoice.status, 'PAID'))
+    .where(
+      and(
+        ne(schema.salesInvoice.status, 'PAID'),
+        notDeleted(schema.salesInvoice.deletedAt),
+      ),
+    )
   return rows[0]?.total ?? 0
 }
 
@@ -65,7 +71,12 @@ export async function getTotalInvoicedThisFY(
       total: sql<number>`COALESCE(SUM(${schema.salesInvoice.totalAmount}), 0)`,
     })
     .from(schema.salesInvoice)
-    .where(gte(schema.salesInvoice.invoiceDate, fyStartDate))
+    .where(
+      and(
+        gte(schema.salesInvoice.invoiceDate, fyStartDate),
+        notDeleted(schema.salesInvoice.deletedAt),
+      ),
+    )
   return rows[0]?.total ?? 0
 }
 
@@ -81,6 +92,7 @@ export async function getOverdueCount(db: Db): Promise<number> {
         ne(schema.salesInvoice.status, 'PAID'),
         isNotNull(schema.salesInvoice.dueDate),
         lt(schema.salesInvoice.dueDate, today),
+        notDeleted(schema.salesInvoice.deletedAt),
       ),
     )
   return rows[0]?.count ?? 0
@@ -97,6 +109,7 @@ export async function getLowStockCount(db: Db): Promise<number> {
       and(
         eq(schema.item.trackStock, true),
         sql`${schema.item.currentStock} < ${schema.item.lowStockWarning}`,
+        notDeleted(schema.item.deletedAt),
       ),
     )
   return rows[0]?.count ?? 0
@@ -122,6 +135,7 @@ export async function getRecentInvoices(
       schema.customer,
       eq(schema.salesInvoice.customerId, schema.customer.id),
     )
+    .where(notDeleted(schema.salesInvoice.deletedAt))
     .orderBy(desc(schema.salesInvoice.invoiceDate))
     .limit(limit)
   return rows.map((r) => ({ ...r.invoice, customerName: r.customerName }))
