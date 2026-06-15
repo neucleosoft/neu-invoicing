@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
+import { notDeleted, notDeletedWhere } from './softDelete'
 
 export const setupCustomerHandlers = () => {
   const prisma = getPrisma()
@@ -172,6 +173,7 @@ export const setupCustomerHandlers = () => {
               customerId: args.customerId,
               type: 'INVOICE',
               invoiceDate: { lte: to },
+              ...notDeleted,
             },
             select: { id: true, invoiceNumber: true, invoiceDate: true, totalAmount: true },
           }),
@@ -180,6 +182,7 @@ export const setupCustomerHandlers = () => {
               customerId: args.customerId,
               type: 'PAYMENT_IN',
               paymentDate: { lte: to },
+              ...notDeleted,
             },
             select: {
               id: true,
@@ -194,6 +197,7 @@ export const setupCustomerHandlers = () => {
               customerId: args.customerId,
               status: 'ACTIVE',
               noteDate: { lte: to },
+              ...notDeleted,
             },
             select: {
               id: true,
@@ -310,9 +314,11 @@ export const setupCustomerHandlers = () => {
         where: { id },
         include: {
           salesInvoices: {
+            ...notDeletedWhere,
             orderBy: { invoiceDate: 'desc' }
           },
           payments: {
+            ...notDeletedWhere,
             orderBy: { paymentDate: 'desc' }
           }
         }

@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
+import { notDeleted } from './softDelete'
 
 export const setupCashBankHandlers = () => {
   const prisma = getPrisma()
@@ -107,7 +108,7 @@ export const setupCashBankHandlers = () => {
   // Get total balance (cash, bank, total)
   ipcMain.handle('cashBank:getTotalBalance', async () => {
     try {
-      const accounts = await prisma.bankAccount.findMany()
+      const accounts = await prisma.bankAccount.findMany({ where: { ...notDeleted } })
 
       let cash = 0
       let bank = 0

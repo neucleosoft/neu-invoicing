@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
+import { notDeleted } from './softDelete'
 
 export const setupItemHandlers = () => {
   const prisma = getPrisma()
@@ -140,7 +141,8 @@ export const setupItemHandlers = () => {
       // Fetch all items that track stock, then filter by comparing fields
       const allItems = await prisma.item.findMany({
         where: {
-          trackStock: true
+          trackStock: true,
+          ...notDeleted
         },
         orderBy: { currentStock: 'asc' }
       })

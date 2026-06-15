@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
+import { notDeleted } from './softDelete'
 
 // Mirrors normalizeItemName in purchase.ts so dedupe behavior is consistent
 // across PO and Bill flows. If a PO line references a SupplierItem by id, use
@@ -350,6 +351,7 @@ export const setupPurchaseOrderHandlers = () => {
         where: {
           supplierId,
           status: { notIn: ['CLOSED', 'CANCELLED'] },
+          ...notDeleted,
         },
         include: purchaseOrderInclude,
         orderBy: { orderDate: 'desc' },
