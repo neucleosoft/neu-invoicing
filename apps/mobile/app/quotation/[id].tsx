@@ -111,23 +111,39 @@ export default function QuotationDetailScreen() {
 
   function handleDelete() {
     if (!id) return
-    Alert.alert('Delete quotation', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            // Items cascade-delete via the FK; clear them explicitly too to be safe.
-            await db.delete(schema.quotationItem).where(eq(schema.quotationItem.quotationId, id))
-            await db.delete(schema.quotation).where(eq(schema.quotation.id, id))
-            router.back()
-          } catch (e) {
-            Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete')
-          }
+    Alert.alert(
+      'Delete quotation',
+      "It will be marked Deleted and left out of totals and reports. You can restore it anytime.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row and its
+              // line items stay put so a restore brings the whole document back intact.
+              await db
+                .update(schema.quotation)
+                .set({ deletedAt: new Date() })
+                .where(eq(schema.quotation.id, id))
+              router.back()
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete')
+            }
+          },
         },
-      },
-    ])
+      ],
+    )
+  }
+
+  function handleRestore() {
+    if (!id) return
+    db.update(schema.quotation)
+      .set({ deletedAt: null })
+      .where(eq(schema.quotation.id, id))
+      .then(() => router.back())
+      .catch((e) => Alert.alert('Error', e instanceof Error ? e.message : 'Failed to restore'))
   }
 
   if (loading) {
@@ -149,10 +165,20 @@ export default function QuotationDetailScreen() {
     )
   }
 
+  const isDeleted = !!quote.deletedAt
+
   return (
     <ThemedView style={styles.container}>
       <Header onBack={() => router.back()} onEdit={onEdit} editEnabled />
       <ScrollView contentContainerStyle={styles.content}>
+        {isDeleted ? (
+          <ThemedView style={styles.deletedBanner}>
+            <ThemedText style={styles.deletedBannerText}>
+              This quotation is deleted — it's left out of totals and reports. Restore it to use it again.
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
             <ThemedText type="title">{quote.invoiceNumber}</ThemedText>
@@ -193,12 +219,20 @@ export default function QuotationDetailScreen() {
 
         {quote.notes ? <Section title="Notes"><ThemedText style={styles.notesText}>{quote.notes}</ThemedText></Section> : null}
 
-        <Pressable style={[styles.convertButton, converting && styles.disabled]} onPress={handleConvert} disabled={converting}>
-          <ThemedText style={styles.convertButtonText}>{converting ? 'Converting…' : 'Convert to Invoice'}</ThemedText>
-        </Pressable>
-        <Pressable style={styles.deleteButton} onPress={handleDelete}>
-          <ThemedText style={styles.deleteButtonText}>Delete quotation</ThemedText>
-        </Pressable>
+        {isDeleted ? (
+          <Pressable style={styles.restoreButton} onPress={handleRestore}>
+            <ThemedText style={styles.restoreButtonText}>Restore quotation</ThemedText>
+          </Pressable>
+        ) : (
+          <>
+            <Pressable style={[styles.convertButton, converting && styles.disabled]} onPress={handleConvert} disabled={converting}>
+              <ThemedText style={styles.convertButtonText}>{converting ? 'Converting…' : 'Convert to Invoice'}</ThemedText>
+            </Pressable>
+            <Pressable style={styles.deleteButton} onPress={handleDelete}>
+              <ThemedText style={styles.deleteButtonText}>Delete quotation</ThemedText>
+            </Pressable>
+          </>
+        )}
       </ScrollView>
     </ThemedView>
   )
@@ -244,4 +278,8 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   deleteButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: '#FF3B30' },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  deletedBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
+  deletedBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
+  restoreButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, backgroundColor: '#16a34a' },
+  restoreButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
 })
