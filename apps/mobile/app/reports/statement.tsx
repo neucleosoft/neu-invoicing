@@ -1,4 +1,5 @@
 import { asc } from 'drizzle-orm'
+import { notDeleted } from '@/db/softDelete'
 import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useState } from 'react'
 import {
@@ -75,7 +76,12 @@ export default function CustomerStatementScreen() {
   } | null>(null)
 
   const reload = useCallback(() => {
-    db.select().from(schema.customer).orderBy(asc(schema.customer.name)).then(setCustomers)
+    db
+      .select()
+      .from(schema.customer)
+      .where(notDeleted(schema.customer.deletedAt))
+      .orderBy(asc(schema.customer.name))
+      .then(setCustomers)
   }, [db])
 
   useFocusEffect(reload)

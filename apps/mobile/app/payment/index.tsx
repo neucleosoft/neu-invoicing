@@ -1,4 +1,5 @@
 import { asc, desc } from 'drizzle-orm'
+import { notDeleted } from '@/db/softDelete'
 import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useMemo, useState } from 'react'
 import {
@@ -56,8 +57,8 @@ export default function PaymentsScreen() {
   const reload = useCallback(() => {
     Promise.all([
       db.select().from(schema.paymentTransaction).orderBy(desc(schema.paymentTransaction.paymentDate)),
-      db.select().from(schema.customer).orderBy(asc(schema.customer.name)),
-      db.select().from(schema.supplier).orderBy(asc(schema.supplier.name)),
+      db.select().from(schema.customer).where(notDeleted(schema.customer.deletedAt)).orderBy(asc(schema.customer.name)),
+      db.select().from(schema.supplier).where(notDeleted(schema.supplier.deletedAt)).orderBy(asc(schema.supplier.name)),
     ]).then(([p, c, s]) => {
       setPayments(p)
       setCustomers(c)

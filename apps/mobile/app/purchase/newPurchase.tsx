@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 // Type-only import: fully erased at build time, so it does NOT pull the native
 // picker module in at screen-load. The runtime value is loaded lazily inside
 // runScan, so this screen + manual entry work even on an app binary built
@@ -22,6 +22,7 @@ import {
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 import { extractBillFromImage } from '@/utils/billOcr'
 import { formatCurrency } from '@/utils/currency'
 import {
@@ -72,7 +73,11 @@ export default function NewPurchaseScreen() {
   const [attachmentMimeType, setAttachmentMimeType] = useState<string | null>(null)
 
   useEffect(() => {
-    db.select().from(schema.supplier).orderBy(asc(schema.supplier.name)).then(setSuppliers)
+    db.select()
+      .from(schema.supplier)
+      .where(notDeleted(schema.supplier.deletedAt))
+      .orderBy(asc(schema.supplier.name))
+      .then(setSuppliers)
   }, [db])
 
   // Catalog is per-supplier — reload it (and clear lines tied to the old
@@ -84,7 +89,12 @@ export default function NewPurchaseScreen() {
     }
     db.select()
       .from(schema.supplierItem)
-      .where(eq(schema.supplierItem.supplierId, supplierId))
+      .where(
+        and(
+          eq(schema.supplierItem.supplierId, supplierId),
+          notDeleted(schema.supplierItem.deletedAt),
+        ),
+      )
       .orderBy(asc(schema.supplierItem.name))
       .then(setCatalog)
   }, [supplierId, db])

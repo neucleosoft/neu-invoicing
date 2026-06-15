@@ -16,6 +16,7 @@ import {
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 
 const UNIT_OPTIONS = ['pcs', 'kg', 'g', 'l', 'm', 'hrs', 'box', 'carton'] as const
 type UnitOption = (typeof UNIT_OPTIONS)[number]
@@ -62,7 +63,7 @@ export default function EditSupplierItemScreen() {
     }
     Promise.all([
       db.select().from(schema.supplierItem).where(eq(schema.supplierItem.id, id)).limit(1),
-      db.select().from(schema.item).orderBy(asc(schema.item.name)),
+      db.select().from(schema.item).where(notDeleted(schema.item.deletedAt)).orderBy(asc(schema.item.name)),
     ]).then(async ([rows, it]) => {
       const si = rows[0]
       setItems(it)

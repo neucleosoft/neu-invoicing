@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import {
@@ -16,6 +16,7 @@ import {
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 import { formatCurrency } from '@/utils/currency'
 import { updatePurchaseOrder, type PoLineInput } from '@/utils/poSave'
 
@@ -46,12 +47,12 @@ export default function EditPurchaseOrderScreen() {
   const [showCatalogPicker, setShowCatalogPicker] = useState(false)
 
   useEffect(() => {
-    db.select().from(schema.supplier).orderBy(asc(schema.supplier.name)).then(setSuppliers)
+    db.select().from(schema.supplier).where(notDeleted(schema.supplier.deletedAt)).orderBy(asc(schema.supplier.name)).then(setSuppliers)
   }, [db])
 
   useEffect(() => {
     if (!supplierId) { setCatalog([]); return }
-    db.select().from(schema.supplierItem).where(eq(schema.supplierItem.supplierId, supplierId)).orderBy(asc(schema.supplierItem.name)).then(setCatalog)
+    db.select().from(schema.supplierItem).where(and(eq(schema.supplierItem.supplierId, supplierId), notDeleted(schema.supplierItem.deletedAt))).orderBy(asc(schema.supplierItem.name)).then(setCatalog)
   }, [supplierId, db])
 
   useEffect(() => {

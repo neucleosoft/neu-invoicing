@@ -18,6 +18,7 @@ import { computeGstValues } from '@neu/shared'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
@@ -114,8 +115,8 @@ export default function EditInvoiceScreen() {
           eq(schema.salesInvoiceItem.itemId, schema.item.id),
         )
         .where(eq(schema.salesInvoiceItem.salesInvoiceId, id)),
-      db.select().from(schema.customer),
-      db.select().from(schema.item),
+      db.select().from(schema.customer).where(notDeleted(schema.customer.deletedAt)),
+      db.select().from(schema.item).where(notDeleted(schema.item.deletedAt)),
       db.select().from(schema.company).limit(1),
     ]).then(([invRows, lineRows, customerList, itemList, companyRows]) => {
       const inv = invRows[0]

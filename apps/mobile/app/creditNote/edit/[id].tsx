@@ -1,4 +1,4 @@
-import { desc, eq, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import {
@@ -18,6 +18,7 @@ import { computeGstValues } from '@neu/shared'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 
 type Item = typeof schema.item.$inferSelect
 type Invoice = typeof schema.salesInvoice.$inferSelect
@@ -111,10 +112,10 @@ export default function EditCreditNoteScreen() {
       )
       const [comp] = await db.select().from(schema.company).limit(1)
       setCompany(comp ?? null)
-      const invs = await db.select().from(schema.salesInvoice).where(eq(schema.salesInvoice.customerId, n.customerId)).orderBy(desc(schema.salesInvoice.invoiceDate))
+      const invs = await db.select().from(schema.salesInvoice).where(and(eq(schema.salesInvoice.customerId, n.customerId), notDeleted(schema.salesInvoice.deletedAt))).orderBy(desc(schema.salesInvoice.invoiceDate))
       setInvoices(invs)
       const its = await db.select().from(schema.creditDebitNoteItem).where(eq(schema.creditDebitNoteItem.creditDebitNoteId, id))
-      const allItems = await db.select().from(schema.item)
+      const allItems = await db.select().from(schema.item).where(notDeleted(schema.item.deletedAt))
       setItems(allItems)
       const nameById = new Map(allItems.map((i) => [i.id, i.name]))
       setLines(its.map((l) => ({ itemId: l.itemId, itemName: nameById.get(l.itemId) ?? 'Item', qty: l.quantity, rate: l.rate, discount: l.discount, taxRate: l.taxRate })))

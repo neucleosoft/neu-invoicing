@@ -18,6 +18,7 @@ import { computeGstValues } from '@neu/shared'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 import { generateChallanNumber } from '@/utils/docNumber'
 
 type Customer = typeof schema.customer.$inferSelect
@@ -80,8 +81,8 @@ export default function NewChallanScreen() {
   const [showTransportPicker, setShowTransportPicker] = useState(false)
 
   useEffect(() => {
-    db.select().from(schema.customer).then(setCustomers)
-    db.select().from(schema.item).then(setItems)
+    db.select().from(schema.customer).where(notDeleted(schema.customer.deletedAt)).then(setCustomers)
+    db.select().from(schema.item).where(notDeleted(schema.item.deletedAt)).then(setItems)
     db.select().from(schema.company).limit(1).then((r) => setCompany(r[0] ?? null))
     generateChallanNumber(db).then(setChallanNumber)
   }, [db])
