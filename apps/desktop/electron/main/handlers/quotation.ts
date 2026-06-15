@@ -196,8 +196,11 @@ export const setupQuotationHandlers = () => {
         throw new Error('Quotation not found')
       }
 
-      await prisma.quotation.delete({
+      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row and its line
+      // items stay put so a restore brings the whole document back intact.
+      await prisma.quotation.update({
         where: { id },
+        data: { deletedAt: new Date() },
       })
 
       return { success: true }
@@ -205,6 +208,30 @@ export const setupQuotationHandlers = () => {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete quotation',
+      }
+    }
+  })
+
+  ipcMain.handle('quotation:restore', async (_, id: string) => {
+    try {
+      const quotation = await prisma.quotation.findUnique({
+        where: { id },
+      })
+
+      if (!quotation) {
+        throw new Error('Quotation not found')
+      }
+
+      await prisma.quotation.update({
+        where: { id },
+        data: { deletedAt: null },
+      })
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restore quotation',
       }
     }
   })

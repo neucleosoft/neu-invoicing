@@ -107,6 +107,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("quotation:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("quotation:delete", id),
+    restore: (id: string) => ipcRenderer.invoke("quotation:restore", id),
     convertToInvoice: (id: string) =>
       ipcRenderer.invoke("quotation:convertToInvoice", id),
     generateQuotationNumber: () =>

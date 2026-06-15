@@ -223,6 +223,7 @@ export interface Quotation {
   items: QuotationItem[]
   createdAt: string
   updatedAt: string
+  deletedAt?: string | null
 }
 
 export interface QuotationItem {
@@ -665,6 +666,7 @@ declare global {
         create: (data: any) => Promise<{ success: boolean; data?: Quotation; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: Quotation; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        restore: (id: string) => Promise<{ success: boolean; error?: string }>
         convertToInvoice: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         generateQuotationNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
       }
