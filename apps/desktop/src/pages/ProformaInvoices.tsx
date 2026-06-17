@@ -324,7 +324,7 @@ const ProformaInvoices = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this proforma invoice?', danger: true })
+    const confirmed = await confirm({ message: 'Delete this proforma invoice? It will be marked Deleted and left out of totals and reports. You can restore it anytime.', danger: true })
     if (confirmed) {
       const result = await window.electronAPI.proformaInvoice.delete(id)
       if (result.success) {
@@ -332,6 +332,15 @@ const ProformaInvoices = () => {
       } else {
         toast.error('Failed to delete proforma invoice: ' + (result.error || 'Unknown error'))
       }
+    }
+  }
+
+  const handleRestore = async (id: string) => {
+    const result = await window.electronAPI.proformaInvoice.restore(id)
+    if (result.success) {
+      loadProformaInvoices()
+    } else {
+      toast.error('Failed to restore proforma invoice: ' + (result.error || 'Unknown error'))
     }
   }
 
@@ -670,8 +679,10 @@ const ProformaInvoices = () => {
                 </tr>
               </thead>
               <tbody>
-                {sortedProformaInvoices.map((proformaInvoice, index) => (
-                  <tr key={proformaInvoice.id} className="border-t">
+                {sortedProformaInvoices.map((proformaInvoice, index) => {
+                  const isDeleted = !!proformaInvoice.deletedAt
+                  return (
+                  <tr key={proformaInvoice.id} className={`border-t ${isDeleted ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{proformaInvoice.invoiceNumber}</td>
                     <td className="table-cell">{new Date(proformaInvoice.invoiceDate).toLocaleDateString('en-GB')}</td>
@@ -679,47 +690,71 @@ const ProformaInvoices = () => {
                     <td className="table-cell">{proformaInvoice.customer?.name}</td>
                     <td className="table-cell">{formatCurrency(proformaInvoice.totalAmount)}</td>
                     <td className="table-cell">
-                      <span className={`px-2 py-1 rounded-full text-xs ${statusBadgeClass(proformaInvoice.status)}`}>
-                        {proformaInvoice.status}
-                      </span>
+                      {isDeleted ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                          Deleted
+                        </span>
+                      ) : (
+                        <span className={`px-2 py-1 rounded-full text-xs ${statusBadgeClass(proformaInvoice.status)}`}>
+                          {proformaInvoice.status}
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={() => handleView(proformaInvoice.id)}
-                          className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                        >
-                          View
-                        </button>
-                        <button
-                          onClick={() => handleEdit(proformaInvoice)}
-                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-                        >
-                          Edit
-                        </button>
-                        <DownloadMenu getOpts={() => buildDownloadOpts(proformaInvoice.id)} />
-                        <ShareMenu
-                          onShare={(target) => handleShare(proformaInvoice.id, target)}
-                          phone={proformaInvoice.customer?.phone}
-                          email={proformaInvoice.customer?.email}
-                          partyName={proformaInvoice.customer?.name}
-                        />
-                        <button
-                          onClick={() => handleConvertToInvoice(proformaInvoice.id)}
-                          className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
-                        >
-                          Convert
-                        </button>
-                        <button
-                          onClick={() => handleDelete(proformaInvoice.id)}
-                          className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      {isDeleted ? (
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleView(proformaInvoice.id)}
+                            className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleRestore(proformaInvoice.id)}
+                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                          >
+                            Restore
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleView(proformaInvoice.id)}
+                            className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleEdit(proformaInvoice)}
+                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                          >
+                            Edit
+                          </button>
+                          <DownloadMenu getOpts={() => buildDownloadOpts(proformaInvoice.id)} />
+                          <ShareMenu
+                            onShare={(target) => handleShare(proformaInvoice.id, target)}
+                            phone={proformaInvoice.customer?.phone}
+                            email={proformaInvoice.customer?.email}
+                            partyName={proformaInvoice.customer?.name}
+                          />
+                          <button
+                            onClick={() => handleConvertToInvoice(proformaInvoice.id)}
+                            className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
+                          >
+                            Convert
+                          </button>
+                          <button
+                            onClick={() => handleDelete(proformaInvoice.id)}
+                            className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

@@ -190,13 +190,22 @@ const PurchaseOrders = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const ok = await confirm({ message: 'Delete this purchase order?', danger: true })
+    const ok = await confirm({ message: 'Delete this purchase order? It will be marked Deleted and left out of totals and reports. You can restore it anytime.', danger: true })
     if (!ok) return
     const result = await window.electronAPI.purchaseOrder.delete(id)
     if (result.success) {
       loadOrders()
     } else {
       toast.error('Failed to delete: ' + (result.error || 'Unknown error'))
+    }
+  }
+
+  const handleRestore = async (id: string) => {
+    const result = await window.electronAPI.purchaseOrder.restore(id)
+    if (result.success) {
+      loadOrders()
+    } else {
+      toast.error('Failed to restore: ' + (result.error || 'Unknown error'))
     }
   }
 
@@ -782,8 +791,10 @@ const PurchaseOrders = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredOrders.map((order, index) => (
-                  <tr key={order.id} className="border-t">
+                {filteredOrders.map((order, index) => {
+                  const isDeleted = !!order.deletedAt
+                  return (
+                  <tr key={order.id} className={`border-t ${isDeleted ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{order.orderNumber}</td>
                     <td className="table-cell">{new Date(order.orderDate).toLocaleDateString('en-GB')}</td>
@@ -793,31 +804,50 @@ const PurchaseOrders = () => {
                     <td className="table-cell">{order.supplier?.name}</td>
                     <td className="table-cell">{formatCurrency(order.totalAmount)}</td>
                     <td className="table-cell">
-                      <span className={`px-2 py-1 rounded-full text-xs ${STATUS_BADGE[order.status] || STATUS_BADGE.DRAFT}`}>
-                        {STATUS_LABEL[order.status] || order.status}
-                      </span>
+                      {isDeleted ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                          Deleted
+                        </span>
+                      ) : (
+                        <span className={`px-2 py-1 rounded-full text-xs ${STATUS_BADGE[order.status] || STATUS_BADGE.DRAFT}`}>
+                          {STATUS_LABEL[order.status] || order.status}
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
-                      <div className="flex items-center space-x-2">
-                        <button onClick={() => handleView(order.id)} className="text-primary-600 hover:text-primary-700">View</button>
-                        <button
-                          onClick={() => handleEdit(order)}
-                          className="text-green-600 hover:text-green-700"
-                        >
-                          Edit
-                        </button>
-                        <DownloadMenu getOpts={() => buildDownloadOpts(order.id)} />
-                        <ShareMenu
-                          onShare={(target) => handleShare(order.id, target)}
-                          phone={order.supplier?.phone}
-                          email={order.supplier?.email}
-                          partyName={order.supplier?.name}
-                        />
-                        <button onClick={() => handleDelete(order.id)} className="text-red-600 hover:text-red-700">Delete</button>
-                      </div>
+                      {isDeleted ? (
+                        <div className="flex items-center space-x-2">
+                          <button onClick={() => handleView(order.id)} className="text-primary-600 hover:text-primary-700">View</button>
+                          <button
+                            onClick={() => handleRestore(order.id)}
+                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                          >
+                            Restore
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-2">
+                          <button onClick={() => handleView(order.id)} className="text-primary-600 hover:text-primary-700">View</button>
+                          <button
+                            onClick={() => handleEdit(order)}
+                            className="text-green-600 hover:text-green-700"
+                          >
+                            Edit
+                          </button>
+                          <DownloadMenu getOpts={() => buildDownloadOpts(order.id)} />
+                          <ShareMenu
+                            onShare={(target) => handleShare(order.id, target)}
+                            phone={order.supplier?.phone}
+                            email={order.supplier?.email}
+                            partyName={order.supplier?.name}
+                          />
+                          <button onClick={() => handleDelete(order.id)} className="text-red-600 hover:text-red-700">Delete</button>
+                        </div>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

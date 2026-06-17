@@ -28,6 +28,7 @@ interface PreviousInvoice {
   notes?: string | null
   fileMimeType: string
   fileName: string
+  deletedAt?: string | null
   createdAt: string
   updatedAt: string
 }
@@ -387,7 +388,7 @@ const PreviousInvoices = () => {
   const handleDelete = async (row: PreviousInvoice) => {
     const ok = await confirm({
       title: 'Delete previous invoice?',
-      message: `${row.invoiceNumber} — ${row.partyName}. This permanently removes the uploaded file. Continue?`,
+      message: `${row.invoiceNumber} — ${row.partyName}. It will be marked Deleted and left out of totals and reports. The uploaded file is preserved and you can restore it anytime.`,
       confirmText: 'Delete',
       danger: true,
     })
@@ -398,6 +399,16 @@ const PreviousInvoices = () => {
       return
     }
     toast.success('Deleted')
+    await loadRows()
+  }
+
+  const handleRestore = async (row: PreviousInvoice) => {
+    const result = await window.electronAPI.previousInvoice.restore(row.id)
+    if (!result.success) {
+      toast.error(result.error || 'Failed to restore')
+      return
+    }
+    toast.success('Restored')
     await loadRows()
   }
 
@@ -762,8 +773,10 @@ const PreviousInvoices = () => {
                 </tr>
               </thead>
               <tbody>
-                {sortedItems.map((row, index) => (
-                  <tr key={row.id} className="border-t">
+                {sortedItems.map((row, index) => {
+                  const isDeleted = !!row.deletedAt
+                  return (
+                  <tr key={row.id} className={`border-t ${isDeleted ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">
                       <button
@@ -784,42 +797,68 @@ const PreviousInvoices = () => {
                     <td className="table-cell">{row.partyName}</td>
                     <td className="table-cell">{formatCurrency(row.totalAmount)}</td>
                     <td className="table-cell">
-                      <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
-                        Archived
-                      </span>
+                      {isDeleted ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                          Deleted
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
+                          Archived
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
-                      <div className="flex items-center space-x-2">
-                        <button
-                          type="button"
-                          onClick={() => handleView(row)}
-                          className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                        >
-                          View
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => openEdit(row)}
-                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-                        >
-                          Edit
-                        </button>
-                        <DownloadMenu getOpts={() => buildDownloadOpts(row)} />
-                        <ShareMenu
-                          onShare={(target) => handleShare(row, target)}
-                          partyName={row.partyName}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => handleDelete(row)}
-                          className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      {isDeleted ? (
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => handleView(row)}
+                            className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRestore(row)}
+                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                          >
+                            Restore
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-2">
+                          <button
+                            type="button"
+                            onClick={() => handleView(row)}
+                            className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => openEdit(row)}
+                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                          >
+                            Edit
+                          </button>
+                          <DownloadMenu getOpts={() => buildDownloadOpts(row)} />
+                          <ShareMenu
+                            onShare={(target) => handleShare(row, target)}
+                            partyName={row.partyName}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleDelete(row)}
+                            className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

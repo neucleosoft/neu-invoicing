@@ -262,12 +262,46 @@ export const setupPurchaseOrderHandlers = () => {
 
   ipcMain.handle('purchaseOrder:delete', async (_, id: string) => {
     try {
-      await prisma.purchaseOrder.delete({ where: { id } })
+      const order = await prisma.purchaseOrder.findUnique({ where: { id } })
+
+      if (!order) {
+        throw new Error('Purchase order not found')
+      }
+
+      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The header and its
+      // line items stay put so a restore brings the whole document back intact.
+      await prisma.purchaseOrder.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      })
+
       return { success: true }
     } catch (error) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete purchase order',
+      }
+    }
+  })
+
+  ipcMain.handle('purchaseOrder:restore', async (_, id: string) => {
+    try {
+      const order = await prisma.purchaseOrder.findUnique({ where: { id } })
+
+      if (!order) {
+        throw new Error('Purchase order not found')
+      }
+
+      await prisma.purchaseOrder.update({
+        where: { id },
+        data: { deletedAt: null },
+      })
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restore purchase order',
       }
     }
   })

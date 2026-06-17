@@ -210,34 +210,18 @@ export const setupSupplierHandlers = () => {
   ipcMain.handle('supplier:delete', async (_, id: string) => {
     try {
       const supplier = await prisma.supplier.findUnique({
-        where: { id },
-        include: {
-          purchaseBills: { take: 1 },
-          // Without this guard, the FK's ON DELETE SET NULL would silently orphan PAYMENT_OUT rows.
-          payments: { take: 1 }
-        }
+        where: { id }
       })
 
       if (!supplier) {
         return { success: false, error: 'Supplier not found' }
       }
 
-      if (supplier.purchaseBills.length > 0) {
-        return {
-          success: false,
-          error: 'Cannot delete supplier with existing purchase bills. Delete those records first.'
-        }
-      }
-
-      if (supplier.payments.length > 0) {
-        return {
-          success: false,
-          error: 'Cannot delete supplier with recorded payments. Delete those records first.'
-        }
-      }
-
-      await prisma.supplier.delete({
-        where: { id }
+      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row stays put so
+      // a restore brings the supplier back intact.
+      await prisma.supplier.update({
+        where: { id },
+        data: { deletedAt: new Date() }
       })
 
       return { success: true }
@@ -245,6 +229,31 @@ export const setupSupplierHandlers = () => {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete supplier'
+      }
+    }
+  })
+
+  // Restore supplier
+  ipcMain.handle('supplier:restore', async (_, id: string) => {
+    try {
+      const supplier = await prisma.supplier.findUnique({
+        where: { id }
+      })
+
+      if (!supplier) {
+        return { success: false, error: 'Supplier not found' }
+      }
+
+      await prisma.supplier.update({
+        where: { id },
+        data: { deletedAt: null }
+      })
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restore supplier'
       }
     }
   })

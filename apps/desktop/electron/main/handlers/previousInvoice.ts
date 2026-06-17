@@ -76,6 +76,7 @@ export const setupPreviousInvoiceHandlers = () => {
           notes: true,
           fileMimeType: true,
           fileName: true,
+          deletedAt: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -262,12 +263,45 @@ export const setupPreviousInvoiceHandlers = () => {
 
   ipcMain.handle('previousInvoice:delete', async (_, id: string) => {
     try {
-      await prisma.previousInvoice.delete({ where: { id } })
+      const existing = await prisma.previousInvoice.findUnique({ where: { id } })
+      if (!existing) {
+        throw new Error('Previous invoice not found')
+      }
+
+      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The header, its line
+      // items, and the uploaded file stay put so a restore brings the whole
+      // archive record back intact.
+      await prisma.previousInvoice.update({
+        where: { id },
+        data: { deletedAt: new Date() },
+      })
+
       return { success: true }
     } catch (error) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete previous invoice',
+      }
+    }
+  })
+
+  ipcMain.handle('previousInvoice:restore', async (_, id: string) => {
+    try {
+      const existing = await prisma.previousInvoice.findUnique({ where: { id } })
+      if (!existing) {
+        throw new Error('Previous invoice not found')
+      }
+
+      await prisma.previousInvoice.update({
+        where: { id },
+        data: { deletedAt: null },
+      })
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restore previous invoice',
       }
     }
   })

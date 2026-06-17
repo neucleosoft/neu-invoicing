@@ -43,6 +43,7 @@ interface BaseParty {
   lastGstFetch?: string
   createdAt: string
   updatedAt: string
+  deletedAt?: string | null
 }
 
 export interface Customer extends BaseParty {
@@ -104,6 +105,7 @@ export interface Item {
   lowStockWarning: number
   createdAt: string
   updatedAt: string
+  deletedAt?: string | null
 }
 
 export interface SupplierItem {
@@ -121,6 +123,7 @@ export interface SupplierItem {
   defaultTaxRate: number
   createdAt: string
   updatedAt: string
+  deletedAt?: string | null
 }
 
 export type SalesDocumentType = 'INVOICE'
@@ -279,6 +282,7 @@ export interface ProformaInvoice {
   items: ProformaInvoiceItem[]
   createdAt: string
   updatedAt: string
+  deletedAt?: string | null
 }
 
 export interface ProformaInvoiceItem {
@@ -399,6 +403,7 @@ export interface PurchaseOrder {
   }>
   createdAt: string
   updatedAt: string
+  deletedAt?: string | null
 }
 
 export interface PurchaseOrderItem {
@@ -622,6 +627,7 @@ declare global {
         create: (data: Partial<Customer>) => Promise<{ success: boolean; data?: Customer; error?: string }>
         update: (id: string, data: Partial<Customer>) => Promise<{ success: boolean; data?: Customer; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        restore: (id: string) => Promise<{ success: boolean; error?: string }>
         getLedger: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
         getStatement: (args: {
           customerId: string
@@ -635,6 +641,7 @@ declare global {
         create: (data: Partial<Supplier>) => Promise<{ success: boolean; data?: Supplier; error?: string }>
         update: (id: string, data: Partial<Supplier>) => Promise<{ success: boolean; data?: Supplier; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        restore: (id: string) => Promise<{ success: boolean; error?: string }>
       }
       supplierItem: {
         getAll: (supplierId?: string) => Promise<{ success: boolean; data?: SupplierItem[]; error?: string }>
@@ -642,6 +649,7 @@ declare global {
         create: (data: Partial<SupplierItem>) => Promise<{ success: boolean; data?: SupplierItem; error?: string }>
         update: (id: string, data: Partial<SupplierItem>) => Promise<{ success: boolean; data?: SupplierItem; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        restore: (id: string) => Promise<{ success: boolean; error?: string }>
       }
       item: {
         getAll: () => Promise<{ success: boolean; data?: Item[]; error?: string }>
@@ -649,6 +657,7 @@ declare global {
         create: (data: Partial<Item>) => Promise<{ success: boolean; data?: Item; error?: string }>
         update: (id: string, data: Partial<Item>) => Promise<{ success: boolean; data?: Item; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        restore: (id: string) => Promise<{ success: boolean; error?: string }>
         getLowStock: () => Promise<{ success: boolean; data?: Item[]; error?: string }>
       }
       sales: {
@@ -676,6 +685,7 @@ declare global {
         create: (data: any) => Promise<{ success: boolean; data?: ProformaInvoice; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: ProformaInvoice; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        restore: (id: string) => Promise<{ success: boolean; error?: string }>
         convertToInvoice: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         generateNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
       }
@@ -694,6 +704,7 @@ declare global {
         create: (data: any) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: PurchaseOrder; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        restore: (id: string) => Promise<{ success: boolean; error?: string }>
         generateOrderNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
         markAsReceived: (
           id: string,
@@ -734,6 +745,7 @@ declare global {
         create: (data: any) => Promise<{ success: boolean; data?: any; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: any; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        restore: (id: string) => Promise<{ success: boolean; error?: string }>
         extractFromPdfText: (args: { fileBytes: Uint8Array }) => Promise<{ success: boolean; data?: any; error?: string }>
       }
       cashBank: {
@@ -742,6 +754,7 @@ declare global {
         create: (data: any) => Promise<{ success: boolean; data?: any; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: any; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        restore: (id: string) => Promise<{ success: boolean; error?: string }>
         getTotalBalance: () => Promise<{ success: boolean; data?: { cash: number; bank: number; total: number }; error?: string }>
         adjustBalance: (id: string, amount: number, notes?: string) => Promise<{ success: boolean; data?: any; error?: string }>
       }

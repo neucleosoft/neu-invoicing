@@ -207,7 +207,10 @@ const Customers = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this customer?', danger: true })
+    const confirmed = await confirm({
+      message: 'Delete this customer? It will be marked Deleted and left out of totals and reports. You can restore it anytime.',
+      danger: true,
+    })
     if (confirmed) {
       const result = await window.electronAPI.customer.delete(id)
       if (result.success) {
@@ -215,6 +218,15 @@ const Customers = () => {
       } else {
         toast.error('Failed to delete customer: ' + (result.error || 'Unknown error'))
       }
+    }
+  }
+
+  const handleRestore = async (id: string) => {
+    const result = await window.electronAPI.customer.restore(id)
+    if (result.success) {
+      loadCustomers()
+    } else {
+      toast.error('Failed to restore customer: ' + (result.error || 'Unknown error'))
     }
   }
 
@@ -330,8 +342,9 @@ const Customers = () => {
             <tbody>
               {sortedCustomers.map((customer, index) => {
                 const balanceDisplay = getBalanceDisplay(customer)
+                const isDeleted = !!customer.deletedAt
                 return (
-                  <tr key={customer.id} className="border-t">
+                  <tr key={customer.id} className={`border-t ${isDeleted ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell">
                       <div className="flex items-center gap-3">
@@ -351,9 +364,15 @@ const Customers = () => {
                       </div>
                     </td>
                     <td className="table-cell">
-                      <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                        {customer.type}
-                      </span>
+                      {isDeleted ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                          Deleted
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
+                          {customer.type}
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
                       {customer.taxId ? (
@@ -385,18 +404,37 @@ const Customers = () => {
                       </div>
                     </td>
                     <td className="table-cell">
-                      <button
-                        onClick={() => navigate('/customer-ledger', { state: { party: customer } })}
-                        className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 mr-3"
-                      >
-                        Ledger
-                      </button>
-                      <button onClick={() => handleEdit(customer)} className="text-primary-600 hover:text-primary-700 mr-3">
-                        Edit
-                      </button>
-                      <button onClick={() => handleDelete(customer.id)} className="text-red-600 hover:text-red-700">
-                        Delete
-                      </button>
+                      {isDeleted ? (
+                        <>
+                          <button
+                            onClick={() => navigate('/customer-ledger', { state: { party: customer } })}
+                            className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 mr-3"
+                          >
+                            Ledger
+                          </button>
+                          <button
+                            onClick={() => handleRestore(customer.id)}
+                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                          >
+                            Restore
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => navigate('/customer-ledger', { state: { party: customer } })}
+                            className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 mr-3"
+                          >
+                            Ledger
+                          </button>
+                          <button onClick={() => handleEdit(customer)} className="text-primary-600 hover:text-primary-700 mr-3">
+                            Edit
+                          </button>
+                          <button onClick={() => handleDelete(customer.id)} className="text-red-600 hover:text-red-700">
+                            Delete
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 )

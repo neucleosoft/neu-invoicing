@@ -102,28 +102,19 @@ export const setupItemHandlers = () => {
   // Delete item
   ipcMain.handle('item:delete', async (_, id: string) => {
     try {
-      // Check if item is used in any invoices or bills
       const item = await prisma.item.findUnique({
-        where: { id },
-        include: {
-          salesInvoiceItems: { take: 1 },
-          supplierItems: { take: 1 }
-        }
+        where: { id }
       })
 
       if (!item) {
         return { success: false, error: 'Item not found' }
       }
 
-      if (item.salesInvoiceItems.length > 0 || item.supplierItems.length > 0) {
-        return {
-          success: false,
-          error: 'Cannot delete item used in invoices or linked supplier items. Delete those records first.'
-        }
-      }
-
-      await prisma.item.delete({
-        where: { id }
+      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row stays put
+      // so a restore brings it back intact, and invoice/supplier links survive.
+      await prisma.item.update({
+        where: { id },
+        data: { deletedAt: new Date() }
       })
 
       return { success: true }
@@ -131,6 +122,31 @@ export const setupItemHandlers = () => {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete item'
+      }
+    }
+  })
+
+  // Restore item
+  ipcMain.handle('item:restore', async (_, id: string) => {
+    try {
+      const item = await prisma.item.findUnique({
+        where: { id }
+      })
+
+      if (!item) {
+        return { success: false, error: 'Item not found' }
+      }
+
+      await prisma.item.update({
+        where: { id },
+        data: { deletedAt: null }
+      })
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restore item'
       }
     }
   })

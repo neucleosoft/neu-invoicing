@@ -576,6 +576,10 @@ const Quotations = () => {
     return true
   })
 
+  // Deleted quotations stay visible in the table (marked), but must never ride
+  // along in a bulk export or inflate its count.
+  const activeFilteredQuotations = filteredQuotations.filter((q) => !q.deletedAt)
+
   const { sortedItems: sortedQuotations, sortKey, sortDir, toggleSort } = useSortable(filteredQuotations, [
     { key: 'invoiceNumber', accessor: (i) => i.invoiceNumber },
     { key: 'invoiceDate', accessor: (i) => new Date(i.invoiceDate).getTime() },
@@ -631,15 +635,15 @@ const Quotations = () => {
         )}
         {dateFilter !== 'all' && (
           <span className="text-sm text-gray-500 dark:text-gray-400">
-            {filteredQuotations.length} {filteredQuotations.length === 1 ? 'quotation' : 'quotations'}
+            {activeFilteredQuotations.length} {activeFilteredQuotations.length === 1 ? 'quotation' : 'quotations'}
           </span>
         )}
-        {filteredQuotations.length > 0 && (
+        {activeFilteredQuotations.length > 0 && (
           <BulkDownloadMenu
-            count={filteredQuotations.length}
+            count={activeFilteredQuotations.length}
             busy={bulkDownloading}
-            onPdfs={() => handleBulkDownloadPdfs(filteredQuotations)}
-            onExcel={() => handleBulkDownloadExcel(filteredQuotations)}
+            onPdfs={() => handleBulkDownloadPdfs(activeFilteredQuotations)}
+            onExcel={() => handleBulkDownloadExcel(activeFilteredQuotations)}
           />
         )}
       </div>
