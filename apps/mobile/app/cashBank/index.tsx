@@ -51,6 +51,8 @@ export default function CashBankScreen() {
     let cash = 0
     let bank = 0
     for (const a of accounts) {
+      // Deleted accounts are left out of Cash/Bank/Total.
+      if (a.deletedAt) continue
       if (a.type === 'CASH') cash += a.currentBalance
       else if (a.type === 'BANK') bank += a.currentBalance
     }
@@ -122,21 +124,38 @@ export default function CashBankScreen() {
   }
 
   function handleDelete(a: Account) {
-    Alert.alert('Delete account', `Delete "${a.name}"?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await db.delete(schema.bankAccount).where(eq(schema.bankAccount.id, a.id))
-            reload()
-          } catch (e) {
-            Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete')
-          }
+    Alert.alert(
+      'Delete account',
+      "It will be marked Deleted and left out of totals and reports. You can restore it anytime.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row stays
+              // put so a restore brings the account back intact.
+              await db
+                .update(schema.bankAccount)
+                .set({ deletedAt: new Date() })
+                .where(eq(schema.bankAccount.id, a.id))
+              reload()
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete')
+            }
+          },
         },
-      },
-    ])
+      ],
+    )
+  }
+
+  function handleRestore(a: Account) {
+    db.update(schema.bankAccount)
+      .set({ deletedAt: null })
+      .where(eq(schema.bankAccount.id, a.id))
+      .then(reload)
+      .catch((e) => Alert.alert('Error', e instanceof Error ? e.message : 'Failed to restore'))
   }
 
   function openAdjust(a: Account) {
@@ -200,16 +219,24 @@ export default function CashBankScreen() {
             action={{ label: 'Add Account', onPress: openCreate }}
           />
         }
-        renderItem={({ item }) => (
-          <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+        renderItem={({ item }) => {
+          const isDeleted = !!item.deletedAt
+          return (
+          <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={[styles.card, isDeleted && styles.cardDeleted]}>
             <View style={styles.cardLeft}>
               <View style={styles.cardTitleRow}>
                 <ThemedText type="defaultSemiBold" numberOfLines={1}>{item.name}</ThemedText>
-                <View style={[styles.typeBadge, { backgroundColor: item.type === 'CASH' ? '#dcfce7' : '#dbeafe' }]}>
-                  <ThemedText style={[styles.typeBadgeText, { color: item.type === 'CASH' ? '#166534' : '#1e40af' }]}>
-                    {item.type}
-                  </ThemedText>
-                </View>
+                {isDeleted ? (
+                  <View style={styles.deletedBadge}>
+                    <ThemedText style={styles.deletedBadgeText}>Deleted</ThemedText>
+                  </View>
+                ) : (
+                  <View style={[styles.typeBadge, { backgroundColor: item.type === 'CASH' ? '#dcfce7' : '#dbeafe' }]}>
+                    <ThemedText style={[styles.typeBadgeText, { color: item.type === 'CASH' ? '#166534' : '#1e40af' }]}>
+                      {item.type}
+                    </ThemedText>
+                  </View>
+                )}
               </View>
               {item.type === 'BANK' && (item.bankName || item.accountNumber) ? (
                 <ThemedText style={styles.metaText} numberOfLines={1}>
@@ -224,18 +251,27 @@ export default function CashBankScreen() {
               </ThemedText>
             </View>
             <View style={styles.cardActions}>
-              <Pressable onPress={() => openAdjust(item)} hitSlop={6} style={styles.actionChip}>
-                <ThemedText style={styles.adjustText}>Adjust</ThemedText>
-              </Pressable>
-              <Pressable onPress={() => openEdit(item)} hitSlop={6} style={styles.actionChip}>
-                <ThemedText style={styles.editText}>Edit</ThemedText>
-              </Pressable>
-              <Pressable onPress={() => handleDelete(item)} hitSlop={6} style={styles.actionChip}>
-                <ThemedText style={styles.delText}>Delete</ThemedText>
-              </Pressable>
+              {isDeleted ? (
+                <Pressable onPress={() => handleRestore(item)} hitSlop={6} style={styles.actionChip}>
+                  <ThemedText style={styles.restoreText}>Restore</ThemedText>
+                </Pressable>
+              ) : (
+                <>
+                  <Pressable onPress={() => openAdjust(item)} hitSlop={6} style={styles.actionChip}>
+                    <ThemedText style={styles.adjustText}>Adjust</ThemedText>
+                  </Pressable>
+                  <Pressable onPress={() => openEdit(item)} hitSlop={6} style={styles.actionChip}>
+                    <ThemedText style={styles.editText}>Edit</ThemedText>
+                  </Pressable>
+                  <Pressable onPress={() => handleDelete(item)} hitSlop={6} style={styles.actionChip}>
+                    <ThemedText style={styles.delText}>Delete</ThemedText>
+                  </Pressable>
+                </>
+              )}
             </View>
           </ThemedView>
-        )}
+          )
+        }}
       />
 
       {/* Add / Edit account modal */}
@@ -396,16 +432,20 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     gap: 12,
   },
+  cardDeleted: { opacity: 0.6 },
   cardLeft: { flex: 1, gap: 3 },
   cardTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   metaText: { fontSize: 12, opacity: 0.6 },
   typeBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   typeBadgeText: { fontSize: 10, fontWeight: '600' },
+  deletedBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  deletedBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
   cardActions: { alignItems: 'flex-end', gap: 6 },
   actionChip: { paddingHorizontal: 4, paddingVertical: 1 },
   adjustText: { fontSize: 13, fontWeight: '600', color: '#7c3aed' },
   editText: { fontSize: 13, fontWeight: '600', color: '#007AFF' },
   delText: { fontSize: 13, fontWeight: '600', color: '#dc2626' },
+  restoreText: { fontSize: 13, fontWeight: '600', color: '#16a34a' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { maxHeight: '85%', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16 },
   modalTitle: { marginBottom: 12 },

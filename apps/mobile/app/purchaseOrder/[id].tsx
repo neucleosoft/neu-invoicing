@@ -11,7 +11,7 @@ import { schema, useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
 import { buildPurchaseOrderPdfPayload } from '@/utils/purchaseOrderPdf'
-import { deletePurchaseOrder, markPoReceived } from '@/utils/poSave'
+import { deletePurchaseOrder, markPoReceived, restorePurchaseOrder } from '@/utils/poSave'
 
 type PurchaseOrder = typeof schema.purchaseOrder.$inferSelect
 type POItem = typeof schema.purchaseOrderItem.$inferSelect
@@ -79,7 +79,7 @@ export default function PurchaseOrderDetailScreen() {
 
   function handleDelete() {
     if (!id) return
-    Alert.alert('Delete purchase order', 'This cannot be undone.', [
+    Alert.alert('Delete purchase order', 'It will be marked Deleted and left out of totals and reports. You can restore it anytime.', [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Delete', style: 'destructive', onPress: async () => {
         try { await deletePurchaseOrder(db, id); router.back() }
@@ -88,13 +88,30 @@ export default function PurchaseOrderDetailScreen() {
     ])
   }
 
+  function handleRestore() {
+    if (!id) return
+    restorePurchaseOrder(db, id)
+      .then(() => router.back())
+      .catch((e) => Alert.alert('Error', e instanceof Error ? e.message : 'Failed to restore'))
+  }
+
   if (loading) return <ThemedView style={styles.container}><Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!po} /><ThemedText style={styles.centered}>Loading…</ThemedText></ThemedView>
   if (!po) return <ThemedView style={styles.container}><Header onBack={() => router.back()} onEdit={onEdit} editEnabled={false} /><View style={styles.centeredBlock}><ThemedText type="subtitle">Purchase order not found</ThemedText></View></ThemedView>
+
+  const isDeleted = !!po.deletedAt
 
   return (
     <ThemedView style={styles.container}>
       <Header onBack={() => router.back()} onEdit={onEdit} editEnabled />
       <ScrollView contentContainerStyle={styles.content}>
+        {isDeleted ? (
+          <ThemedView style={styles.deletedBanner}>
+            <ThemedText style={styles.deletedBannerText}>
+              This purchase order is deleted — it's left out of totals and reports. Restore it to use it again.
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
             <ThemedText type="title">{po.orderNumber}</ThemedText>
@@ -131,8 +148,14 @@ export default function PurchaseOrderDetailScreen() {
         {po.notes ? <Section title="Notes"><ThemedText style={styles.notesText}>{po.notes}</ThemedText></Section> : null}
 
         <PdfActions buildPayload={() => buildPurchaseOrderPdfPayload(db, id)} />
-        <Pressable style={styles.receiveButton} onPress={openReceive}><ThemedText style={styles.receiveButtonText}>Mark Received</ThemedText></Pressable>
-        <Pressable style={styles.deleteButton} onPress={handleDelete}><ThemedText style={styles.deleteButtonText}>Delete order</ThemedText></Pressable>
+        {isDeleted ? (
+          <Pressable style={styles.restoreButton} onPress={handleRestore}><ThemedText style={styles.restoreButtonText}>Restore order</ThemedText></Pressable>
+        ) : (
+          <>
+            <Pressable style={styles.receiveButton} onPress={openReceive}><ThemedText style={styles.receiveButtonText}>Mark Received</ThemedText></Pressable>
+            <Pressable style={styles.deleteButton} onPress={handleDelete}><ThemedText style={styles.deleteButtonText}>Delete order</ThemedText></Pressable>
+          </>
+        )}
       </ScrollView>
 
       <Modal visible={showReceive} animationType="slide" transparent>
@@ -205,6 +228,10 @@ const styles = StyleSheet.create({
   receiveButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
   deleteButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: '#FF3B30' },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  deletedBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
+  deletedBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
+  restoreButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, backgroundColor: '#16a34a' },
+  restoreButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { maxHeight: '85%', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16 },
   modalTitle: { marginBottom: 8 },

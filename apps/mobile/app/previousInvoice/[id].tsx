@@ -57,7 +57,7 @@ export default function PreviousInvoiceDetailScreen() {
     if (!id) return
     Alert.alert(
       'Delete previous invoice',
-      'This removes the archived record and its uploaded file. This cannot be undone.',
+      "It will be marked Deleted and left out of totals and reports. The uploaded file is preserved and you can restore it anytime.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -65,9 +65,13 @@ export default function PreviousInvoiceDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Items cascade-delete via the FK; clear them explicitly too to be safe.
-              await db.delete(schema.previousInvoiceItem).where(eq(schema.previousInvoiceItem.previousInvoiceId, id))
-              await db.delete(schema.previousInvoice).where(eq(schema.previousInvoice.id, id))
+              // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The header,
+              // its line items, and the uploaded file stay put so a restore
+              // brings the whole archive record back intact.
+              await db
+                .update(schema.previousInvoice)
+                .set({ deletedAt: new Date() })
+                .where(eq(schema.previousInvoice.id, id))
               router.back()
             } catch (e) {
               Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete')
@@ -76,6 +80,15 @@ export default function PreviousInvoiceDetailScreen() {
         },
       ],
     )
+  }
+
+  function handleRestore() {
+    if (!id) return
+    db.update(schema.previousInvoice)
+      .set({ deletedAt: null })
+      .where(eq(schema.previousInvoice.id, id))
+      .then(() => router.back())
+      .catch((e) => Alert.alert('Error', e instanceof Error ? e.message : 'Failed to restore'))
   }
 
   if (loading) {
@@ -99,10 +112,20 @@ export default function PreviousInvoiceDetailScreen() {
     )
   }
 
+  const isDeleted = !!invoice.deletedAt
+
   return (
     <ThemedView style={styles.container}>
       <Header onBack={() => router.back()} />
       <ScrollView contentContainerStyle={styles.content}>
+        {isDeleted ? (
+          <ThemedView style={styles.deletedBanner}>
+            <ThemedText style={styles.deletedBannerText}>
+              This previous invoice is deleted — it's left out of totals and reports. Restore it to use it again.
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
             <ThemedText type="title">{invoice.invoiceNumber}</ThemedText>
@@ -142,9 +165,15 @@ export default function PreviousInvoiceDetailScreen() {
           </Pressable>
         ) : null}
 
-        <Pressable style={styles.deleteButton} onPress={handleDelete}>
-          <ThemedText style={styles.deleteButtonText}>Delete previous invoice</ThemedText>
-        </Pressable>
+        {isDeleted ? (
+          <Pressable style={styles.restoreButton} onPress={handleRestore}>
+            <ThemedText style={styles.restoreButtonText}>Restore previous invoice</ThemedText>
+          </Pressable>
+        ) : (
+          <Pressable style={styles.deleteButton} onPress={handleDelete}>
+            <ThemedText style={styles.deleteButtonText}>Delete previous invoice</ThemedText>
+          </Pressable>
+        )}
       </ScrollView>
 
       {fileUri ? (
@@ -218,6 +247,10 @@ const styles = StyleSheet.create({
     borderColor: '#FF3B30',
   },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  deletedBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
+  deletedBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
+  restoreButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, backgroundColor: '#16a34a' },
+  restoreButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
   fileOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.92)',
