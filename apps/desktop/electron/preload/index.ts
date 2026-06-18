@@ -140,7 +140,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     create: (data: any) => ipcRenderer.invoke("purchase:create", data),
     update: (id: string, data: any) =>
       ipcRenderer.invoke("purchase:update", id, data),
-    delete: (id: string) => ipcRenderer.invoke("purchase:delete", id),
+    cancel: (id: string) => ipcRenderer.invoke("purchase:cancel", id),
     generateBillNumber: () => ipcRenderer.invoke("purchase:generateBillNumber"),
     extractFromImage: (args: { fileBytes: Uint8Array; mimeType: string }) =>
       ipcRenderer.invoke("purchase:extractFromImage", args),

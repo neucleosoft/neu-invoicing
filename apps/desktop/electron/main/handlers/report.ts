@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { notDeleted } from './softDelete'
+import { notCancelled, notDeleted } from './softDelete'
 
 export const setupReportHandlers = () => {
   const prisma = getPrisma()
@@ -232,7 +232,7 @@ export const setupReportHandlers = () => {
       }
 
       const purchaseBills = await prisma.purchaseBill.findMany({
-        where: { ...billWhere, ...notDeleted },
+        where: { ...billWhere, ...notDeleted, ...notCancelled },
         select: {
           billDate: true,
           billNumber: true,

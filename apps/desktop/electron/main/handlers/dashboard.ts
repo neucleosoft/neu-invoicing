@@ -28,7 +28,8 @@ export const setupDashboardHandlers = () => {
           status: {
             in: ['DRAFT', 'PARTIAL', 'OVERDUE']
           },
-          ...notDeleted
+          ...notDeleted,
+          ...notCancelled
         },
         _sum: {
           balanceDue: true

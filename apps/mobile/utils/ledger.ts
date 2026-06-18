@@ -181,6 +181,7 @@ export async function buildSupplierLedger(
         and(
           eq(schema.purchaseBill.supplierId, supplierId),
           notDeleted(schema.purchaseBill.deletedAt),
+          notCancelled(schema.purchaseBill.cancelledAt),
         ),
       ),
     db

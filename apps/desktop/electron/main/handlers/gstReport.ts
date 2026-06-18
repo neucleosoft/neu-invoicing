@@ -2,7 +2,7 @@ import { ipcMain, app } from 'electron'
 import { getPrisma } from '../database'
 import ExcelJS from 'exceljs'
 import path from 'path'
-import { notDeleted } from './softDelete'
+import { notCancelled, notDeleted } from './softDelete'
 
 // Indian State Codes
 export const INDIAN_STATES: Record<string, string> = {
@@ -562,6 +562,7 @@ export const setupGSTReportHandlers = () => {
     try {
       const where: any = {
         ...notDeleted,
+        ...notCancelled,
         billDate: {
           gte: new Date(filters.startDate),
           lte: new Date(filters.endDate)
@@ -708,6 +709,7 @@ export const setupGSTReportHandlers = () => {
       const purchaseBills = await prisma.purchaseBill.findMany({
         where: {
           ...notDeleted,
+          ...notCancelled,
           billDate: { gte: startDate, lte: endDate }
         },
         include: {
@@ -880,6 +882,7 @@ export const setupGSTReportHandlers = () => {
       const purchaseBills = await prisma.purchaseBill.findMany({
         where: {
           ...notDeleted,
+          ...notCancelled,
           billDate: { gte: startDate, lte: endDate }
         },
         include: {

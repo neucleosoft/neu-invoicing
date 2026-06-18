@@ -337,6 +337,7 @@ export interface PurchaseBill {
   items: PurchaseBillItem[]
   createdAt: string
   updatedAt: string
+  cancelledAt?: string | null
 }
 
 export interface ExtractedBillItem {
@@ -695,7 +696,7 @@ declare global {
         getById: (id: string) => Promise<{ success: boolean; data?: PurchaseBill; error?: string }>
         create: (data: any) => Promise<{ success: boolean; data?: PurchaseBill; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: PurchaseBill; error?: string }>
-        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        cancel: (id: string) => Promise<{ success: boolean; error?: string }>
         generateBillNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
         extractFromImage: (args: { fileBytes: Uint8Array; mimeType: string }) => Promise<{ success: boolean; data?: ExtractedBillData; error?: string }>
       }

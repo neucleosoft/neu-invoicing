@@ -160,6 +160,7 @@ async function fetchBills(db: Db, range: GstRange): Promise<BillRow[]> {
         gte(schema.purchaseBill.billDate, range.start),
         lte(schema.purchaseBill.billDate, range.end),
         notDeleted(schema.purchaseBill.deletedAt),
+        notCancelled(schema.purchaseBill.cancelledAt),
       ),
     )
 }

@@ -9,7 +9,7 @@
 import { and, asc, desc, eq, gt, gte, lte, sql, type SQL } from 'drizzle-orm'
 
 import { schema, useDb } from '@/db'
-import { notDeleted } from '@/db/softDelete'
+import { notCancelled, notDeleted } from '@/db/softDelete'
 
 type Db = ReturnType<typeof useDb>
 
@@ -165,7 +165,7 @@ export async function getTaxReport(db: Db, range: DateRange): Promise<TaxReport>
   if (range.startDate) sConds.push(gte(schema.salesInvoice.invoiceDate, range.startDate))
   if (range.endDate) sConds.push(lte(schema.salesInvoice.invoiceDate, range.endDate))
 
-  const pConds: SQL[] = [notDeleted(schema.purchaseBill.deletedAt)]
+  const pConds: SQL[] = [notDeleted(schema.purchaseBill.deletedAt), notCancelled(schema.purchaseBill.cancelledAt)]
   if (range.startDate) pConds.push(gte(schema.purchaseBill.billDate, range.startDate))
   if (range.endDate) pConds.push(lte(schema.purchaseBill.billDate, range.endDate))
 
