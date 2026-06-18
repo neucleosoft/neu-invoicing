@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { notDeleted, notDeletedWhere } from './softDelete'
+import { notCancelled, notDeleted, notDeletedWhere } from './softDelete'
 
 export const setupCustomerHandlers = () => {
   const prisma = getPrisma()
@@ -216,6 +216,7 @@ export const setupCustomerHandlers = () => {
               status: 'ACTIVE',
               noteDate: { lte: to },
               ...notDeleted,
+              ...notCancelled,
             },
             select: {
               id: true,

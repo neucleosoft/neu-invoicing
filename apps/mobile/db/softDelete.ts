@@ -18,3 +18,14 @@ import { isNull, type Column } from 'drizzle-orm'
 export function notDeleted(deletedAt: Column) {
   return isNull(deletedAt)
 }
+
+// Cancel read filter (sync R8, Mode B). The 5 money documents (sales invoice,
+// purchase bill, credit/debit note, delivery challan, payment) are never deleted —
+// they get a terminal `cancelledAt` timestamp whose effect on balances/stock was
+// already reversed. So every NUMBER (reports, GST, ledgers, recompute) must hide
+// cancelled rows, exactly like notDeleted hides archived rows. Same one-line impl,
+// deliberately a SEPARATE name so the intent is clear and `notCancelled(` is
+// greppable to prove no money figure counts a cancelled doc.
+export function notCancelled(cancelledAt: Column) {
+  return isNull(cancelledAt)
+}

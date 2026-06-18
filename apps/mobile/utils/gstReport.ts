@@ -14,7 +14,7 @@
 import { and, eq, gte, inArray, lte } from 'drizzle-orm'
 
 import { schema, useDb } from '@/db'
-import { notDeleted } from '@/db/softDelete'
+import { notCancelled, notDeleted } from '@/db/softDelete'
 
 type Db = ReturnType<typeof useDb>
 
@@ -184,6 +184,7 @@ async function fetchNotes(db: Db, range: GstRange): Promise<NoteRow[]> {
         gte(schema.creditDebitNote.noteDate, range.start),
         lte(schema.creditDebitNote.noteDate, range.end),
         notDeleted(schema.creditDebitNote.deletedAt),
+        notCancelled(schema.creditDebitNote.cancelledAt),
       ),
     )
 }

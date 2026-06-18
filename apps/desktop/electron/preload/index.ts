@@ -255,7 +255,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     create: (data: any) => ipcRenderer.invoke("creditNote:create", data),
     update: (id: string, data: any) =>
       ipcRenderer.invoke("creditNote:update", id, data),
-    delete: (id: string) => ipcRenderer.invoke("creditNote:delete", id),
+    cancel: (id: string) => ipcRenderer.invoke("creditNote:cancel", id),
     generateNoteNumber: (type: string) =>
       ipcRenderer.invoke("creditNote:generateNoteNumber", type),
   },

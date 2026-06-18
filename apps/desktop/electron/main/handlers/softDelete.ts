@@ -15,3 +15,12 @@ export const notDeleted = { deletedAt: null } as const
 
 // For nested `include` relations whose child is itself a soft-deletable table.
 export const notDeletedWhere = { where: { deletedAt: null } } as const
+
+// Cancel read filter (sync R8, Mode B). The 5 money documents are never deleted —
+// they get a terminal `cancelledAt` timestamp whose balance/stock effect was
+// already reversed. So every NUMBER (reports, GST, statements, recompute) must hide
+// cancelled rows, exactly like notDeleted hides archived ones. Separate name so the
+// intent is clear and `notCancelled` is greppable. Spread BOTH into a where to
+// exclude archived AND cancelled: `where: { ...notDeleted, ...notCancelled }`.
+export const notCancelled = { cancelledAt: null } as const
+export const notCancelledWhere = { where: { cancelledAt: null } } as const

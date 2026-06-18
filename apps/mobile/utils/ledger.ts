@@ -13,7 +13,7 @@
 import { and, eq } from 'drizzle-orm'
 
 import { schema, useDb } from '@/db'
-import { notDeleted } from '@/db/softDelete'
+import { notCancelled, notDeleted } from '@/db/softDelete'
 
 type Db = ReturnType<typeof useDb>
 
@@ -116,6 +116,7 @@ export async function buildCustomerLedger(
         and(
           eq(schema.creditDebitNote.customerId, customerId),
           notDeleted(schema.creditDebitNote.deletedAt),
+          notCancelled(schema.creditDebitNote.cancelledAt),
         ),
       ),
   ])
