@@ -169,6 +169,8 @@ model Item {
 // Sales Invoices
 model SalesInvoice {
   deletedAt                DateTime? // soft-delete (sync R8): null = live, timestamp = deleted-at-then
+  cancelledAt              DateTime? // cancel/void (Mode B): null = live, timestamp = cancelled-at-then (terminal, never restored)
+  cancelReason             String? // optional free-text reason for the cancellation
   id                       String           @id @default(cuid())
   invoiceNumber            String           @unique
   invoiceDate              DateTime         @default(now())
@@ -361,6 +363,8 @@ model ProformaInvoiceItem {
 // Purchase Bills
 model PurchaseBill {
   deletedAt             DateTime? // soft-delete (sync R8): null = live, timestamp = deleted-at-then
+  cancelledAt           DateTime? // cancel/void (Mode B): null = live, timestamp = cancelled-at-then (terminal, never restored)
+  cancelReason          String? // optional free-text reason for the cancellation
   id                    String         @id @default(cuid())
   billNumber            String         @unique
   billDate              DateTime       @default(now())
@@ -499,6 +503,8 @@ model PurchaseBillItem {
 // Payment Transactions (Payment In and Payment Out)
 model PaymentTransaction {
   deletedAt      DateTime? // soft-delete (sync R8): null = live, timestamp = deleted-at-then
+  cancelledAt    DateTime? // cancel/void (Mode B): null = live, timestamp = cancelled-at-then (terminal, never restored)
+  cancelReason   String? // optional free-text reason for the cancellation
   id             String        @id @default(cuid())
   type           String // PAYMENT_IN or PAYMENT_OUT
   customerId     String?       @map("partyId")
@@ -554,6 +560,8 @@ model Settings {
 // Delivery Challan (goods dispatch without invoice)
 model DeliveryChallan {
   deletedAt            DateTime? // soft-delete (sync R8): null = live, timestamp = deleted-at-then
+  cancelledAt          DateTime? // cancel/void (Mode B): null = live, timestamp = cancelled-at-then (terminal, never restored)
+  cancelReason         String? // optional free-text reason for the cancellation
   id                   String                @id @default(cuid())
   challanNumber        String                @unique
   challanDate          DateTime              @default(now())
@@ -596,6 +604,8 @@ model DeliveryChallanItem {
 // Credit and Debit Notes (for returns / adjustments)
 model CreditDebitNote {
   deletedAt          DateTime? // soft-delete (sync R8): null = live, timestamp = deleted-at-then
+  cancelledAt        DateTime? // cancel/void (Mode B): null = live, timestamp = cancelled-at-then (terminal, never restored)
+  cancelReason       String? // optional free-text reason for the cancellation
   id                 String                @id @default(cuid())
   noteNumber         String                @unique
   noteDate           DateTime              @default(now())

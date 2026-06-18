@@ -196,6 +196,8 @@ export const supplierItem = sqliteTable("SupplierItem", {
 export const salesInvoice = sqliteTable("SalesInvoice", {
   id: text("id").primaryKey().$defaultFn(cuid),
   deletedAt: prismaDate("deletedAt"),
+  cancelledAt: prismaDate("cancelledAt"),
+  cancelReason: text("cancelReason"),
   invoiceNumber: text("invoiceNumber").notNull().unique(),
   invoiceDate: prismaDate("invoiceDate")
     .notNull()
@@ -493,6 +495,8 @@ export const purchaseOrderItem = sqliteTable("PurchaseOrderItem", {
 export const purchaseBill = sqliteTable("PurchaseBill", {
   id: text("id").primaryKey().$defaultFn(cuid),
   deletedAt: prismaDate("deletedAt"),
+  cancelledAt: prismaDate("cancelledAt"),
+  cancelReason: text("cancelReason"),
   billNumber: text("billNumber").notNull().unique(),
   billDate: prismaDate("billDate")
     .notNull()
@@ -571,6 +575,8 @@ export const purchaseBillItem = sqliteTable("PurchaseBillItem", {
 export const paymentTransaction = sqliteTable("PaymentTransaction", {
   id: text("id").primaryKey().$defaultFn(cuid),
   deletedAt: prismaDate("deletedAt"),
+  cancelledAt: prismaDate("cancelledAt"),
+  cancelReason: text("cancelReason"),
   type: text("type").notNull(),
   customerId: text("partyId").references(() => customer.id),
   supplierId: text("supplierId").references(() => supplier.id),
@@ -647,6 +653,8 @@ export const settings = sqliteTable("Settings", {
 export const deliveryChallan = sqliteTable("DeliveryChallan", {
   id: text("id").primaryKey().$defaultFn(cuid),
   deletedAt: prismaDate("deletedAt"),
+  cancelledAt: prismaDate("cancelledAt"),
+  cancelReason: text("cancelReason"),
   challanNumber: text("challanNumber").notNull().unique(),
   challanDate: prismaDate("challanDate")
     .notNull()
@@ -701,6 +709,8 @@ export const deliveryChallanItem = sqliteTable("DeliveryChallanItem", {
 export const creditDebitNote = sqliteTable("CreditDebitNote", {
   id: text("id").primaryKey().$defaultFn(cuid),
   deletedAt: prismaDate("deletedAt"),
+  cancelledAt: prismaDate("cancelledAt"),
+  cancelReason: text("cancelReason"),
   noteNumber: text("noteNumber").notNull().unique(),
   noteDate: prismaDate("noteDate")
     .notNull()
