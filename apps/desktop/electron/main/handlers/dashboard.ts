@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { notDeleted } from './softDelete'
+import { notCancelled, notDeleted } from './softDelete'
 
 export const setupDashboardHandlers = () => {
   const prisma = getPrisma()
@@ -145,7 +145,7 @@ export const setupDashboardHandlers = () => {
           take: limit
         }),
         prisma.paymentTransaction.findMany({
-          where: { ...notDeleted },
+          where: { ...notDeleted, ...notCancelled },
           include: {
             customer: true,
             supplier: true

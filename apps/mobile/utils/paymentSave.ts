@@ -124,8 +124,9 @@ export async function updatePayment(
   })
 }
 
-// Delete a payment: reverse its effect, then remove the row.
-export async function deletePayment(db: Db, id: string): Promise<void> {
+// Cancel a payment (Mode B): reverse its effect, then stamp cancelledAt. The row
+// stays on record, marked Cancelled, forever. Terminal — there is no restore.
+export async function cancelPayment(db: Db, id: string): Promise<void> {
   await db.transaction(async (tx) => {
     const [existing] = await tx
       .select()
@@ -133,6 +134,7 @@ export async function deletePayment(db: Db, id: string): Promise<void> {
       .where(eq(schema.paymentTransaction.id, id))
       .limit(1)
     if (!existing) throw new Error('Payment not found')
+    if (existing.cancelledAt) return // already cancelled — never reverse the balance twice
 
     await reversePayment(tx, {
       type: existing.type as PaymentType,
@@ -143,7 +145,8 @@ export async function deletePayment(db: Db, id: string): Promise<void> {
       purchaseBillId: existing.purchaseBillId,
     })
     await tx
-      .delete(schema.paymentTransaction)
+      .update(schema.paymentTransaction)
+      .set({ cancelledAt: new Date() })
       .where(eq(schema.paymentTransaction.id, id))
   })
 }

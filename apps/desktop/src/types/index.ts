@@ -452,6 +452,7 @@ export interface PaymentTransaction {
   referenceType?: 'INVOICE' | 'BILL' | 'ADVANCE'
   referenceId?: string
   notes?: string
+  cancelledAt?: string | null
   createdAt: string
 }
 
@@ -719,7 +720,7 @@ declare global {
         recordPaymentOut: (data: any) => Promise<{ success: boolean; data?: PaymentTransaction; error?: string }>
         getAll: (type?: string) => Promise<{ success: boolean; data?: PaymentTransaction[]; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: PaymentTransaction; error?: string }>
-        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        cancel: (id: string) => Promise<{ success: boolean; error?: string }>
       }
       challan: {
         getAll: () => Promise<{ success: boolean; data?: any[]; error?: string }>

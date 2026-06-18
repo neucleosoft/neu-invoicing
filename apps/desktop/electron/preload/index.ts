@@ -174,7 +174,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getAll: (type?: string) => ipcRenderer.invoke("payment:getAll", type),
     update: (id: string, data: any) =>
       ipcRenderer.invoke("payment:update", id, data),
-    delete: (id: string) => ipcRenderer.invoke("payment:delete", id),
+    cancel: (id: string) => ipcRenderer.invoke("payment:cancel", id),
   },
 
   // Dashboard

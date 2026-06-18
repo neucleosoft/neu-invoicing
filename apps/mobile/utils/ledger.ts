@@ -101,6 +101,7 @@ export async function buildCustomerLedger(
           eq(schema.paymentTransaction.customerId, customerId),
           eq(schema.paymentTransaction.type, 'PAYMENT_IN'),
           notDeleted(schema.paymentTransaction.deletedAt),
+          notCancelled(schema.paymentTransaction.cancelledAt),
         ),
       ),
     db
@@ -195,6 +196,7 @@ export async function buildSupplierLedger(
           eq(schema.paymentTransaction.supplierId, supplierId),
           eq(schema.paymentTransaction.type, 'PAYMENT_OUT'),
           notDeleted(schema.paymentTransaction.deletedAt),
+          notCancelled(schema.paymentTransaction.cancelledAt),
         ),
       ),
   ])

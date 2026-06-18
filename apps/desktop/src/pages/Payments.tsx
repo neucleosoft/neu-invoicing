@@ -88,18 +88,18 @@ const Payments = () => {
     setShowModal(true)
   }
 
-  const handleDelete = async (pmt: PaymentTransaction) => {
+  const handleCancel = async (pmt: PaymentTransaction) => {
     const ok = await confirm({
-      message: 'Delete this payment? The party balance and any linked invoice/bill will be adjusted back.',
+      message: 'Cancel this payment? The party balance and any linked invoice/bill are adjusted back, and it is marked Cancelled for your records. This cannot be undone.',
       danger: true,
     })
     if (!ok) return
-    const result = await window.electronAPI.payment.delete(pmt.id)
+    const result = await window.electronAPI.payment.cancel(pmt.id)
     if (result.success) {
-      toast.success('Payment deleted')
+      toast.success('Payment cancelled')
       loadPayments()
     } else {
-      toast.error('Failed to delete payment: ' + (result.error || 'Unknown error'))
+      toast.error('Failed to cancel payment: ' + (result.error || 'Unknown error'))
     }
   }
 
@@ -208,7 +208,7 @@ const Payments = () => {
             </thead>
             <tbody>
               {payments.map((payment, index) => (
-                <tr key={payment.id} className="border-t">
+                <tr key={payment.id} className={`border-t ${payment.cancelledAt ? 'opacity-60' : ''}`}>
                   <td className="table-cell">{index + 1}</td>
                   <td className="table-cell">{new Date(payment.paymentDate).toLocaleDateString('en-GB')}</td>
                   <td className="table-cell">
@@ -223,18 +223,26 @@ const Payments = () => {
                   <td className="table-cell">{payment.paymentMode.replace('_', ' ')}</td>
                   <td className="table-cell">{payment.notes || '-'}</td>
                   <td className="table-cell">
-                    <button
-                      onClick={() => openEditModal(payment)}
-                      className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 mr-3"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => handleDelete(payment)}
-                      className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                    >
-                      Delete
-                    </button>
+                    {payment.cancelledAt ? (
+                      <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                        Cancelled
+                      </span>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => openEditModal(payment)}
+                          className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300 mr-3"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleCancel(payment)}
+                          className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                        >
+                          Cancel
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}

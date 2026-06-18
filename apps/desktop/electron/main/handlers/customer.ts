@@ -201,6 +201,7 @@ export const setupCustomerHandlers = () => {
               type: 'PAYMENT_IN',
               paymentDate: { lte: to },
               ...notDeleted,
+              ...notCancelled,
             },
             select: {
               id: true,

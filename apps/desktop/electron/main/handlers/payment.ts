@@ -280,22 +280,26 @@ export const setupPaymentHandlers = () => {
     }
   })
 
-  // Delete a payment — reverse its effect on balances and the linked invoice/bill.
-  ipcMain.handle('payment:delete', async (_, id: string) => {
+  // Cancel a payment (Mode B): reverse its effect on balances and the linked
+  // invoice/bill, then stamp cancelledAt instead of deleting. The row stays on
+  // record, marked Cancelled, forever. Terminal — there is no restore.
+  ipcMain.handle('payment:cancel', async (_, id: string) => {
     try {
       const existing = await prisma.paymentTransaction.findUnique({ where: { id } })
       if (!existing) return { success: false, error: 'Payment not found' }
+      // Already cancelled — never reverse the balance twice (idempotency guard).
+      if (existing.cancelledAt) return { success: true }
 
       await prisma.$transaction(async (tx: any) => {
         await reversePayment(tx, existing)
-        await tx.paymentTransaction.delete({ where: { id } })
+        await tx.paymentTransaction.update({ where: { id }, data: { cancelledAt: new Date() } })
       })
 
       return { success: true }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to delete payment'
+        error: error instanceof Error ? error.message : 'Failed to cancel payment'
       }
     }
   })
