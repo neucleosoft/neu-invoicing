@@ -241,7 +241,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     create: (data: any) => ipcRenderer.invoke("challan:create", data),
     update: (id: string, data: any) =>
       ipcRenderer.invoke("challan:update", id, data),
-    delete: (id: string) => ipcRenderer.invoke("challan:delete", id),
+    cancel: (id: string) => ipcRenderer.invoke("challan:cancel", id),
     convertToInvoice: (id: string) =>
       ipcRenderer.invoke("challan:convertToInvoice", id),
     generateChallanNumber: () =>

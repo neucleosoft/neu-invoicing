@@ -25,6 +25,7 @@ interface Challan {
   // NON_RETURNABLE = goods sent for sale (can convert to invoice).
   // CONVERTED is set programmatically once a non-returnable challan becomes an invoice.
   status: 'RETURNABLE' | 'NON_RETURNABLE' | 'CONVERTED'
+  cancelledAt?: string | null
   customerId?: string
   totalAmount: number
   subtotal?: number
@@ -148,14 +149,17 @@ const DeliveryChallan = () => {
     }
   }
 
-  const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this delivery challan?', danger: true })
+  const handleCancel = async (id: string) => {
+    const confirmed = await confirm({
+      message: 'Cancel this delivery challan? The dispatched stock is returned and it is marked Cancelled for your records. This cannot be undone.',
+      danger: true,
+    })
     if (confirmed) {
-      const result = await window.electronAPI.challan.delete(id)
+      const result = await window.electronAPI.challan.cancel(id)
       if (result.success) {
         loadChallans()
       } else {
-        toast.error('Failed to delete challan: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to cancel challan: ' + (result.error || 'Unknown error'))
       }
     }
   }
@@ -693,7 +697,7 @@ const DeliveryChallan = () => {
               </thead>
               <tbody>
                 {filteredChallans.map((challan, index) => (
-                  <tr key={challan.id} className="border-t">
+                  <tr key={challan.id} className={`border-t ${challan.cancelledAt ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{challan.challanNumber}</td>
                     <td className="table-cell">{new Date(challan.challanDate).toLocaleDateString('en-GB')}</td>
@@ -701,11 +705,13 @@ const DeliveryChallan = () => {
                     <td className="table-cell">{formatCurrency(challan.totalAmount)}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
+                        challan.cancelledAt ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' :
                         challan.status === 'RETURNABLE' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' :
                         challan.status === 'NON_RETURNABLE' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300' :
                         'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                       }`}>
-                        {challan.status === 'RETURNABLE' ? 'Returnable' :
+                        {challan.cancelledAt ? 'Cancelled' :
+                         challan.status === 'RETURNABLE' ? 'Returnable' :
                          challan.status === 'NON_RETURNABLE' ? 'Non-Returnable' :
                          'Converted'}
                       </span>
@@ -725,7 +731,7 @@ const DeliveryChallan = () => {
                           email={challan.customer?.email}
                           partyName={challan.customer?.name}
                         />
-                        {challan.status !== 'CONVERTED' && (
+                        {challan.status !== 'CONVERTED' && !challan.cancelledAt && (
                           <button
                             onClick={() => handleEdit(challan)}
                             className="text-green-600 hover:text-green-700"
@@ -733,7 +739,7 @@ const DeliveryChallan = () => {
                             Edit
                           </button>
                         )}
-                        {challan.status === 'NON_RETURNABLE' && (
+                        {challan.status === 'NON_RETURNABLE' && !challan.cancelledAt && (
                           <button
                             onClick={() => handleConvertToInvoice(challan.id)}
                             className="text-purple-600 hover:text-purple-700"
@@ -741,12 +747,12 @@ const DeliveryChallan = () => {
                             Convert
                           </button>
                         )}
-                        {challan.status !== 'CONVERTED' && (
+                        {challan.status !== 'CONVERTED' && !challan.cancelledAt && (
                           <button
-                            onClick={() => handleDelete(challan.id)}
+                            onClick={() => handleCancel(challan.id)}
                             className="text-red-600 hover:text-red-700"
                           >
-                            Delete
+                            Cancel
                           </button>
                         )}
                       </div>
@@ -1082,11 +1088,13 @@ const DeliveryChallan = () => {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
+                    viewingChallan.cancelledAt ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' :
                     viewingChallan.status === 'RETURNABLE' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' :
                     viewingChallan.status === 'NON_RETURNABLE' ? 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300' :
                     'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
                   }`}>
-                    {viewingChallan.status === 'RETURNABLE' ? 'Returnable' :
+                    {viewingChallan.cancelledAt ? 'Cancelled' :
+                     viewingChallan.status === 'RETURNABLE' ? 'Returnable' :
                      viewingChallan.status === 'NON_RETURNABLE' ? 'Non-Returnable' :
                      'Converted'}
                   </span>

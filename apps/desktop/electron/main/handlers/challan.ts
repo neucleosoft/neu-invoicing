@@ -259,11 +259,12 @@ export const setupChallanHandlers = () => {
     }
   })
 
-  // Delete delivery challan
-  ipcMain.handle('challan:delete', async (_, id: string) => {
+  // Cancel delivery challan (Mode B): return the dispatched stock by APPENDING a
+  // reversing movement (never deleting the originals), then stamp cancelledAt.
+  // Terminal — there is no restore.
+  ipcMain.handle('challan:cancel', async (_, id: string) => {
     try {
       await prisma.$transaction(async (tx: any) => {
-        // Get the challan with items before deleting
         const challan = await tx.deliveryChallan.findUnique({
           where: { id },
           include: { items: true }
@@ -273,7 +274,20 @@ export const setupChallanHandlers = () => {
           throw new Error('Delivery challan not found')
         }
 
-        // Reverse stock for each item
+        // Already cancelled — never reverse the stock twice (idempotency guard).
+        if (challan.cancelledAt) {
+          return
+        }
+
+        // A converted challan's stock was carried into its invoice — cancel the
+        // invoice instead, not the challan.
+        if (challan.status === 'CONVERTED') {
+          throw new Error('This challan was converted to an invoice — cancel the invoice instead.')
+        }
+
+        // Put tracked stock back AND append a "returned" movement per line. We do
+        // NOT delete the original movements: cancel preserves the record, and a
+        // deleted stockMovement can't sync (the table has no soft-delete column).
         for (const item of challan.items) {
           const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
           if (dbItem && dbItem.trackStock) {
@@ -283,20 +297,24 @@ export const setupChallanHandlers = () => {
                 currentStock: { increment: item.quantity }
               }
             })
+            await tx.stockMovement.create({
+              data: {
+                itemId: item.itemId,
+                movementType: 'SALE',
+                quantity: item.quantity, // positive = goods returned by the cancel
+                referenceType: 'CHALLAN',
+                referenceId: id,
+                notes: 'Challan cancelled — stock returned'
+              }
+            })
           }
         }
 
-        // Delete stock movements for this challan
-        await tx.stockMovement.deleteMany({
-          where: {
-            referenceType: 'CHALLAN',
-            referenceId: id
-          }
-        })
-
-        // Delete the challan (items will cascade delete)
-        await tx.deliveryChallan.delete({
-          where: { id }
+        // CANCEL, not delete: stamp cancelledAt; the challan, its items, and its
+        // stock movements all stay on record.
+        await tx.deliveryChallan.update({
+          where: { id },
+          data: { cancelledAt: new Date() }
         })
       })
 
@@ -304,7 +322,7 @@ export const setupChallanHandlers = () => {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to delete delivery challan'
+        error: error instanceof Error ? error.message : 'Failed to cancel delivery challan'
       }
     }
   })

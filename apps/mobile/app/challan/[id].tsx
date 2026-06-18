@@ -158,19 +158,19 @@ export default function ChallanDetailScreen() {
     )
   }
 
-  function handleDelete() {
+  function handleCancel() {
     if (!id) return
-    Alert.alert('Delete challan', 'This reverses the stock that left and cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert('Cancel challan', 'This returns the dispatched stock and marks the challan Cancelled for your records. It cannot be undone.', [
+      { text: 'Keep challan', style: 'cancel' },
       {
-        text: 'Delete',
+        text: 'Cancel challan',
         style: 'destructive',
         onPress: async () => {
           try {
-            await deleteChallan(db, id)
+            await cancelChallan(db, id)
             router.back()
           } catch (e) {
-            Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete')
+            Alert.alert('Error', e instanceof Error ? e.message : 'Failed to cancel')
           }
         },
       },
@@ -178,6 +178,7 @@ export default function ChallanDetailScreen() {
   }
 
   const isConverted = challan?.status === 'CONVERTED'
+  const isCancelled = !!challan?.cancelledAt
 
   if (loading) {
     return (
@@ -200,13 +201,21 @@ export default function ChallanDetailScreen() {
 
   return (
     <ThemedView style={styles.container}>
-      <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!isConverted} />
+      <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!isConverted && !isCancelled} />
       <ScrollView contentContainerStyle={styles.content}>
+        {isCancelled ? (
+          <ThemedView style={styles.cancelledBanner}>
+            <ThemedText style={styles.cancelledBannerText}>
+              This challan is cancelled — the dispatched stock was returned and it's left out of reports. It can't be restored.
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
             <ThemedText type="title">{challan.challanNumber}</ThemedText>
             <ThemedText style={styles.muted}>{customerName}</ThemedText>
-            <ThemedText style={styles.muted}>{challan.status}</ThemedText>
+            <ThemedText style={styles.muted}>{isCancelled ? 'Cancelled' : challan.status}</ThemedText>
           </View>
           <View style={styles.heroRight}>
             <ThemedText type="defaultSemiBold" style={styles.heroTotal}>{formatCurrency(challan.totalAmount)}</ThemedText>
@@ -242,7 +251,7 @@ export default function ChallanDetailScreen() {
 
         {challan.notes ? <Section title="Notes"><ThemedText style={styles.notesText}>{challan.notes}</ThemedText></Section> : null}
 
-        {isConverted ? (
+        {isCancelled ? null : isConverted ? (
           <ThemedView lightColor="#dcfce7" darkColor="#14532d" style={styles.convertedNote}>
             <ThemedText style={styles.convertedNoteText}>Converted to invoice</ThemedText>
           </ThemedView>
@@ -253,8 +262,8 @@ export default function ChallanDetailScreen() {
                 <ThemedText style={styles.convertButtonText}>{converting ? 'Converting…' : 'Convert to Invoice'}</ThemedText>
               </Pressable>
             ) : null}
-            <Pressable style={styles.deleteButton} onPress={handleDelete}>
-              <ThemedText style={styles.deleteButtonText}>Delete challan</ThemedText>
+            <Pressable style={styles.deleteButton} onPress={handleCancel}>
+              <ThemedText style={styles.deleteButtonText}>Cancel challan</ThemedText>
             </Pressable>
           </>
         )}
@@ -263,12 +272,17 @@ export default function ChallanDetailScreen() {
   )
 }
 
-// Reverses the goods movement: put tracked stock back, drop the audit rows, then
-// delete lines + header. Mirrors deletePurchaseBill's reversal shape.
-async function deleteChallan(db: Db, id: string): Promise<void> {
+// Cancel (Mode B): return tracked stock by APPENDING a "returned" movement (never
+// deleting the originals), then stamp cancelledAt. The challan, its items, and its
+// movements all stay on record. Terminal — there is no restore.
+async function cancelChallan(db: Db, id: string): Promise<void> {
   await db.transaction(async (tx) => {
     const [dc] = await tx.select().from(schema.deliveryChallan).where(eq(schema.deliveryChallan.id, id)).limit(1)
     if (!dc) throw new Error('Challan not found')
+    if (dc.cancelledAt) return // already cancelled — never reverse the stock twice
+    if (dc.status === 'CONVERTED') {
+      throw new Error('This challan was converted to an invoice — cancel the invoice instead.')
+    }
 
     const existingItems = await tx.select().from(schema.deliveryChallanItem).where(eq(schema.deliveryChallanItem.deliveryChallanId, id))
     const itemRows = await tx.select().from(schema.item)
@@ -280,18 +294,20 @@ async function deleteChallan(db: Db, id: string): Promise<void> {
         .update(schema.item)
         .set({ currentStock: sql`${schema.item.currentStock} + ${ei.quantity}` })
         .where(eq(schema.item.id, ei.itemId))
+      await tx.insert(schema.stockMovement).values({
+        itemId: ei.itemId,
+        movementType: 'DELIVERY',
+        quantity: ei.quantity, // positive = goods returned by the cancel
+        referenceType: 'CHALLAN',
+        referenceId: id,
+        notes: 'Challan cancelled — stock returned',
+      })
     }
 
     await tx
-      .delete(schema.stockMovement)
-      .where(
-        and(
-          eq(schema.stockMovement.referenceType, 'CHALLAN'),
-          eq(schema.stockMovement.referenceId, id),
-        ),
-      )
-    await tx.delete(schema.deliveryChallanItem).where(eq(schema.deliveryChallanItem.deliveryChallanId, id))
-    await tx.delete(schema.deliveryChallan).where(eq(schema.deliveryChallan.id, id))
+      .update(schema.deliveryChallan)
+      .set({ cancelledAt: new Date() })
+      .where(eq(schema.deliveryChallan.id, id))
   })
 }
 
@@ -335,6 +351,8 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   deleteButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: '#FF3B30' },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  cancelledBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
+  cancelledBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
   convertedNote: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8 },
   convertedNoteText: { fontSize: 15, fontWeight: '600', color: '#166534' },
 })

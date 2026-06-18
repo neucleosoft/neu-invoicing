@@ -154,7 +154,7 @@ export const setupDashboardHandlers = () => {
           take: limit
         }),
         prisma.deliveryChallan.findMany({
-          where: { ...notDeleted },
+          where: { ...notDeleted, ...notCancelled },
           include: { customer: true },
           orderBy: { challanDate: 'desc' },
           take: limit

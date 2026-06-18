@@ -727,7 +727,7 @@ declare global {
         getById: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
         create: (data: any) => Promise<{ success: boolean; data?: any; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: any; error?: string }>
-        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        cancel: (id: string) => Promise<{ success: boolean; error?: string }>
         convertToInvoice: (id: string) => Promise<{ success: boolean; data?: any; error?: string }>
         generateChallanNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
       }

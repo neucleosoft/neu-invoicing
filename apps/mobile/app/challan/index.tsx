@@ -51,8 +51,10 @@ export default function ChallansScreen() {
     )
   }, [challans, search, customerName])
 
+  const activeCount = useMemo(() => challans.filter((c) => !c.cancelledAt).length, [challans])
+
   const renderItem = useCallback<ListRenderItem<Challan>>(
-    ({ item }) => <Row dc={item} customerName={customerName(item.customerId)} />,
+    ({ item }) => <Row dc={item} customerName={customerName(item.customerId)} cancelled={!!item.cancelledAt} />,
     [customerName],
   )
 
@@ -64,7 +66,7 @@ export default function ChallansScreen() {
         </Pressable>
         <ThemedText type="title" style={styles.headerTitle}>Delivery Challans</ThemedText>
         <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
-          <ThemedText style={styles.countText}>{challans.length}</ThemedText>
+          <ThemedText style={styles.countText}>{activeCount}</ThemedText>
         </ThemedView>
       </View>
 
@@ -91,11 +93,11 @@ export default function ChallansScreen() {
   )
 }
 
-const Row = memo(function Row({ dc, customerName }: { dc: Challan; customerName: string }) {
+const Row = memo(function Row({ dc, customerName, cancelled }: { dc: Challan; customerName: string; cancelled: boolean }) {
   const badge = STATUS_COLORS[dc.status] ?? STATUS_COLORS.NON_RETURNABLE
   return (
     <Pressable onPress={() => router.push({ pathname: '/challan/[id]', params: { id: dc.id } })} style={({ pressed }) => [pressed && styles.cardPressed]}>
-      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={[styles.card, cancelled && styles.cardCancelled]}>
         <View style={styles.cardLeft}>
           <ThemedText type="defaultSemiBold" numberOfLines={1}>{dc.challanNumber}</ThemedText>
           <ThemedText style={styles.metaText} numberOfLines={1}>{customerName}</ThemedText>
@@ -103,9 +105,15 @@ const Row = memo(function Row({ dc, customerName }: { dc: Challan; customerName:
         </View>
         <View style={styles.cardRight}>
           <ThemedText type="defaultSemiBold">{formatCurrency(dc.totalAmount)}</ThemedText>
-          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-            <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>{dc.status}</ThemedText>
-          </View>
+          {cancelled ? (
+            <View style={styles.cancelledBadge}>
+              <ThemedText style={styles.cancelledBadgeText}>Cancelled</ThemedText>
+            </View>
+          ) : (
+            <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+              <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>{dc.status}</ThemedText>
+            </View>
+          )}
         </View>
       </ThemedView>
     </Pressable>
@@ -131,4 +139,7 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 11, opacity: 0.5 },
   statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   statusBadgeText: { fontSize: 10, fontWeight: '600' },
+  cardCancelled: { opacity: 0.6 },
+  cancelledBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  cancelledBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
 })
