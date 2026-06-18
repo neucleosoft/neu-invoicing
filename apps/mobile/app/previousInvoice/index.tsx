@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm'
+import { desc } from 'drizzle-orm'
 import { router, useFocusEffect } from 'expo-router'
 import { memo, useCallback, useMemo, useState } from 'react'
 import { FlatList, type ListRenderItem, Pressable, StyleSheet, TextInput, View } from 'react-native'
@@ -52,17 +52,7 @@ export default function PreviousInvoicesScreen() {
     }, [load]),
   )
 
-  const handleRestore = useCallback(
-    (id: string) => {
-      db.update(schema.previousInvoice)
-        .set({ deletedAt: null })
-        .where(eq(schema.previousInvoice.id, id))
-        .then(load)
-    },
-    [db, load],
-  )
-
-  // The count chip shows live invoices only — deleted ones stay visible in the
+  // The count chip shows live invoices only — removed ones stay visible in the
   // list (marked) but never count toward a number.
   const activeCount = useMemo(() => invoices.filter((x) => !x.deletedAt).length, [invoices])
 
@@ -77,8 +67,8 @@ export default function PreviousInvoicesScreen() {
   }, [invoices, search])
 
   const renderItem = useCallback<ListRenderItem<ArchiveRow>>(
-    ({ item }) => <Row invoice={item} deleted={!!item.deletedAt} onRestore={handleRestore} />,
-    [handleRestore],
+    ({ item }) => <Row invoice={item} deleted={!!item.deletedAt} />,
+    [],
   )
 
   return (
@@ -129,11 +119,9 @@ export default function PreviousInvoicesScreen() {
 const Row = memo(function Row({
   invoice,
   deleted,
-  onRestore,
 }: {
   invoice: ArchiveRow
   deleted: boolean
-  onRestore: (id: string) => void
 }) {
   return (
     <Pressable
@@ -149,14 +137,9 @@ const Row = memo(function Row({
         <View style={styles.cardRight}>
           <ThemedText type="defaultSemiBold">{formatCurrency(invoice.totalAmount)}</ThemedText>
           {deleted ? (
-            <>
-              <View style={styles.deletedBadge}>
-                <ThemedText style={styles.deletedBadgeText}>Deleted</ThemedText>
-              </View>
-              <Pressable onPress={() => onRestore(invoice.id)} hitSlop={8} style={styles.restoreLink}>
-                <ThemedText style={styles.restoreLinkText}>Restore</ThemedText>
-              </Pressable>
-            </>
+            <View style={styles.deletedBadge}>
+              <ThemedText style={styles.deletedBadgeText}>Removed</ThemedText>
+            </View>
           ) : invoice.serialNumber != null ? (
             <View style={styles.serialBadge}>
               <ThemedText style={styles.serialBadgeText}>#{invoice.serialNumber}</ThemedText>
@@ -190,6 +173,4 @@ const styles = StyleSheet.create({
   serialBadgeText: { fontSize: 10, fontWeight: '600', color: '#374151' },
   deletedBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
   deletedBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
-  restoreLink: { paddingVertical: 2 },
-  restoreLinkText: { fontSize: 12, fontWeight: '600', color: '#007AFF' },
 })

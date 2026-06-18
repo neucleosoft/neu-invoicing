@@ -269,7 +269,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("previousInvoice:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("previousInvoice:delete", id),
-    restore: (id: string) => ipcRenderer.invoke("previousInvoice:restore", id),
     extractFromPdfText: (args: { fileBytes: Uint8Array }) =>
       ipcRenderer.invoke("previousInvoice:extractFromPdfText", args),
   },

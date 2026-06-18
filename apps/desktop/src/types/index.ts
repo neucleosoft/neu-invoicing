@@ -745,7 +745,6 @@ declare global {
         create: (data: any) => Promise<{ success: boolean; data?: any; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: any; error?: string }>
         delete: (id: string) => Promise<{ success: boolean; error?: string }>
-        restore: (id: string) => Promise<{ success: boolean; error?: string }>
         extractFromPdfText: (args: { fileBytes: Uint8Array }) => Promise<{ success: boolean; data?: any; error?: string }>
       }
       cashBank: {

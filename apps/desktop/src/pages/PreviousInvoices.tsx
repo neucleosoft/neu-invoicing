@@ -388,7 +388,7 @@ const PreviousInvoices = () => {
   const handleDelete = async (row: PreviousInvoice) => {
     const ok = await confirm({
       title: 'Delete previous invoice?',
-      message: `${row.invoiceNumber} — ${row.partyName}. It will be marked Deleted and left out of totals and reports. The uploaded file is preserved and you can restore it anytime.`,
+      message: `${row.invoiceNumber} — ${row.partyName}. It will be removed from your records and left out of totals and reports. This can't be undone.`,
       confirmText: 'Delete',
       danger: true,
     })
@@ -398,17 +398,7 @@ const PreviousInvoices = () => {
       toast.error(result.error || 'Failed to delete')
       return
     }
-    toast.success('Deleted')
-    await loadRows()
-  }
-
-  const handleRestore = async (row: PreviousInvoice) => {
-    const result = await window.electronAPI.previousInvoice.restore(row.id)
-    if (!result.success) {
-      toast.error(result.error || 'Failed to restore')
-      return
-    }
-    toast.success('Restored')
+    toast.success('Removed')
     await loadRows()
   }
 
@@ -799,7 +789,7 @@ const PreviousInvoices = () => {
                     <td className="table-cell">
                       {isDeleted ? (
                         <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
-                          Deleted
+                          Removed
                         </span>
                       ) : (
                         <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300">
@@ -816,13 +806,6 @@ const PreviousInvoices = () => {
                             className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
                           >
                             View
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleRestore(row)}
-                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-                          >
-                            Restore
                           </button>
                         </div>
                       ) : (

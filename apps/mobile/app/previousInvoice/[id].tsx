@@ -57,7 +57,7 @@ export default function PreviousInvoiceDetailScreen() {
     if (!id) return
     Alert.alert(
       'Delete previous invoice',
-      "It will be marked Deleted and left out of totals and reports. The uploaded file is preserved and you can restore it anytime.",
+      "It will be removed from your records and left out of totals and reports. This can't be undone.",
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -65,9 +65,9 @@ export default function PreviousInvoiceDetailScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The header,
-              // its line items, and the uploaded file stay put so a restore
-              // brings the whole archive record back intact.
+              // Terminal removal: stamp deletedAt (updatedAt auto-bumps). A previous
+              // invoice is a frozen historical record — once removed it cannot be
+              // restored (there is no restore path). The row is purged ~21 days later.
               await db
                 .update(schema.previousInvoice)
                 .set({ deletedAt: new Date() })
@@ -80,15 +80,6 @@ export default function PreviousInvoiceDetailScreen() {
         },
       ],
     )
-  }
-
-  function handleRestore() {
-    if (!id) return
-    db.update(schema.previousInvoice)
-      .set({ deletedAt: null })
-      .where(eq(schema.previousInvoice.id, id))
-      .then(() => router.back())
-      .catch((e) => Alert.alert('Error', e instanceof Error ? e.message : 'Failed to restore'))
   }
 
   if (loading) {
@@ -121,7 +112,7 @@ export default function PreviousInvoiceDetailScreen() {
         {isDeleted ? (
           <ThemedView style={styles.deletedBanner}>
             <ThemedText style={styles.deletedBannerText}>
-              This previous invoice is deleted — it's left out of totals and reports. Restore it to use it again.
+              This previous invoice has been removed — it's left out of totals and reports and can't be restored.
             </ThemedText>
           </ThemedView>
         ) : null}
@@ -165,11 +156,7 @@ export default function PreviousInvoiceDetailScreen() {
           </Pressable>
         ) : null}
 
-        {isDeleted ? (
-          <Pressable style={styles.restoreButton} onPress={handleRestore}>
-            <ThemedText style={styles.restoreButtonText}>Restore previous invoice</ThemedText>
-          </Pressable>
-        ) : (
+        {isDeleted ? null : (
           <Pressable style={styles.deleteButton} onPress={handleDelete}>
             <ThemedText style={styles.deleteButtonText}>Delete previous invoice</ThemedText>
           </Pressable>
@@ -249,8 +236,6 @@ const styles = StyleSheet.create({
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
   deletedBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
   deletedBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
-  restoreButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, backgroundColor: '#16a34a' },
-  restoreButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
   fileOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.92)',

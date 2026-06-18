@@ -268,9 +268,9 @@ export const setupPreviousInvoiceHandlers = () => {
         throw new Error('Previous invoice not found')
       }
 
-      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The header, its line
-      // items, and the uploaded file stay put so a restore brings the whole
-      // archive record back intact.
+      // Terminal removal: stamp deletedAt (updatedAt auto-bumps). A previous invoice
+      // is a frozen historical record — once removed it cannot be restored (no
+      // restore handler). The row is purged ~21 days later.
       await prisma.previousInvoice.update({
         where: { id },
         data: { deletedAt: new Date() },
@@ -281,27 +281,6 @@ export const setupPreviousInvoiceHandlers = () => {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete previous invoice',
-      }
-    }
-  })
-
-  ipcMain.handle('previousInvoice:restore', async (_, id: string) => {
-    try {
-      const existing = await prisma.previousInvoice.findUnique({ where: { id } })
-      if (!existing) {
-        throw new Error('Previous invoice not found')
-      }
-
-      await prisma.previousInvoice.update({
-        where: { id },
-        data: { deletedAt: null },
-      })
-
-      return { success: true }
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : 'Failed to restore previous invoice',
       }
     }
   })
