@@ -191,8 +191,11 @@ export const setupProformaInvoiceHandlers = () => {
         throw new Error('Proforma invoice not found')
       }
 
-      await prisma.proformaInvoice.delete({
-        where: { id }
+      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row and its line
+      // items stay put so a restore brings the whole document back intact.
+      await prisma.proformaInvoice.update({
+        where: { id },
+        data: { deletedAt: new Date() }
       })
 
       return { success: true }
@@ -200,6 +203,30 @@ export const setupProformaInvoiceHandlers = () => {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete proforma invoice'
+      }
+    }
+  })
+
+  ipcMain.handle('proformaInvoice:restore', async (_, id: string) => {
+    try {
+      const proformaInvoice = await prisma.proformaInvoice.findUnique({
+        where: { id }
+      })
+
+      if (!proformaInvoice) {
+        throw new Error('Proforma invoice not found')
+      }
+
+      await prisma.proformaInvoice.update({
+        where: { id },
+        data: { deletedAt: null }
+      })
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restore proforma invoice'
       }
     }
   })

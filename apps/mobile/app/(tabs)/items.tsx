@@ -1,4 +1,4 @@
-import { desc } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { router, useFocusEffect } from 'expo-router'
 import { memo, useCallback, useMemo, useState } from 'react'
 import { FlatList, type ListRenderItem, Pressable, StyleSheet, TextInput, View } from 'react-native'
@@ -17,15 +17,34 @@ export default function ItemsScreen() {
   const [items, setItems] = useState<Item[]>([])
   const [search, setSearch] = useState('')
 
+  const load = useCallback(() => {
+    return db
+      .select()
+      .from(schema.item)
+      .orderBy(desc(schema.item.updatedAt))
+      .then(setItems)
+  }, [db])
+
   // Re-fetch every time the tab regains focus, e.g. after returning from /item/newItem.
   useFocusEffect(
     useCallback(() => {
-      db.select()
-        .from(schema.item)
-        .orderBy(desc(schema.item.updatedAt))
-        .then(setItems)
-    }, [db]),
+      load()
+    }, [load]),
   )
+
+  const handleRestore = useCallback(
+    (id: string) => {
+      db.update(schema.item)
+        .set({ deletedAt: null })
+        .where(eq(schema.item.id, id))
+        .then(load)
+    },
+    [db, load],
+  )
+
+  // The count chip shows live items only — deleted ones stay visible in the
+  // list (marked) but never count toward a number.
+  const activeCount = useMemo(() => items.filter((it) => !it.deletedAt).length, [items])
 
   // Client-side filter by name (case-insensitive). At 161 rows this is
   // instantaneous; the boundary at which SQL beats memory is ~5k rows.
@@ -39,8 +58,8 @@ export default function ItemsScreen() {
   // keystroke in the search box would mark all rows as "renderItem changed"
   // and re-render the entire list.
   const renderItem = useCallback<ListRenderItem<Item>>(
-    ({ item }) => <ItemRow item={item} />,
-    [],
+    ({ item }) => <ItemRow item={item} deleted={!!item.deletedAt} onRestore={handleRestore} />,
+    [handleRestore],
   )
   const keyExtractor = useCallback((row: Item) => row.id, [])
 
@@ -49,7 +68,7 @@ export default function ItemsScreen() {
       <View style={styles.header}>
         <ThemedText type="title">Items</ThemedText>
         <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
-          <ThemedText style={styles.countText}>{items.length}</ThemedText>
+          <ThemedText style={styles.countText}>{activeCount}</ThemedText>
         </ThemedView>
       </View>
 
@@ -89,7 +108,15 @@ export default function ItemsScreen() {
 // React.memo so rows don't re-render when the parent's search/state changes.
 // Comparison is the default shallow check on `item`, which is fine because
 // Drizzle returns new row objects only when the underlying data actually changed.
-const ItemRow = memo(function ItemRow({ item }: { item: Item }) {
+const ItemRow = memo(function ItemRow({
+  item,
+  deleted,
+  onRestore,
+}: {
+  item: Item
+  deleted: boolean
+  onRestore: (id: string) => void
+}) {
   const isLowStock =
     item.trackStock && item.currentStock < item.lowStockWarning
 
@@ -100,7 +127,7 @@ const ItemRow = memo(function ItemRow({ item }: { item: Item }) {
       }
       style={({ pressed }) => [pressed && styles.cardPressed]}
     >
-      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={[styles.card, deleted && styles.cardDeleted]}>
         <View style={styles.cardLeft}>
           <ThemedText type="defaultSemiBold" numberOfLines={1}>
             {item.name}
@@ -124,17 +151,28 @@ const ItemRow = memo(function ItemRow({ item }: { item: Item }) {
         <View style={styles.cardRight}>
           <ThemedText type="defaultSemiBold">{formatCurrency(item.salePrice)}</ThemedText>
           <ThemedText style={styles.unitText}>per {item.unit}</ThemedText>
-          {/* Nested Pressable: inner press wins, so tapping Edit navigates to
-              edit without also triggering the card's tap-to-view. */}
-          <Pressable
-            onPress={() =>
-              router.push({ pathname: '/item/edit/[id]', params: { id: item.id } })
-            }
-            hitSlop={8}
-            style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
-          >
-            <ThemedText style={styles.editChipText}>Edit</ThemedText>
-          </Pressable>
+          {deleted ? (
+            <>
+              <View style={styles.deletedBadge}>
+                <ThemedText style={styles.deletedBadgeText}>Deleted</ThemedText>
+              </View>
+              <Pressable onPress={() => onRestore(item.id)} hitSlop={8} style={styles.restoreLink}>
+                <ThemedText style={styles.restoreLinkText}>Restore</ThemedText>
+              </Pressable>
+            </>
+          ) : (
+            /* Nested Pressable: inner press wins, so tapping Edit navigates to
+               edit without also triggering the card's tap-to-view. */
+            <Pressable
+              onPress={() =>
+                router.push({ pathname: '/item/edit/[id]', params: { id: item.id } })
+              }
+              hitSlop={8}
+              style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
+            >
+              <ThemedText style={styles.editChipText}>Edit</ThemedText>
+            </Pressable>
+          )}
         </View>
       </ThemedView>
     </Pressable>
@@ -177,6 +215,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   cardPressed: { opacity: 0.7 },
+  cardDeleted: { opacity: 0.6 },
   cardLeft: { flex: 1, gap: 4 },
   cardRight: { alignItems: 'flex-end', gap: 2 },
   metaRow: {
@@ -204,4 +243,8 @@ const styles = StyleSheet.create({
   editChip: { paddingHorizontal: 6, paddingVertical: 2 },
   editChipPressed: { opacity: 0.5 },
   editChipText: { fontSize: 12, fontWeight: '600', color: '#16a34a' },
+  deletedBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  deletedBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
+  restoreLink: { paddingVertical: 2 },
+  restoreLinkText: { fontSize: 12, fontWeight: '600', color: '#007AFF' },
 })

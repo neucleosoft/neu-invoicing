@@ -135,7 +135,7 @@ const SupplierItems = () => {
 
   const handleDelete = async (item: SupplierItem) => {
     const confirmed = await confirm({
-      message: `Delete "${item.name}" from ${supplierName(item.supplierId)}'s catalog?`,
+      message: `Delete "${item.name}" from ${supplierName(item.supplierId)}'s catalog? It will be marked Deleted and left out of totals and reports. You can restore it anytime.`,
       danger: true,
     })
     if (!confirmed) return
@@ -145,6 +145,16 @@ const SupplierItems = () => {
       loadAll()
     } else {
       toast.error(result.error || 'Could not delete item')
+    }
+  }
+
+  const handleRestore = async (item: SupplierItem) => {
+    const result = await window.electronAPI.supplierItem.restore(item.id)
+    if (result.success) {
+      toast.success('Item restored')
+      loadAll()
+    } else {
+      toast.error(result.error || 'Could not restore item')
     }
   }
 
@@ -215,11 +225,20 @@ const SupplierItems = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredItems.map((item, index) => (
-                  <tr key={item.id} className="border-t">
+                {filteredItems.map((item, index) => {
+                  const isDeleted = !!item.deletedAt
+                  return (
+                  <tr key={item.id} className={`border-t ${isDeleted ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell">{supplierName(item.supplierId)}</td>
-                    <td className="table-cell font-medium">{item.name}</td>
+                    <td className="table-cell font-medium">
+                      {item.name}
+                      {isDeleted && (
+                        <span className="ml-2 px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                          Deleted
+                        </span>
+                      )}
+                    </td>
                     <td className="table-cell text-sm">{item.hsnCode || '-'}</td>
                     <td className="table-cell">{item.unit}</td>
                     <td className="table-cell">{item.lastPurchasePrice.toFixed(2)}</td>
@@ -232,15 +251,24 @@ const SupplierItems = () => {
                       )}
                     </td>
                     <td className="table-cell">
-                      <button onClick={() => handleEdit(item)} className="text-primary-600 hover:text-primary-700 mr-3">
-                        Edit
-                      </button>
-                      <button onClick={() => handleDelete(item)} className="text-red-600 hover:text-red-700">
-                        Delete
-                      </button>
+                      {isDeleted ? (
+                        <button onClick={() => handleRestore(item)} className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300">
+                          Restore
+                        </button>
+                      ) : (
+                        <>
+                          <button onClick={() => handleEdit(item)} className="text-primary-600 hover:text-primary-700 mr-3">
+                            Edit
+                          </button>
+                          <button onClick={() => handleDelete(item)} className="text-red-600 hover:text-red-700">
+                            Delete
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

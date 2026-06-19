@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
+import { notCancelled, notDeleted, notDeletedWhere } from './softDelete'
 
 export const setupCustomerHandlers = () => {
   const prisma = getPrisma()
@@ -116,30 +117,23 @@ export const setupCustomerHandlers = () => {
     }
   })
 
-  // Delete customer (only if no records)
+  // Delete customer (soft-delete)
   ipcMain.handle('customer:delete', async (_, id: string) => {
     try {
       const customer = await prisma.customer.findUnique({
-        where: { id },
-        include: {
-          salesInvoices: { take: 1 },
-          payments: { take: 1 }
-        }
+        where: { id }
       })
 
       if (!customer) {
         return { success: false, error: 'Customer not found' }
       }
 
-      if (customer.salesInvoices.length > 0 || customer.payments.length > 0) {
-        return {
-          success: false,
-          error: 'Cannot delete customer with existing invoices or payments. Delete those records first.'
-        }
-      }
-
-      await prisma.customer.delete({
-        where: { id }
+      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row and its
+      // invoices/payments/balance stay put so a restore brings the customer back
+      // intact.
+      await prisma.customer.update({
+        where: { id },
+        data: { deletedAt: new Date() }
       })
 
       return { success: true }
@@ -147,6 +141,31 @@ export const setupCustomerHandlers = () => {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete customer'
+      }
+    }
+  })
+
+  // Restore a soft-deleted customer
+  ipcMain.handle('customer:restore', async (_, id: string) => {
+    try {
+      const customer = await prisma.customer.findUnique({
+        where: { id }
+      })
+
+      if (!customer) {
+        return { success: false, error: 'Customer not found' }
+      }
+
+      await prisma.customer.update({
+        where: { id },
+        data: { deletedAt: null }
+      })
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restore customer'
       }
     }
   })
@@ -172,6 +191,7 @@ export const setupCustomerHandlers = () => {
               customerId: args.customerId,
               type: 'INVOICE',
               invoiceDate: { lte: to },
+              ...notDeleted,
             },
             select: { id: true, invoiceNumber: true, invoiceDate: true, totalAmount: true },
           }),
@@ -180,6 +200,8 @@ export const setupCustomerHandlers = () => {
               customerId: args.customerId,
               type: 'PAYMENT_IN',
               paymentDate: { lte: to },
+              ...notDeleted,
+              ...notCancelled,
             },
             select: {
               id: true,
@@ -194,6 +216,8 @@ export const setupCustomerHandlers = () => {
               customerId: args.customerId,
               status: 'ACTIVE',
               noteDate: { lte: to },
+              ...notDeleted,
+              ...notCancelled,
             },
             select: {
               id: true,
@@ -310,9 +334,11 @@ export const setupCustomerHandlers = () => {
         where: { id },
         include: {
           salesInvoices: {
+            ...notDeletedWhere,
             orderBy: { invoiceDate: 'desc' }
           },
           payments: {
+            ...notDeletedWhere,
             orderBy: { paymentDate: 'desc' }
           }
         }

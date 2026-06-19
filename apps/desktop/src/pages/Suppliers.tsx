@@ -214,7 +214,10 @@ const Suppliers = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this supplier?', danger: true })
+    const confirmed = await confirm({
+      message: 'Delete this supplier? It will be marked Deleted and left out of totals and reports. You can restore it anytime.',
+      danger: true,
+    })
     if (confirmed) {
       const result = await window.electronAPI.supplier.delete(id)
       if (result.success) {
@@ -222,6 +225,15 @@ const Suppliers = () => {
       } else {
         toast.error('Failed to delete supplier: ' + (result.error || 'Unknown error'))
       }
+    }
+  }
+
+  const handleRestore = async (id: string) => {
+    const result = await window.electronAPI.supplier.restore(id)
+    if (result.success) {
+      loadSuppliers()
+    } else {
+      toast.error('Failed to restore supplier: ' + (result.error || 'Unknown error'))
     }
   }
 
@@ -337,8 +349,9 @@ const Suppliers = () => {
             <tbody>
               {sortedSuppliers.map((supplier, index) => {
                 const balanceDisplay = getBalanceDisplay(supplier)
+                const isDeleted = !!supplier.deletedAt
                 return (
-                  <tr key={supplier.id} className="border-t">
+                  <tr key={supplier.id} className={`border-t ${isDeleted ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell">
                       <div className="flex items-center gap-3">
@@ -358,9 +371,15 @@ const Suppliers = () => {
                       </div>
                     </td>
                     <td className="table-cell">
-                      <span className="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                        {supplier.type}
-                      </span>
+                      {isDeleted ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                          Deleted
+                        </span>
+                      ) : (
+                        <span className="px-2 py-1 rounded-full text-xs bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                          {supplier.type}
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
                       {supplier.taxId ? (
@@ -392,24 +411,35 @@ const Suppliers = () => {
                       </div>
                     </td>
                     <td className="table-cell">
-                      <button
-                        onClick={() => setCatalogSupplier(supplier as Supplier)}
-                        className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 mr-3"
-                      >
-                        Catalog
-                      </button>
-                      <button
-                        onClick={() => navigate('/supplier-ledger', { state: { party: supplier } })}
-                        className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 mr-3"
-                      >
-                        Ledger
-                      </button>
-                      <button onClick={() => handleEdit(supplier)} className="text-primary-600 hover:text-primary-700 mr-3">
-                        Edit
-                      </button>
-                      <button onClick={() => handleDelete(supplier.id)} className="text-red-600 hover:text-red-700">
-                        Delete
-                      </button>
+                      {isDeleted ? (
+                        <button
+                          onClick={() => handleRestore(supplier.id)}
+                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                        >
+                          Restore
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => setCatalogSupplier(supplier as Supplier)}
+                            className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300 mr-3"
+                          >
+                            Catalog
+                          </button>
+                          <button
+                            onClick={() => navigate('/supplier-ledger', { state: { party: supplier } })}
+                            className="text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300 mr-3"
+                          >
+                            Ledger
+                          </button>
+                          <button onClick={() => handleEdit(supplier)} className="text-primary-600 hover:text-primary-700 mr-3">
+                            Edit
+                          </button>
+                          <button onClick={() => handleDelete(supplier.id)} className="text-red-600 hover:text-red-700">
+                            Delete
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
                 )

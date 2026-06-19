@@ -74,36 +74,40 @@ export default function SupplierItemDetailScreen() {
 
   function handleDelete() {
     if (!id) return
-    Alert.alert('Delete supplier item', `Delete "${row?.name ?? ''}" from this catalog?`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            // Guard (mirrors desktop): refuse if any purchase bill line still
-            // references this supplier item — deleting would orphan that line.
-            const refs = await db
-              .select({ id: schema.purchaseBillItem.id })
-              .from(schema.purchaseBillItem)
-              .where(eq(schema.purchaseBillItem.supplierItemId, id))
-              .limit(1)
-            if (refs.length > 0) {
-              Alert.alert(
-                'Cannot delete',
-                'This supplier item is used on one or more purchase bills. Remove it from those bills first.',
-              )
-              return
+    Alert.alert(
+      'Delete supplier item',
+      "It will be marked Deleted and left out of totals and reports. You can restore it anytime.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row stays
+              // put so a restore brings the catalog entry back intact.
+              await db
+                .update(schema.supplierItem)
+                .set({ deletedAt: new Date() })
+                .where(eq(schema.supplierItem.id, id))
+              router.back()
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : 'Failed to delete'
+              Alert.alert('Error', msg)
             }
-            await db.delete(schema.supplierItem).where(eq(schema.supplierItem.id, id))
-            router.back()
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : 'Failed to delete'
-            Alert.alert('Error', msg)
-          }
+          },
         },
-      },
-    ])
+      ],
+    )
+  }
+
+  function handleRestore() {
+    if (!id) return
+    db.update(schema.supplierItem)
+      .set({ deletedAt: null })
+      .where(eq(schema.supplierItem.id, id))
+      .then(() => router.back())
+      .catch((e) => Alert.alert('Error', e instanceof Error ? e.message : 'Failed to restore'))
   }
 
   if (loading) {
@@ -127,10 +131,20 @@ export default function SupplierItemDetailScreen() {
     )
   }
 
+  const isDeleted = !!row.deletedAt
+
   return (
     <ThemedView style={styles.container}>
       <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!row} />
       <ScrollView contentContainerStyle={styles.content}>
+        {isDeleted ? (
+          <ThemedView style={styles.deletedBanner}>
+            <ThemedText style={styles.deletedBannerText}>
+              This supplier item is deleted — it's left out of totals and reports. Restore it to use it again.
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
             <ThemedText type="title" numberOfLines={2}>
@@ -174,9 +188,15 @@ export default function SupplierItemDetailScreen() {
           <Row label="Updated" value={formatDate(row.updatedAt)} />
         </Section>
 
-        <Pressable style={styles.deleteButton} onPress={handleDelete}>
-          <ThemedText style={styles.deleteButtonText}>Delete supplier item</ThemedText>
-        </Pressable>
+        {isDeleted ? (
+          <Pressable style={styles.restoreButton} onPress={handleRestore}>
+            <ThemedText style={styles.restoreButtonText}>Restore supplier item</ThemedText>
+          </Pressable>
+        ) : (
+          <Pressable style={styles.deleteButton} onPress={handleDelete}>
+            <ThemedText style={styles.deleteButtonText}>Delete supplier item</ThemedText>
+          </Pressable>
+        )}
       </ScrollView>
     </ThemedView>
   )
@@ -255,4 +275,8 @@ const styles = StyleSheet.create({
     borderColor: '#FF3B30',
   },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  deletedBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
+  deletedBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
+  restoreButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, backgroundColor: '#16a34a' },
+  restoreButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
 })

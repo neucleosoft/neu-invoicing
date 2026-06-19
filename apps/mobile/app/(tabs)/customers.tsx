@@ -1,4 +1,4 @@
-import { asc } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { router, useFocusEffect } from 'expo-router'
 import { memo, useCallback, useMemo, useState } from 'react'
 import { FlatList, type ListRenderItem, Pressable, StyleSheet, TextInput, View } from 'react-native'
@@ -26,14 +26,33 @@ export default function CustomersScreen() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
 
+  const load = useCallback(() => {
+    return db
+      .select()
+      .from(schema.customer)
+      .orderBy(asc(schema.customer.name))
+      .then(setCustomers)
+  }, [db])
+
   useFocusEffect(
     useCallback(() => {
-      db.select()
-        .from(schema.customer)
-        .orderBy(asc(schema.customer.name))
-        .then(setCustomers)
-    }, [db]),
+      load()
+    }, [load]),
   )
+
+  const handleRestore = useCallback(
+    (id: string) => {
+      db.update(schema.customer)
+        .set({ deletedAt: null })
+        .where(eq(schema.customer.id, id))
+        .then(load)
+    },
+    [db, load],
+  )
+
+  // The count chip shows live customers only — deleted ones stay visible in the
+  // list (marked) but never count toward a number.
+  const activeCount = useMemo(() => customers.filter((c) => !c.deletedAt).length, [customers])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -42,8 +61,10 @@ export default function CustomersScreen() {
   }, [customers, search])
 
   const renderItem = useCallback<ListRenderItem<Customer>>(
-    ({ item }) => <CustomerRow customer={item} />,
-    [],
+    ({ item }) => (
+      <CustomerRow customer={item} deleted={!!item.deletedAt} onRestore={handleRestore} />
+    ),
+    [handleRestore],
   )
   const keyExtractor = useCallback((row: Customer) => row.id, [])
 
@@ -52,7 +73,7 @@ export default function CustomersScreen() {
       <View style={styles.header}>
         <ThemedText type="title">Customers</ThemedText>
         <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
-          <ThemedText style={styles.countText}>{customers.length}</ThemedText>
+          <ThemedText style={styles.countText}>{activeCount}</ThemedText>
         </ThemedView>
       </View>
 
@@ -89,7 +110,15 @@ export default function CustomersScreen() {
   )
 }
 
-const CustomerRow = memo(function CustomerRow({ customer }: { customer: Customer }) {
+const CustomerRow = memo(function CustomerRow({
+  customer,
+  deleted,
+  onRestore,
+}: {
+  customer: Customer
+  deleted: boolean
+  onRestore: (id: string) => void
+}) {
   return (
     <Pressable
       onPress={() =>
@@ -97,7 +126,7 @@ const CustomerRow = memo(function CustomerRow({ customer }: { customer: Customer
       }
       style={({ pressed }) => [pressed && styles.cardPressed]}
     >
-      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={[styles.card, deleted && styles.cardDeleted]}>
         <View style={styles.cardLeft}>
           <ThemedText type="defaultSemiBold" numberOfLines={1}>
             {customer.name}
@@ -127,17 +156,28 @@ const CustomerRow = memo(function CustomerRow({ customer }: { customer: Customer
               ? 'advance'
               : 'settled'}
           </ThemedText>
-          {/* Nested Pressable: inner press wins, so tapping Edit navigates to
-              edit without also triggering the card's tap-to-view. */}
-          <Pressable
-            onPress={() =>
-              router.push({ pathname: '/customer/edit/[id]', params: { id: customer.id } })
-            }
-            hitSlop={8}
-            style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
-          >
-            <ThemedText style={styles.editChipText}>Edit</ThemedText>
-          </Pressable>
+          {deleted ? (
+            <>
+              <View style={styles.deletedBadge}>
+                <ThemedText style={styles.deletedBadgeText}>Deleted</ThemedText>
+              </View>
+              <Pressable onPress={() => onRestore(customer.id)} hitSlop={8} style={styles.restoreLink}>
+                <ThemedText style={styles.restoreLinkText}>Restore</ThemedText>
+              </Pressable>
+            </>
+          ) : (
+            /* Nested Pressable: inner press wins, so tapping Edit navigates to
+               edit without also triggering the card's tap-to-view. */
+            <Pressable
+              onPress={() =>
+                router.push({ pathname: '/customer/edit/[id]', params: { id: customer.id } })
+              }
+              hitSlop={8}
+              style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
+            >
+              <ThemedText style={styles.editChipText}>Edit</ThemedText>
+            </Pressable>
+          )}
         </View>
       </ThemedView>
     </Pressable>
@@ -160,6 +200,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     gap: 12,
   },
+  cardDeleted: { opacity: 0.6 },
   cardPressed: { opacity: 0.7 },
   cardLeft: { flex: 1, gap: 4 },
   cardRight: { alignItems: 'flex-end', gap: 2 },
@@ -176,4 +217,8 @@ const styles = StyleSheet.create({
   editChip: { paddingHorizontal: 6, paddingVertical: 2 },
   editChipPressed: { opacity: 0.5 },
   editChipText: { fontSize: 12, fontWeight: '600', color: '#16a34a' },
+  deletedBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  deletedBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
+  restoreLink: { paddingVertical: 2 },
+  restoreLinkText: { fontSize: 12, fontWeight: '600', color: '#007AFF' },
 })

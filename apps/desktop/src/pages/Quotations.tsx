@@ -320,7 +320,10 @@ const Quotations = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this quotation?', danger: true })
+    const confirmed = await confirm({
+      message: 'Delete this quotation? It will be marked Deleted and left out of totals and reports. You can restore it anytime.',
+      danger: true,
+    })
     if (confirmed) {
       const result = await window.electronAPI.quotation.delete(id)
       if (result.success) {
@@ -328,6 +331,15 @@ const Quotations = () => {
       } else {
         toast.error('Failed to delete quotation: ' + (result.error || 'Unknown error'))
       }
+    }
+  }
+
+  const handleRestore = async (id: string) => {
+    const result = await window.electronAPI.quotation.restore(id)
+    if (result.success) {
+      loadQuotations()
+    } else {
+      toast.error('Failed to restore quotation: ' + (result.error || 'Unknown error'))
     }
   }
 
@@ -564,6 +576,10 @@ const Quotations = () => {
     return true
   })
 
+  // Deleted quotations stay visible in the table (marked), but must never ride
+  // along in a bulk export or inflate its count.
+  const activeFilteredQuotations = filteredQuotations.filter((q) => !q.deletedAt)
+
   const { sortedItems: sortedQuotations, sortKey, sortDir, toggleSort } = useSortable(filteredQuotations, [
     { key: 'invoiceNumber', accessor: (i) => i.invoiceNumber },
     { key: 'invoiceDate', accessor: (i) => new Date(i.invoiceDate).getTime() },
@@ -619,15 +635,15 @@ const Quotations = () => {
         )}
         {dateFilter !== 'all' && (
           <span className="text-sm text-gray-500 dark:text-gray-400">
-            {filteredQuotations.length} {filteredQuotations.length === 1 ? 'quotation' : 'quotations'}
+            {activeFilteredQuotations.length} {activeFilteredQuotations.length === 1 ? 'quotation' : 'quotations'}
           </span>
         )}
-        {filteredQuotations.length > 0 && (
+        {activeFilteredQuotations.length > 0 && (
           <BulkDownloadMenu
-            count={filteredQuotations.length}
+            count={activeFilteredQuotations.length}
             busy={bulkDownloading}
-            onPdfs={() => handleBulkDownloadPdfs(filteredQuotations)}
-            onExcel={() => handleBulkDownloadExcel(filteredQuotations)}
+            onPdfs={() => handleBulkDownloadPdfs(activeFilteredQuotations)}
+            onExcel={() => handleBulkDownloadExcel(activeFilteredQuotations)}
           />
         )}
       </div>
@@ -666,8 +682,10 @@ const Quotations = () => {
                 </tr>
               </thead>
               <tbody>
-                {sortedQuotations.map((quotation, index) => (
-                  <tr key={quotation.id} className="border-t">
+                {sortedQuotations.map((quotation, index) => {
+                  const isDeleted = !!quotation.deletedAt
+                  return (
+                  <tr key={quotation.id} className={`border-t ${isDeleted ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{quotation.invoiceNumber}</td>
                     <td className="table-cell">{new Date(quotation.invoiceDate).toLocaleDateString('en-GB')}</td>
@@ -675,47 +693,71 @@ const Quotations = () => {
                     <td className="table-cell">{quotation.customer?.name}</td>
                     <td className="table-cell">{formatCurrency(quotation.totalAmount)}</td>
                     <td className="table-cell">
-                      <span className={`px-2 py-1 rounded-full text-xs ${statusBadgeClass(quotation.status)}`}>
-                        {quotation.status}
-                      </span>
+                      {isDeleted ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                          Deleted
+                        </span>
+                      ) : (
+                        <span className={`px-2 py-1 rounded-full text-xs ${statusBadgeClass(quotation.status)}`}>
+                          {quotation.status}
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">
-                      <div className="flex items-center space-x-2">
-                        <button
-                          onClick={() => handleView(quotation.id)}
-                          className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
-                        >
-                          View
-                        </button>
-                        <button
-                          onClick={() => handleEdit(quotation)}
-                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-                        >
-                          Edit
-                        </button>
-                        <DownloadMenu getOpts={() => buildDownloadOpts(quotation.id)} />
-                        <ShareMenu
-                          onShare={(target) => handleShare(quotation.id, target)}
-                          phone={quotation.customer?.phone}
-                          email={quotation.customer?.email}
-                          partyName={quotation.customer?.name}
-                        />
-                        <button
-                          onClick={() => handleConvertToInvoice(quotation.id)}
-                          className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
-                        >
-                          Convert
-                        </button>
-                        <button
-                          onClick={() => handleDelete(quotation.id)}
-                          className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                        >
-                          Delete
-                        </button>
-                      </div>
+                      {isDeleted ? (
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleView(quotation.id)}
+                            className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleRestore(quotation.id)}
+                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                          >
+                            Restore
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-2">
+                          <button
+                            onClick={() => handleView(quotation.id)}
+                            className="text-primary-600 hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleEdit(quotation)}
+                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                          >
+                            Edit
+                          </button>
+                          <DownloadMenu getOpts={() => buildDownloadOpts(quotation.id)} />
+                          <ShareMenu
+                            onShare={(target) => handleShare(quotation.id, target)}
+                            phone={quotation.customer?.phone}
+                            email={quotation.customer?.email}
+                            partyName={quotation.customer?.name}
+                          />
+                          <button
+                            onClick={() => handleConvertToInvoice(quotation.id)}
+                            className="text-purple-600 hover:text-purple-700 dark:text-purple-400 dark:hover:text-purple-300"
+                          >
+                            Convert
+                          </button>
+                          <button
+                            onClick={() => handleDelete(quotation.id)}
+                            className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>

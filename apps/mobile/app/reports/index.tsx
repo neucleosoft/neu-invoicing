@@ -1,4 +1,5 @@
 import { asc } from 'drizzle-orm'
+import { notDeleted } from '@/db/softDelete'
 import { router, useFocusEffect } from 'expo-router'
 import { type ComponentProps, useCallback, useState } from 'react'
 import { FlatList, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native'
@@ -68,8 +69,8 @@ export default function ReportsHubScreen() {
 
   const reload = useCallback(() => {
     Promise.all([
-      db.select().from(schema.customer).orderBy(asc(schema.customer.name)),
-      db.select().from(schema.supplier).orderBy(asc(schema.supplier.name)),
+      db.select().from(schema.customer).where(notDeleted(schema.customer.deletedAt)).orderBy(asc(schema.customer.name)),
+      db.select().from(schema.supplier).where(notDeleted(schema.supplier.deletedAt)).orderBy(asc(schema.supplier.name)),
     ]).then(([c, s]) => {
       setCustomers(c)
       setSuppliers(s)

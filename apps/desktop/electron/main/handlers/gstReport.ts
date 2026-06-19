@@ -2,6 +2,7 @@ import { ipcMain, app } from 'electron'
 import { getPrisma } from '../database'
 import ExcelJS from 'exceljs'
 import path from 'path'
+import { notCancelled, notDeleted } from './softDelete'
 
 // Indian State Codes
 export const INDIAN_STATES: Record<string, string> = {
@@ -423,6 +424,7 @@ export const setupGSTReportHandlers = () => {
     try {
       const where: any = {
         type: 'INVOICE',
+        ...notDeleted,
         invoiceDate: {
           gte: new Date(filters.startDate),
           lte: new Date(filters.endDate)
@@ -559,6 +561,8 @@ export const setupGSTReportHandlers = () => {
   ipcMain.handle('gstReport:getGSTR2', async (_, filters: GSTReportFilters) => {
     try {
       const where: any = {
+        ...notDeleted,
+        ...notCancelled,
         billDate: {
           gte: new Date(filters.startDate),
           lte: new Date(filters.endDate)
@@ -692,6 +696,7 @@ export const setupGSTReportHandlers = () => {
       const salesInvoices = await prisma.salesInvoice.findMany({
         where: {
           type: 'INVOICE',
+          ...notDeleted,
           invoiceDate: { gte: startDate, lte: endDate }
         },
         include: {
@@ -703,6 +708,8 @@ export const setupGSTReportHandlers = () => {
       // Get all purchase bills
       const purchaseBills = await prisma.purchaseBill.findMany({
         where: {
+          ...notDeleted,
+          ...notCancelled,
           billDate: { gte: startDate, lte: endDate }
         },
         include: {
@@ -862,6 +869,7 @@ export const setupGSTReportHandlers = () => {
       const salesInvoices = await prisma.salesInvoice.findMany({
         where: {
           type: 'INVOICE',
+          ...notDeleted,
           invoiceDate: { gte: startDate, lte: endDate }
         },
         include: {
@@ -873,6 +881,8 @@ export const setupGSTReportHandlers = () => {
       // Get all purchase bills for the year
       const purchaseBills = await prisma.purchaseBill.findMany({
         where: {
+          ...notDeleted,
+          ...notCancelled,
           billDate: { gte: startDate, lte: endDate }
         },
         include: {
@@ -1059,6 +1069,7 @@ export const setupGSTReportHandlers = () => {
       const invoices = await prisma.salesInvoice.findMany({
         where: {
           type: 'INVOICE',
+          ...notDeleted,
           invoiceDate: { gte: startDate, lte: endDate }
         },
         include: {

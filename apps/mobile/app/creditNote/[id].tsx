@@ -53,24 +53,26 @@ export default function CreditNoteDetailScreen() {
     load()
   }, [id, db])
 
-  function handleDelete() {
+  function handleCancel() {
     if (!id) return
     Alert.alert(
-      'Delete note',
-      'This reverses the customer balance (and any linked invoice) before deleting. Continue?',
+      'Cancel note',
+      'This reverses its balance effect (on the customer, and any linked invoice) and marks the note Cancelled for your records. It cannot be undone.',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Keep note', style: 'cancel' },
         {
-          text: 'Delete',
+          text: 'Cancel note',
           style: 'destructive',
           onPress: async () => {
             try {
-              // Reverse-then-delete: undo the balance effect this note applied,
-              // then remove items + note. The reverse sign is the OPPOSITE of
-              // what create applied (create used -1 for CREDIT, +1 for DEBIT).
+              // CANCEL (Mode B), not delete. Reverse the balance effect this note
+              // applied — same math the old delete did — then stamp cancelledAt so
+              // the row + its items STAY on record, marked Cancelled, forever.
+              // reverseSign is the OPPOSITE of create (create used -1 CREDIT / +1 DEBIT).
               await db.transaction(async (tx) => {
                 const [existing] = await tx.select().from(schema.creditDebitNote).where(eq(schema.creditDebitNote.id, id)).limit(1)
                 if (!existing) throw new Error('Note not found')
+                if (existing.cancelledAt) return // already cancelled — never reverse the balance twice
                 const reverseSign = existing.type === 'CREDIT_NOTE' ? 1 : -1
                 await tx
                   .update(schema.customer)
@@ -82,12 +84,14 @@ export default function CreditNoteDetailScreen() {
                     .set({ balanceDue: sql`${schema.salesInvoice.balanceDue} + ${reverseSign * existing.totalAmount}` })
                     .where(eq(schema.salesInvoice.id, existing.referenceInvoiceId))
                 }
-                await tx.delete(schema.creditDebitNoteItem).where(eq(schema.creditDebitNoteItem.creditDebitNoteId, id))
-                await tx.delete(schema.creditDebitNote).where(eq(schema.creditDebitNote.id, id))
+                await tx
+                  .update(schema.creditDebitNote)
+                  .set({ cancelledAt: new Date() })
+                  .where(eq(schema.creditDebitNote.id, id))
               })
               router.back()
             } catch (e) {
-              Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete')
+              Alert.alert('Error', e instanceof Error ? e.message : 'Failed to cancel')
             }
           },
         },
@@ -115,11 +119,20 @@ export default function CreditNoteDetailScreen() {
   }
 
   const typeLabel = note.type === 'CREDIT_NOTE' ? 'Credit Note' : 'Debit Note'
+  const isCancelled = !!note.cancelledAt
 
   return (
     <ThemedView style={styles.container}>
-      <Header onBack={() => router.back()} onEdit={onEdit} editEnabled />
+      <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!isCancelled} />
       <ScrollView contentContainerStyle={styles.content}>
+        {isCancelled ? (
+          <ThemedView style={styles.cancelledBanner}>
+            <ThemedText style={styles.cancelledBannerText}>
+              This note is cancelled — its balance effect was reversed and it's left out of reports. It can't be restored.
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
             <ThemedText type="title">{note.noteNumber}</ThemedText>
@@ -136,7 +149,7 @@ export default function CreditNoteDetailScreen() {
         <Section title="Note">
           <Row label="Type" value={typeLabel} />
           <Row label="Date" value={formatDate(note.noteDate)} />
-          <Row label="Status" value={note.status} />
+          <Row label="Status" value={isCancelled ? 'Cancelled' : note.status} />
           {refInvoiceNumber ? <Row label="Reference Invoice" value={refInvoiceNumber} /> : null}
           {note.reason ? <Row label="Reason" value={note.reason} /> : null}
         </Section>
@@ -162,9 +175,11 @@ export default function CreditNoteDetailScreen() {
 
         {note.notes ? <Section title="Notes"><ThemedText style={styles.notesText}>{note.notes}</ThemedText></Section> : null}
 
-        <Pressable style={styles.deleteButton} onPress={handleDelete}>
-          <ThemedText style={styles.deleteButtonText}>Delete note</ThemedText>
-        </Pressable>
+        {isCancelled ? null : (
+          <Pressable style={styles.deleteButton} onPress={handleCancel}>
+            <ThemedText style={styles.deleteButtonText}>Cancel note</ThemedText>
+          </Pressable>
+        )}
       </ScrollView>
     </ThemedView>
   )
@@ -207,4 +222,6 @@ const styles = StyleSheet.create({
   notesText: { fontSize: 14, lineHeight: 20, paddingVertical: 4 },
   deleteButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: '#FF3B30' },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  cancelledBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
+  cancelledBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
 })

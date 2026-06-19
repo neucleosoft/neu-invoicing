@@ -9,6 +9,7 @@
 import { and, asc, desc, eq, gt, gte, lte, sql, type SQL } from 'drizzle-orm'
 
 import { schema, useDb } from '@/db'
+import { notCancelled, notDeleted } from '@/db/softDelete'
 
 type Db = ReturnType<typeof useDb>
 
@@ -37,7 +38,10 @@ export async function getSalesReport(
   range: DateRange,
   status: SalesStatus,
 ): Promise<SalesReport> {
-  const conds: SQL[] = [eq(schema.salesInvoice.type, 'INVOICE')]
+  const conds: SQL[] = [
+    eq(schema.salesInvoice.type, 'INVOICE'),
+    notDeleted(schema.salesInvoice.deletedAt),
+  ]
   if (range.startDate) conds.push(gte(schema.salesInvoice.invoiceDate, range.startDate))
   if (range.endDate) conds.push(lte(schema.salesInvoice.invoiceDate, range.endDate))
   if (status) conds.push(eq(schema.salesInvoice.status, status))
@@ -88,7 +92,7 @@ export async function getStockSummary(db: Db): Promise<StockSummary> {
   const items = await db
     .select()
     .from(schema.item)
-    .where(eq(schema.item.trackStock, true))
+    .where(and(eq(schema.item.trackStock, true), notDeleted(schema.item.deletedAt)))
     .orderBy(asc(schema.item.name))
 
   const rows: StockRow[] = items.map((it) => ({
@@ -123,7 +127,7 @@ export async function getReceivables(db: Db): Promise<PartyBalanceReport> {
       currentBalance: schema.customer.currentBalance,
     })
     .from(schema.customer)
-    .where(gt(schema.customer.currentBalance, 0))
+    .where(and(gt(schema.customer.currentBalance, 0), notDeleted(schema.customer.deletedAt)))
     .orderBy(desc(schema.customer.currentBalance))
   return { parties, total: parties.reduce((s, p) => s + p.currentBalance, 0) }
 }
@@ -138,7 +142,7 @@ export async function getPayables(db: Db): Promise<PartyBalanceReport> {
       currentBalance: schema.supplier.currentBalance,
     })
     .from(schema.supplier)
-    .where(gt(schema.supplier.currentBalance, 0))
+    .where(and(gt(schema.supplier.currentBalance, 0), notDeleted(schema.supplier.deletedAt)))
     .orderBy(desc(schema.supplier.currentBalance))
   return { parties, total: parties.reduce((s, p) => s + p.currentBalance, 0) }
 }
@@ -154,11 +158,14 @@ export interface TaxReport {
 // sums the single taxAmount column (not cgst/sgst/igst separately); we mirror that.
 // Status filter does NOT apply to tax (only dates).
 export async function getTaxReport(db: Db, range: DateRange): Promise<TaxReport> {
-  const sConds: SQL[] = [eq(schema.salesInvoice.type, 'INVOICE')]
+  const sConds: SQL[] = [
+    eq(schema.salesInvoice.type, 'INVOICE'),
+    notDeleted(schema.salesInvoice.deletedAt),
+  ]
   if (range.startDate) sConds.push(gte(schema.salesInvoice.invoiceDate, range.startDate))
   if (range.endDate) sConds.push(lte(schema.salesInvoice.invoiceDate, range.endDate))
 
-  const pConds: SQL[] = []
+  const pConds: SQL[] = [notDeleted(schema.purchaseBill.deletedAt), notCancelled(schema.purchaseBill.cancelledAt)]
   if (range.startDate) pConds.push(gte(schema.purchaseBill.billDate, range.startDate))
   if (range.endDate) pConds.push(lte(schema.purchaseBill.billDate, range.endDate))
 

@@ -88,14 +88,15 @@ export default function ProformaDetailScreen() {
 
   function handleDelete() {
     if (!id) return
-    Alert.alert('Delete proforma', 'This cannot be undone.', [
+    Alert.alert('Delete proforma', "It will be marked Deleted and left out of totals and reports. You can restore it anytime.", [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete', style: 'destructive',
         onPress: async () => {
           try {
-            await db.delete(schema.proformaInvoiceItem).where(eq(schema.proformaInvoiceItem.proformaInvoiceId, id))
-            await db.delete(schema.proformaInvoice).where(eq(schema.proformaInvoice.id, id))
+            // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row and its
+            // line items stay put so a restore brings the whole document back intact.
+            await db.update(schema.proformaInvoice).set({ deletedAt: new Date() }).where(eq(schema.proformaInvoice.id, id))
             router.back()
           } catch (e) { Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete') }
         },
@@ -103,13 +104,32 @@ export default function ProformaDetailScreen() {
     ])
   }
 
+  function handleRestore() {
+    if (!id) return
+    db.update(schema.proformaInvoice)
+      .set({ deletedAt: null })
+      .where(eq(schema.proformaInvoice.id, id))
+      .then(() => router.back())
+      .catch((e) => Alert.alert('Error', e instanceof Error ? e.message : 'Failed to restore'))
+  }
+
   if (loading) return <ThemedView style={styles.container}><Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!doc} /><ThemedText style={styles.centered}>Loading…</ThemedText></ThemedView>
   if (!doc) return <ThemedView style={styles.container}><Header onBack={() => router.back()} onEdit={onEdit} editEnabled={false} /><View style={styles.centeredBlock}><ThemedText type="subtitle">Proforma not found</ThemedText></View></ThemedView>
+
+  const isDeleted = !!doc.deletedAt
 
   return (
     <ThemedView style={styles.container}>
       <Header onBack={() => router.back()} onEdit={onEdit} editEnabled />
       <ScrollView contentContainerStyle={styles.content}>
+        {isDeleted ? (
+          <ThemedView style={styles.deletedBanner}>
+            <ThemedText style={styles.deletedBannerText}>
+              This proforma is deleted — it's left out of totals and reports. Restore it to use it again.
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
             <ThemedText type="title">{doc.invoiceNumber}</ThemedText>
@@ -148,10 +168,18 @@ export default function ProformaDetailScreen() {
 
         {doc.notes ? <Section title="Notes"><ThemedText style={styles.notesText}>{doc.notes}</ThemedText></Section> : null}
 
-        <Pressable style={[styles.convertButton, converting && styles.disabled]} onPress={handleConvert} disabled={converting}>
-          <ThemedText style={styles.convertButtonText}>{converting ? 'Converting…' : 'Convert to Invoice'}</ThemedText>
-        </Pressable>
-        <Pressable style={styles.deleteButton} onPress={handleDelete}><ThemedText style={styles.deleteButtonText}>Delete proforma</ThemedText></Pressable>
+        {isDeleted ? (
+          <Pressable style={styles.restoreButton} onPress={handleRestore}>
+            <ThemedText style={styles.restoreButtonText}>Restore proforma</ThemedText>
+          </Pressable>
+        ) : (
+          <>
+            <Pressable style={[styles.convertButton, converting && styles.disabled]} onPress={handleConvert} disabled={converting}>
+              <ThemedText style={styles.convertButtonText}>{converting ? 'Converting…' : 'Convert to Invoice'}</ThemedText>
+            </Pressable>
+            <Pressable style={styles.deleteButton} onPress={handleDelete}><ThemedText style={styles.deleteButtonText}>Delete proforma</ThemedText></Pressable>
+          </>
+        )}
       </ScrollView>
     </ThemedView>
   )
@@ -195,4 +223,8 @@ const styles = StyleSheet.create({
   disabled: { opacity: 0.5 },
   deleteButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, borderWidth: 1, borderColor: '#FF3B30' },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  deletedBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
+  deletedBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
+  restoreButton: { paddingVertical: 14, borderRadius: 8, alignItems: 'center', marginTop: 8, backgroundColor: '#16a34a' },
+  restoreButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
 })

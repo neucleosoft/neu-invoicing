@@ -18,6 +18,7 @@ import { computeGstValues } from '@neu/shared'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 
 type Item = typeof schema.item.$inferSelect
 type Customer = typeof schema.customer.$inferSelect
@@ -98,7 +99,7 @@ export default function EditChallanScreen() {
       const [co] = await db.select().from(schema.company).limit(1)
       setCompany(co ?? null)
       const its = await db.select().from(schema.deliveryChallanItem).where(eq(schema.deliveryChallanItem.deliveryChallanId, id))
-      const allItems = await db.select().from(schema.item)
+      const allItems = await db.select().from(schema.item).where(notDeleted(schema.item.deletedAt))
       setItems(allItems)
       const nameById = new Map(allItems.map((i) => [i.id, i.name]))
       setLines(its.map((l) => ({ itemId: l.itemId, itemName: nameById.get(l.itemId) ?? 'Item', qty: l.quantity, rate: l.rate, discount: l.discount, taxRate: l.taxRate })))

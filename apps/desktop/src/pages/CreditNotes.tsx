@@ -27,6 +27,7 @@ interface CreditDebitNote {
   noteDate: string
   type: 'CREDIT_NOTE' | 'DEBIT_NOTE'
   status: 'ACTIVE' | 'CANCELLED'
+  cancelledAt?: string | null
   customerId?: string
   subtotal: number
   taxAmount: number
@@ -177,14 +178,17 @@ const CreditNotes = () => {
     loadPartyInvoices(customerId)
   }
 
-  const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this note?', danger: true })
+  const handleCancel = async (id: string) => {
+    const confirmed = await confirm({
+      message: 'Cancel this note? It reverses its balance effect and is marked Cancelled for your records. This cannot be undone.',
+      danger: true,
+    })
     if (confirmed) {
-      const result = await window.electronAPI.creditNote.delete(id)
+      const result = await window.electronAPI.creditNote.cancel(id)
       if (result.success) {
         loadNotes()
       } else {
-        toast.error('Failed to delete note: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to cancel note: ' + (result.error || 'Unknown error'))
       }
     }
   }
@@ -763,7 +767,7 @@ const CreditNotes = () => {
               </thead>
               <tbody>
                 {filteredNotes.map((note, index) => (
-                  <tr key={note.id} className="border-t">
+                  <tr key={note.id} className={`border-t ${note.cancelledAt ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{note.noteNumber}</td>
                     <td className="table-cell">{new Date(note.noteDate).toLocaleDateString('en-GB')}</td>
@@ -781,9 +785,9 @@ const CreditNotes = () => {
                     <td className="table-cell">{formatCurrency(note.totalAmount)}</td>
                     <td className="table-cell">
                       <span className={`px-2 py-1 rounded-full text-xs ${
-                        note.status === 'ACTIVE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                        note.cancelledAt ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' : note.status === 'ACTIVE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                       }`}>
-                        {note.status}
+                        {note.cancelledAt ? 'Cancelled' : note.status}
                       </span>
                     </td>
                     <td className="table-cell">
@@ -794,12 +798,14 @@ const CreditNotes = () => {
                         >
                           View
                         </button>
-                        <button
-                          onClick={() => handleEdit(note)}
-                          className="text-green-600 hover:text-green-700"
-                        >
-                          Edit
-                        </button>
+                        {!note.cancelledAt && (
+                          <button
+                            onClick={() => handleEdit(note)}
+                            className="text-green-600 hover:text-green-700"
+                          >
+                            Edit
+                          </button>
+                        )}
                         <DownloadMenu getOpts={() => buildDownloadOpts(note.id)} />
                         <ShareMenu
                           onShare={(target) => handleShare(note.id, target)}
@@ -807,12 +813,14 @@ const CreditNotes = () => {
                           email={note.customer?.email}
                           partyName={note.customer?.name}
                         />
-                        <button
-                          onClick={() => handleDelete(note.id)}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          Delete
-                        </button>
+                        {!note.cancelledAt && (
+                          <button
+                            onClick={() => handleCancel(note.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            Cancel
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1111,9 +1119,9 @@ const CreditNotes = () => {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
-                    viewingNote.status === 'ACTIVE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                    viewingNote.cancelledAt ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' : viewingNote.status === 'ACTIVE' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300' : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                   }`}>
-                    {viewingNote.status}
+                    {viewingNote.cancelledAt ? 'Cancelled' : viewingNote.status}
                   </span>
                 </div>
               </div>

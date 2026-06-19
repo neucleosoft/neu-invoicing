@@ -12,7 +12,7 @@ import { schema, useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
 import { buildPurchaseBillPdfPayload } from '@/utils/purchaseBillPdf'
-import { deletePurchaseBill } from '@/utils/purchaseSave'
+import { cancelPurchaseBill } from '@/utils/purchaseSave'
 
 type PurchaseBill = typeof schema.purchaseBill.$inferSelect
 type PurchaseBillItem = typeof schema.purchaseBillItem.$inferSelect
@@ -85,22 +85,22 @@ export default function PurchaseDetailScreen() {
     load()
   }, [id, db])
 
-  function handleDelete() {
+  function handleCancel() {
     if (!id) return
     Alert.alert(
-      'Delete purchase bill',
-      'This reverses the supplier balance and any stock it added. Continue?',
+      'Cancel purchase bill',
+      'This reverses the supplier balance and any stock it added, and marks the bill Cancelled for your records. It cannot be undone.',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Keep bill', style: 'cancel' },
         {
-          text: 'Delete',
+          text: 'Cancel bill',
           style: 'destructive',
           onPress: async () => {
             try {
-              await deletePurchaseBill(db, id)
+              await cancelPurchaseBill(db, id)
               router.back()
             } catch (e) {
-              const msg = e instanceof Error ? e.message : 'Failed to delete'
+              const msg = e instanceof Error ? e.message : 'Failed to cancel'
               Alert.alert('Error', msg)
             }
           },
@@ -131,18 +131,33 @@ export default function PurchaseDetailScreen() {
   }
 
   const badge = BILL_STATUS[bill.status] ?? BILL_STATUS.DRAFT
+  const isCancelled = !!bill.cancelledAt
 
   return (
     <ThemedView style={styles.container}>
-      <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!bill} />
+      <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!bill && !isCancelled} />
       <ScrollView contentContainerStyle={styles.content}>
+        {isCancelled ? (
+          <ThemedView style={styles.cancelledBanner}>
+            <ThemedText style={styles.cancelledBannerText}>
+              This bill is cancelled — its supplier balance and stock were reversed and it's left out of reports. It can't be restored.
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
             <ThemedText type="title">{bill.billNumber}</ThemedText>
             <ThemedText style={styles.muted}>{supplierName}</ThemedText>
-            <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-              <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>{badge.label}</ThemedText>
-            </View>
+            {isCancelled ? (
+              <View style={styles.cancelledBadge}>
+                <ThemedText style={styles.cancelledBadgeText}>Cancelled</ThemedText>
+              </View>
+            ) : (
+              <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+                <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>{badge.label}</ThemedText>
+              </View>
+            )}
           </View>
           <View style={styles.heroRight}>
             <ThemedText type="defaultSemiBold" style={styles.heroTotal}>
@@ -199,9 +214,11 @@ export default function PurchaseDetailScreen() {
           </Pressable>
         ) : null}
 
-        <Pressable style={styles.deleteButton} onPress={handleDelete}>
-          <ThemedText style={styles.deleteButtonText}>Delete bill</ThemedText>
-        </Pressable>
+        {isCancelled ? null : (
+          <Pressable style={styles.deleteButton} onPress={handleCancel}>
+            <ThemedText style={styles.deleteButtonText}>Cancel bill</ThemedText>
+          </Pressable>
+        )}
       </ScrollView>
 
       {photoUri ? (
@@ -308,6 +325,10 @@ const styles = StyleSheet.create({
     borderColor: '#FF3B30',
   },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  cancelledBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
+  cancelledBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
+  cancelledBadge: { alignSelf: 'flex-start', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  cancelledBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
   photoOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.92)',

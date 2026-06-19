@@ -13,6 +13,7 @@
 import { and, eq } from 'drizzle-orm'
 
 import { schema, useDb } from '@/db'
+import { notCancelled, notDeleted } from '@/db/softDelete'
 
 type Db = ReturnType<typeof useDb>
 
@@ -84,6 +85,7 @@ export async function buildCustomerLedger(
         and(
           eq(schema.salesInvoice.customerId, customerId),
           eq(schema.salesInvoice.type, 'INVOICE'),
+          notDeleted(schema.salesInvoice.deletedAt),
         ),
       ),
     db
@@ -98,6 +100,8 @@ export async function buildCustomerLedger(
         and(
           eq(schema.paymentTransaction.customerId, customerId),
           eq(schema.paymentTransaction.type, 'PAYMENT_IN'),
+          notDeleted(schema.paymentTransaction.deletedAt),
+          notCancelled(schema.paymentTransaction.cancelledAt),
         ),
       ),
     db
@@ -109,7 +113,13 @@ export async function buildCustomerLedger(
         status: schema.creditDebitNote.status,
       })
       .from(schema.creditDebitNote)
-      .where(eq(schema.creditDebitNote.customerId, customerId)),
+      .where(
+        and(
+          eq(schema.creditDebitNote.customerId, customerId),
+          notDeleted(schema.creditDebitNote.deletedAt),
+          notCancelled(schema.creditDebitNote.cancelledAt),
+        ),
+      ),
   ])
 
   const raw: Omit<LedgerLine, 'balance'>[] = []
@@ -167,7 +177,13 @@ export async function buildSupplierLedger(
         total: schema.purchaseBill.totalAmount,
       })
       .from(schema.purchaseBill)
-      .where(eq(schema.purchaseBill.supplierId, supplierId)),
+      .where(
+        and(
+          eq(schema.purchaseBill.supplierId, supplierId),
+          notDeleted(schema.purchaseBill.deletedAt),
+          notCancelled(schema.purchaseBill.cancelledAt),
+        ),
+      ),
     db
       .select({
         id: schema.paymentTransaction.id,
@@ -180,6 +196,8 @@ export async function buildSupplierLedger(
         and(
           eq(schema.paymentTransaction.supplierId, supplierId),
           eq(schema.paymentTransaction.type, 'PAYMENT_OUT'),
+          notDeleted(schema.paymentTransaction.deletedAt),
+          notCancelled(schema.paymentTransaction.cancelledAt),
         ),
       ),
   ])

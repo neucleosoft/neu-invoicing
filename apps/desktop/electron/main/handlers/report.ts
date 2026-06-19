@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
+import { notCancelled, notDeleted } from './softDelete'
 
 export const setupReportHandlers = () => {
   const prisma = getPrisma()
@@ -8,7 +9,8 @@ export const setupReportHandlers = () => {
   ipcMain.handle('report:getSalesReport', async (_, filters: any) => {
     try {
       const where: any = {
-        type: 'INVOICE'
+        type: 'INVOICE',
+        ...notDeleted
       }
 
       if (filters.startDate) {
@@ -70,7 +72,8 @@ export const setupReportHandlers = () => {
     try {
       const items = await prisma.item.findMany({
         where: {
-          trackStock: true
+          trackStock: true,
+          ...notDeleted
         },
         orderBy: { name: 'asc' }
       })
@@ -105,14 +108,16 @@ export const setupReportHandlers = () => {
         where: {
           currentBalance: {
             gt: 0
-          }
+          },
+          ...notDeleted
         },
         include: {
           salesInvoices: {
             where: {
               balanceDue: {
                 gt: 0
-              }
+              },
+              ...notDeleted
             },
             orderBy: { invoiceDate: 'asc' }
           }
@@ -144,14 +149,16 @@ export const setupReportHandlers = () => {
         where: {
           currentBalance: {
             gt: 0
-          }
+          },
+          ...notDeleted
         },
         include: {
           purchaseBills: {
             where: {
               balanceDue: {
                 gt: 0
-              }
+              },
+              ...notDeleted
             },
             orderBy: { billDate: 'asc' }
           }
@@ -199,7 +206,8 @@ export const setupReportHandlers = () => {
       const salesInvoices = await prisma.salesInvoice.findMany({
         where: {
           ...where,
-          type: 'INVOICE'
+          type: 'INVOICE',
+          ...notDeleted
         },
         select: {
           invoiceDate: true,
@@ -224,7 +232,7 @@ export const setupReportHandlers = () => {
       }
 
       const purchaseBills = await prisma.purchaseBill.findMany({
-        where: billWhere,
+        where: { ...billWhere, ...notDeleted, ...notCancelled },
         select: {
           billDate: true,
           billNumber: true,

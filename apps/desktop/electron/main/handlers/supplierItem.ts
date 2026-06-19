@@ -90,25 +90,54 @@ export const setupSupplierItemHandlers = () => {
     }
   })
 
-  // Delete supplier item
+  // Delete supplier item (soft)
   ipcMain.handle('supplierItem:delete', async (_, id: string) => {
     try {
-      // Check if supplier item has been used on any purchase bill
-      const linked = await prisma.purchaseBillItem.findFirst({
-        where: { supplierItemId: id }
+      const supplierItem = await prisma.supplierItem.findUnique({
+        where: { id }
       })
-      if (linked) {
-        return {
-          success: false,
-          error: 'Cannot delete: this supplier item is referenced by purchase bills.'
-        }
+
+      if (!supplierItem) {
+        throw new Error('Supplier item not found')
       }
-      await prisma.supplierItem.delete({ where: { id } })
+
+      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row stays put so
+      // a restore brings the catalog entry back intact.
+      await prisma.supplierItem.update({
+        where: { id },
+        data: { deletedAt: new Date() }
+      })
+
       return { success: true }
     } catch (error) {
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Failed to delete supplier item'
+      }
+    }
+  })
+
+  // Restore supplier item
+  ipcMain.handle('supplierItem:restore', async (_, id: string) => {
+    try {
+      const supplierItem = await prisma.supplierItem.findUnique({
+        where: { id }
+      })
+
+      if (!supplierItem) {
+        throw new Error('Supplier item not found')
+      }
+
+      await prisma.supplierItem.update({
+        where: { id },
+        data: { deletedAt: null }
+      })
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restore supplier item'
       }
     }
   })

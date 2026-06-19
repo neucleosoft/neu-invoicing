@@ -22,6 +22,7 @@ type ArchiveRow = {
   invoiceDate: Date
   partyName: string
   totalAmount: number
+  deletedAt: Date | null
 }
 
 export default function PreviousInvoicesScreen() {
@@ -29,21 +30,31 @@ export default function PreviousInvoicesScreen() {
   const [invoices, setInvoices] = useState<ArchiveRow[]>([])
   const [search, setSearch] = useState('')
 
-  useFocusEffect(
-    useCallback(() => {
-      db.select({
+  const load = useCallback(() => {
+    return db
+      .select({
         id: schema.previousInvoice.id,
         serialNumber: schema.previousInvoice.serialNumber,
         invoiceNumber: schema.previousInvoice.invoiceNumber,
         invoiceDate: schema.previousInvoice.invoiceDate,
         partyName: schema.previousInvoice.partyName,
         totalAmount: schema.previousInvoice.totalAmount,
+        deletedAt: schema.previousInvoice.deletedAt,
       })
-        .from(schema.previousInvoice)
-        .orderBy(desc(schema.previousInvoice.invoiceDate))
-        .then(setInvoices)
-    }, [db]),
+      .from(schema.previousInvoice)
+      .orderBy(desc(schema.previousInvoice.invoiceDate))
+      .then(setInvoices)
+  }, [db])
+
+  useFocusEffect(
+    useCallback(() => {
+      load()
+    }, [load]),
   )
+
+  // The count chip shows live invoices only — removed ones stay visible in the
+  // list (marked) but never count toward a number.
+  const activeCount = useMemo(() => invoices.filter((x) => !x.deletedAt).length, [invoices])
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -56,7 +67,7 @@ export default function PreviousInvoicesScreen() {
   }, [invoices, search])
 
   const renderItem = useCallback<ListRenderItem<ArchiveRow>>(
-    ({ item }) => <Row invoice={item} />,
+    ({ item }) => <Row invoice={item} deleted={!!item.deletedAt} />,
     [],
   )
 
@@ -68,7 +79,7 @@ export default function PreviousInvoicesScreen() {
         </Pressable>
         <ThemedText type="title" style={styles.headerTitle}>Previous Invoices</ThemedText>
         <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
-          <ThemedText style={styles.countText}>{invoices.length}</ThemedText>
+          <ThemedText style={styles.countText}>{activeCount}</ThemedText>
         </ThemedView>
       </View>
 
@@ -105,13 +116,19 @@ export default function PreviousInvoicesScreen() {
   )
 }
 
-const Row = memo(function Row({ invoice }: { invoice: ArchiveRow }) {
+const Row = memo(function Row({
+  invoice,
+  deleted,
+}: {
+  invoice: ArchiveRow
+  deleted: boolean
+}) {
   return (
     <Pressable
       onPress={() => router.push({ pathname: '/previousInvoice/[id]', params: { id: invoice.id } })}
       style={({ pressed }) => [pressed && styles.cardPressed]}
     >
-      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={[styles.card, deleted && styles.cardDeleted]}>
         <View style={styles.cardLeft}>
           <ThemedText type="defaultSemiBold" numberOfLines={1}>{invoice.invoiceNumber}</ThemedText>
           <ThemedText style={styles.metaText} numberOfLines={1}>{invoice.partyName}</ThemedText>
@@ -119,7 +136,11 @@ const Row = memo(function Row({ invoice }: { invoice: ArchiveRow }) {
         </View>
         <View style={styles.cardRight}>
           <ThemedText type="defaultSemiBold">{formatCurrency(invoice.totalAmount)}</ThemedText>
-          {invoice.serialNumber != null ? (
+          {deleted ? (
+            <View style={styles.deletedBadge}>
+              <ThemedText style={styles.deletedBadgeText}>Removed</ThemedText>
+            </View>
+          ) : invoice.serialNumber != null ? (
             <View style={styles.serialBadge}>
               <ThemedText style={styles.serialBadgeText}>#{invoice.serialNumber}</ThemedText>
             </View>
@@ -142,6 +163,7 @@ const styles = StyleSheet.create({
   searchInput: { paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: '#111827' },
   listContent: { paddingBottom: 96 },
   card: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 12, marginBottom: 10, gap: 12 },
+  cardDeleted: { opacity: 0.6 },
   cardPressed: { opacity: 0.7 },
   cardLeft: { flex: 1, gap: 3 },
   cardRight: { alignItems: 'flex-end', gap: 4 },
@@ -149,4 +171,6 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 11, opacity: 0.5 },
   serialBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
   serialBadgeText: { fontSize: 10, fontWeight: '600', color: '#374151' },
+  deletedBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  deletedBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
 })

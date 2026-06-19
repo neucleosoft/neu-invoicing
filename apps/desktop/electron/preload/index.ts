@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("customer:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("customer:delete", id),
+    restore: (id: string) => ipcRenderer.invoke("customer:restore", id),
     getLedger: (id: string) => ipcRenderer.invoke("customer:getLedger", id),
     getStatement: (args: { customerId: string; fromDate: string; toDate: string }) =>
       ipcRenderer.invoke("customer:getStatement", args),
@@ -63,6 +64,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("supplier:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("supplier:delete", id),
+    restore: (id: string) => ipcRenderer.invoke("supplier:restore", id),
   },
 
   // Supplier items
@@ -73,6 +75,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("supplierItem:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("supplierItem:delete", id),
+    restore: (id: string) => ipcRenderer.invoke("supplierItem:restore", id),
   },
 
   // Items
@@ -83,6 +86,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("item:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("item:delete", id),
+    restore: (id: string) => ipcRenderer.invoke("item:restore", id),
     getLowStock: () => ipcRenderer.invoke("item:getLowStock"),
   },
 
@@ -107,6 +111,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("quotation:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("quotation:delete", id),
+    restore: (id: string) => ipcRenderer.invoke("quotation:restore", id),
     convertToInvoice: (id: string) =>
       ipcRenderer.invoke("quotation:convertToInvoice", id),
     generateQuotationNumber: () =>
@@ -121,6 +126,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("proformaInvoice:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("proformaInvoice:delete", id),
+    restore: (id: string) => ipcRenderer.invoke("proformaInvoice:restore", id),
     convertToInvoice: (id: string) =>
       ipcRenderer.invoke("proformaInvoice:convertToInvoice", id),
     generateNumber: () =>
@@ -134,7 +140,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     create: (data: any) => ipcRenderer.invoke("purchase:create", data),
     update: (id: string, data: any) =>
       ipcRenderer.invoke("purchase:update", id, data),
-    delete: (id: string) => ipcRenderer.invoke("purchase:delete", id),
+    cancel: (id: string) => ipcRenderer.invoke("purchase:cancel", id),
     generateBillNumber: () => ipcRenderer.invoke("purchase:generateBillNumber"),
     extractFromImage: (args: { fileBytes: Uint8Array; mimeType: string }) =>
       ipcRenderer.invoke("purchase:extractFromImage", args),
@@ -148,6 +154,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("purchaseOrder:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("purchaseOrder:delete", id),
+    restore: (id: string) => ipcRenderer.invoke("purchaseOrder:restore", id),
     generateOrderNumber: () =>
       ipcRenderer.invoke("purchaseOrder:generateOrderNumber"),
     markAsReceived: (
@@ -167,7 +174,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getAll: (type?: string) => ipcRenderer.invoke("payment:getAll", type),
     update: (id: string, data: any) =>
       ipcRenderer.invoke("payment:update", id, data),
-    delete: (id: string) => ipcRenderer.invoke("payment:delete", id),
+    cancel: (id: string) => ipcRenderer.invoke("payment:cancel", id),
   },
 
   // Dashboard
@@ -234,7 +241,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     create: (data: any) => ipcRenderer.invoke("challan:create", data),
     update: (id: string, data: any) =>
       ipcRenderer.invoke("challan:update", id, data),
-    delete: (id: string) => ipcRenderer.invoke("challan:delete", id),
+    cancel: (id: string) => ipcRenderer.invoke("challan:cancel", id),
     convertToInvoice: (id: string) =>
       ipcRenderer.invoke("challan:convertToInvoice", id),
     generateChallanNumber: () =>
@@ -248,7 +255,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     create: (data: any) => ipcRenderer.invoke("creditNote:create", data),
     update: (id: string, data: any) =>
       ipcRenderer.invoke("creditNote:update", id, data),
-    delete: (id: string) => ipcRenderer.invoke("creditNote:delete", id),
+    cancel: (id: string) => ipcRenderer.invoke("creditNote:cancel", id),
     generateNoteNumber: (type: string) =>
       ipcRenderer.invoke("creditNote:generateNoteNumber", type),
   },
@@ -274,6 +281,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("cashBank:update", id, data),
     delete: (id: string) => ipcRenderer.invoke("cashBank:delete", id),
+    restore: (id: string) => ipcRenderer.invoke("cashBank:restore", id),
     getTotalBalance: () => ipcRenderer.invoke("cashBank:getTotalBalance"),
     adjustBalance: (id: string, amount: number, notes?: string) =>
       ipcRenderer.invoke("cashBank:adjustBalance", id, amount, notes),

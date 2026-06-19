@@ -16,6 +16,7 @@ import {
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 
 // Same 8 units as Items — a locked list keeps reports able to GROUP BY unit.
 const UNIT_OPTIONS = ['pcs', 'kg', 'g', 'l', 'm', 'hrs', 'box', 'carton'] as const
@@ -55,8 +56,8 @@ export default function NewSupplierItemScreen() {
 
   useEffect(() => {
     Promise.all([
-      db.select().from(schema.supplier).orderBy(asc(schema.supplier.name)),
-      db.select().from(schema.item).orderBy(asc(schema.item.name)),
+      db.select().from(schema.supplier).where(notDeleted(schema.supplier.deletedAt)).orderBy(asc(schema.supplier.name)),
+      db.select().from(schema.item).where(notDeleted(schema.item.deletedAt)).orderBy(asc(schema.item.name)),
     ]).then(([sup, it]) => {
       setSuppliers(sup)
       setItems(it)

@@ -752,8 +752,11 @@ export const setupPurchaseHandlers = () => {
     }
   })
 
-  // Delete purchase bill
-  ipcMain.handle('purchase:delete', async (_, id: string) => {
+  // Cancel purchase bill (Mode B): reverse the supplier balance + stock, then stamp
+  // cancelledAt. applyStockUpdates('decrement') APPENDS the reversing movements; we do
+  // NOT deleteMany — cancel preserves the record and a deleted movement can't sync.
+  // Terminal — there is no restore.
+  ipcMain.handle('purchase:cancel', async (_, id: string) => {
     try {
       await prisma.$transaction(async (tx: any) => {
         const bill = await tx.purchaseBill.findUnique({
@@ -775,6 +778,11 @@ export const setupPurchaseHandlers = () => {
           throw new Error('Purchase bill not found')
         }
 
+        // Already cancelled — never reverse the balance/stock twice (idempotency guard).
+        if (bill.cancelledAt) {
+          return
+        }
+
         await tx.supplier.update({
           where: { id: bill.supplierId },
           data: {
@@ -784,6 +792,9 @@ export const setupPurchaseHandlers = () => {
           }
         })
 
+        // Reverse stock AND append the reversing movements (direction 'decrement'
+        // inserts -qty PURCHASE rows). The original +qty rows and these reversals both
+        // stay — net zero, append-only, sync-safe. No deleteMany.
         await applyStockUpdates(
           tx,
           bill.items.map((item: any) => ({
@@ -795,15 +806,11 @@ export const setupPurchaseHandlers = () => {
           'decrement'
         )
 
-        await tx.stockMovement.deleteMany({
-          where: {
-            referenceType: 'BILL',
-            referenceId: id
-          }
-        })
-
-        await tx.purchaseBill.delete({
-          where: { id }
+        // CANCEL, not delete: stamp cancelledAt; the bill, its items, and its stock
+        // movements all stay on record.
+        await tx.purchaseBill.update({
+          where: { id },
+          data: { cancelledAt: new Date() }
         })
       })
 
@@ -811,7 +818,7 @@ export const setupPurchaseHandlers = () => {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to delete purchase bill'
+        error: error instanceof Error ? error.message : 'Failed to cancel purchase bill'
       }
     }
   })

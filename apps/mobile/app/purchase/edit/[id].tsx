@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import {
@@ -16,6 +16,7 @@ import {
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 import { formatCurrency } from '@/utils/currency'
 import { updatePurchaseBill, type PurchaseLineInput } from '@/utils/purchaseSave'
 
@@ -55,7 +56,11 @@ export default function EditPurchaseScreen() {
   const [showCatalogPicker, setShowCatalogPicker] = useState(false)
 
   useEffect(() => {
-    db.select().from(schema.supplier).orderBy(asc(schema.supplier.name)).then(setSuppliers)
+    db.select()
+      .from(schema.supplier)
+      .where(notDeleted(schema.supplier.deletedAt))
+      .orderBy(asc(schema.supplier.name))
+      .then(setSuppliers)
   }, [db])
 
   // Catalog tracks the selected supplier. Lines are NOT cleared here (that only
@@ -68,7 +73,12 @@ export default function EditPurchaseScreen() {
     }
     db.select()
       .from(schema.supplierItem)
-      .where(eq(schema.supplierItem.supplierId, supplierId))
+      .where(
+        and(
+          eq(schema.supplierItem.supplierId, supplierId),
+          notDeleted(schema.supplierItem.deletedAt),
+        ),
+      )
       .orderBy(asc(schema.supplierItem.name))
       .then(setCatalog)
   }, [supplierId, db])

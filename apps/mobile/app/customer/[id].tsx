@@ -34,42 +34,41 @@ export default function CustomerDetailScreen() {
 
   function handleDelete() {
     if (!id) return
-    Alert.alert('Delete customer', `Delete "${customer?.name ?? ''}"? This cannot be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            // Guard (mirrors desktop customer:delete): block if the customer has
-            // any sales invoices or payments — deleting would orphan those and
-            // corrupt the ledger. The user must remove those records first.
-            const [inv] = await db
-              .select({ id: schema.salesInvoice.id })
-              .from(schema.salesInvoice)
-              .where(eq(schema.salesInvoice.customerId, id))
-              .limit(1)
-            const [pay] = await db
-              .select({ id: schema.paymentTransaction.id })
-              .from(schema.paymentTransaction)
-              .where(eq(schema.paymentTransaction.customerId, id))
-              .limit(1)
-            if (inv || pay) {
-              Alert.alert(
-                'Cannot delete',
-                'This customer has invoices or payments. Delete those records first.',
-              )
-              return
+    Alert.alert(
+      'Delete customer',
+      "It will be marked Deleted and left out of totals and reports. You can restore it anytime.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row and
+              // its invoices/payments/balance stay put so a restore brings the
+              // customer back intact.
+              await db
+                .update(schema.customer)
+                .set({ deletedAt: new Date() })
+                .where(eq(schema.customer.id, id))
+              router.back()
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : 'Failed to delete'
+              Alert.alert('Error', msg)
             }
-            await db.delete(schema.customer).where(eq(schema.customer.id, id))
-            router.back()
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : 'Failed to delete'
-            Alert.alert('Error', msg)
-          }
+          },
         },
-      },
-    ])
+      ],
+    )
+  }
+
+  function handleRestore() {
+    if (!id) return
+    db.update(schema.customer)
+      .set({ deletedAt: null })
+      .where(eq(schema.customer.id, id))
+      .then(() => router.back())
+      .catch((e) => Alert.alert('Error', e instanceof Error ? e.message : 'Failed to restore'))
   }
 
   useEffect(() => {
@@ -115,10 +114,20 @@ export default function CustomerDetailScreen() {
     [customer.city, customer.district].filter(Boolean).join(', ') ||
     null
 
+  const isDeleted = !!customer.deletedAt
+
   return (
     <ThemedView style={styles.container}>
       <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!customer} />
       <ScrollView contentContainerStyle={styles.content}>
+        {isDeleted ? (
+          <ThemedView style={styles.deletedBanner}>
+            <ThemedText style={styles.deletedBannerText}>
+              This customer is deleted — it's left out of totals and reports. Restore it to use it again.
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
             <ThemedText type="title" numberOfLines={2}>
@@ -181,9 +190,15 @@ export default function CustomerDetailScreen() {
           <Row label="Updated" value={formatDate(customer.updatedAt)} />
         </Section>
 
-        <Pressable style={styles.deleteButton} onPress={handleDelete}>
-          <ThemedText style={styles.deleteButtonText}>Delete customer</ThemedText>
-        </Pressable>
+        {isDeleted ? (
+          <Pressable style={styles.restoreButton} onPress={handleRestore}>
+            <ThemedText style={styles.restoreButtonText}>Restore customer</ThemedText>
+          </Pressable>
+        ) : (
+          <Pressable style={styles.deleteButton} onPress={handleDelete}>
+            <ThemedText style={styles.deleteButtonText}>Delete customer</ThemedText>
+          </Pressable>
+        )}
       </ScrollView>
     </ThemedView>
   )
@@ -259,6 +274,16 @@ const styles = StyleSheet.create({
     borderColor: '#FF3B30',
   },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  deletedBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
+  deletedBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
+  restoreButton: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+    backgroundColor: '#16a34a',
+  },
+  restoreButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
   ledgerButton: {
     paddingVertical: 12,
     borderRadius: 8,

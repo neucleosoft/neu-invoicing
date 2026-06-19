@@ -400,16 +400,22 @@ export const setupCreditNoteHandlers = () => {
     }
   })
 
-  // Delete credit/debit note
-  ipcMain.handle('creditNote:delete', async (_, id: string) => {
+  // Cancel credit/debit note (Mode B): reverse its balance effect, then stamp
+  // cancelledAt instead of deleting. The row + its items stay on record, marked
+  // Cancelled, forever. Terminal — there is no restore.
+  ipcMain.handle('creditNote:cancel', async (_, id: string) => {
     try {
       const existingNote = await prisma.creditDebitNote.findUnique({
-        where: { id },
-        include: { items: true }
+        where: { id }
       })
 
       if (!existingNote) {
         throw new Error('Credit/Debit note not found')
+      }
+
+      // Already cancelled — never reverse the balance twice (idempotency guard).
+      if (existingNote.cancelledAt) {
+        return { success: true }
       }
 
       await prisma.$transaction(async (tx: any) => {
@@ -446,9 +452,10 @@ export const setupCreditNoteHandlers = () => {
           }
         }
 
-        // Delete the note (items will cascade delete)
-        await tx.creditDebitNote.delete({
-          where: { id }
+        // CANCEL, not delete: stamp cancelledAt; the note + items stay on record.
+        await tx.creditDebitNote.update({
+          where: { id },
+          data: { cancelledAt: new Date() }
         })
       })
 
@@ -456,7 +463,7 @@ export const setupCreditNoteHandlers = () => {
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to delete credit/debit note'
+        error: error instanceof Error ? error.message : 'Failed to cancel credit/debit note'
       }
     }
   })

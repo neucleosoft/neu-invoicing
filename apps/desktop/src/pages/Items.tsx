@@ -107,7 +107,10 @@ const Items = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this item?', danger: true })
+    const confirmed = await confirm({
+      message: 'Delete this item? It will be marked Deleted and left out of totals and reports. You can restore it anytime.',
+      danger: true,
+    })
     if (confirmed) {
       const result = await window.electronAPI.item.delete(id)
       if (result.success) {
@@ -115,6 +118,15 @@ const Items = () => {
       } else {
         toast.error('Failed to delete item: ' + (result.error || 'Unknown error'))
       }
+    }
+  }
+
+  const handleRestore = async (id: string) => {
+    const result = await window.electronAPI.item.restore(id)
+    if (result.success) {
+      loadItems()
+    } else {
+      toast.error('Failed to restore item: ' + (result.error || 'Unknown error'))
     }
   }
 
@@ -196,10 +208,21 @@ const Items = () => {
               </tr>
             </thead>
             <tbody>
-              {filteredItems.map((item, index) => (
-                <tr key={item.id} className="border-t">
+              {filteredItems.map((item, index) => {
+                const isDeleted = !!item.deletedAt
+                return (
+                <tr key={item.id} className={`border-t ${isDeleted ? 'opacity-60' : ''}`}>
                   <td className="table-cell">{index + 1}</td>
-                  <td className="table-cell font-medium">{item.name}</td>
+                  <td className="table-cell font-medium">
+                    <div className="flex items-center gap-2">
+                      {item.name}
+                      {isDeleted && (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                          Deleted
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="table-cell">{item.skuHsn || '-'}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-1 rounded-full text-xs ${
@@ -220,15 +243,24 @@ const Items = () => {
                   </td>
                   <td className="table-cell">{item.unit}</td>
                   <td className="table-cell">
-                    <button onClick={() => handleEdit(item)} className="text-primary-600 hover:text-primary-700 mr-3">
-                      Edit
-                    </button>
-                    <button onClick={() => handleDelete(item.id)} className="text-red-600 hover:text-red-700">
-                      Delete
-                    </button>
+                    {isDeleted ? (
+                      <button onClick={() => handleRestore(item.id)} className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300">
+                        Restore
+                      </button>
+                    ) : (
+                      <>
+                        <button onClick={() => handleEdit(item)} className="text-primary-600 hover:text-primary-700 mr-3">
+                          Edit
+                        </button>
+                        <button onClick={() => handleDelete(item.id)} className="text-red-600 hover:text-red-700">
+                          Delete
+                        </button>
+                      </>
+                    )}
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>

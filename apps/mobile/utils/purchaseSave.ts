@@ -488,7 +488,11 @@ export async function updatePurchaseBill(
   })
 }
 
-export async function deletePurchaseBill(db: Db, id: string): Promise<void> {
+// Cancel (Mode B): reverse the supplier balance + stock, then stamp cancelledAt.
+// applyStockUpdates('decrement') APPENDS the reversing movements; we do NOT delete
+// the movement rows or the bill — cancel preserves the whole record (append-only,
+// sync-safe). Terminal — there is no restore.
+export async function cancelPurchaseBill(db: Db, id: string): Promise<void> {
   await db.transaction(async (tx) => {
     const [bill] = await tx
       .select()
@@ -496,6 +500,7 @@ export async function deletePurchaseBill(db: Db, id: string): Promise<void> {
       .where(eq(schema.purchaseBill.id, id))
       .limit(1)
     if (!bill) throw new Error('Purchase bill not found')
+    if (bill.cancelledAt) return // already cancelled — never reverse the balance/stock twice
 
     const reversal = await loadReversalLines(tx, id)
 
@@ -505,18 +510,10 @@ export async function deletePurchaseBill(db: Db, id: string): Promise<void> {
       .where(eq(schema.supplier.id, bill.supplierId))
 
     await applyStockUpdates(tx, reversal, id, 'decrement')
+
     await tx
-      .delete(schema.stockMovement)
-      .where(
-        and(
-          eq(schema.stockMovement.referenceType, 'BILL'),
-          eq(schema.stockMovement.referenceId, id),
-        ),
-      )
-    // Explicitly clear children first — don't rely on FK cascade being enabled.
-    await tx
-      .delete(schema.purchaseBillItem)
-      .where(eq(schema.purchaseBillItem.purchaseBillId, id))
-    await tx.delete(schema.purchaseBill).where(eq(schema.purchaseBill.id, id))
+      .update(schema.purchaseBill)
+      .set({ cancelledAt: new Date() })
+      .where(eq(schema.purchaseBill.id, id))
   })
 }

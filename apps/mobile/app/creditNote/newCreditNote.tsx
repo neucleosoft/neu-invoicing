@@ -1,4 +1,4 @@
-import { desc, eq, like, sql } from 'drizzle-orm'
+import { and, desc, eq, like, sql } from 'drizzle-orm'
 import { router } from 'expo-router'
 import { useEffect, useState } from 'react'
 import {
@@ -18,6 +18,7 @@ import { computeGstValues } from '@neu/shared'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
@@ -95,8 +96,8 @@ export default function NewCreditNoteScreen() {
   const [showItemPicker, setShowItemPicker] = useState(false)
 
   useEffect(() => {
-    db.select().from(schema.customer).then(setCustomers)
-    db.select().from(schema.item).then(setItems)
+    db.select().from(schema.customer).where(notDeleted(schema.customer.deletedAt)).then(setCustomers)
+    db.select().from(schema.item).where(notDeleted(schema.item.deletedAt)).then(setItems)
     db.select().from(schema.company).limit(1).then((r) => setCompany(r[0] ?? null))
   }, [db])
 
@@ -113,7 +114,7 @@ export default function NewCreditNoteScreen() {
     }
     db.select()
       .from(schema.salesInvoice)
-      .where(eq(schema.salesInvoice.customerId, customerId))
+      .where(and(eq(schema.salesInvoice.customerId, customerId), notDeleted(schema.salesInvoice.deletedAt)))
       .orderBy(desc(schema.salesInvoice.invoiceDate))
       .then(setInvoices)
   }, [db, customerId])

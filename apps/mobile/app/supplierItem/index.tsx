@@ -1,4 +1,4 @@
-import { asc } from 'drizzle-orm'
+import { asc, eq } from 'drizzle-orm'
 import { router, useFocusEffect } from 'expo-router'
 import { memo, useCallback, useMemo, useState } from 'react'
 import {
@@ -32,19 +32,37 @@ export default function SupplierItemsScreen() {
   const [supplierFilter, setSupplierFilter] = useState<string>('ALL')
   const [showFilter, setShowFilter] = useState(false)
 
+  const load = useCallback(() => {
+    return Promise.all([
+      db.select().from(schema.supplierItem).orderBy(asc(schema.supplierItem.name)),
+      db.select().from(schema.supplier).orderBy(asc(schema.supplier.name)),
+      db.select().from(schema.item),
+    ]).then(([si, sup, it]) => {
+      setRows(si)
+      setSuppliers(sup)
+      setItems(it)
+    })
+  }, [db])
+
   useFocusEffect(
     useCallback(() => {
-      Promise.all([
-        db.select().from(schema.supplierItem).orderBy(asc(schema.supplierItem.name)),
-        db.select().from(schema.supplier).orderBy(asc(schema.supplier.name)),
-        db.select().from(schema.item),
-      ]).then(([si, sup, it]) => {
-        setRows(si)
-        setSuppliers(sup)
-        setItems(it)
-      })
-    }, [db]),
+      load()
+    }, [load]),
   )
+
+  const handleRestore = useCallback(
+    (id: string) => {
+      db.update(schema.supplierItem)
+        .set({ deletedAt: null })
+        .where(eq(schema.supplierItem.id, id))
+        .then(load)
+    },
+    [db, load],
+  )
+
+  // The count chip shows live supplier items only — deleted ones stay visible in
+  // the list (marked) but never count toward a number.
+  const activeCount = useMemo(() => rows.filter((r) => !r.deletedAt).length, [rows])
 
   // Lookup maps so each row can show its supplier's name and (if linked) the
   // sellable item it feeds stock into, without an N+1 query per row.
@@ -82,9 +100,11 @@ export default function SupplierItemsScreen() {
         row={item}
         supplierName={supplierName(item.supplierId)}
         linkedName={linkedName(item.linkedItemId)}
+        deleted={!!item.deletedAt}
+        onRestore={handleRestore}
       />
     ),
-    [supplierName, linkedName],
+    [supplierName, linkedName, handleRestore],
   )
   const keyExtractor = useCallback((row: SupplierItem) => row.id, [])
 
@@ -99,7 +119,7 @@ export default function SupplierItemsScreen() {
         </Pressable>
         <ThemedText type="title" style={styles.headerTitle}>Supplier Items</ThemedText>
         <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
-          <ThemedText style={styles.countText}>{rows.length}</ThemedText>
+          <ThemedText style={styles.countText}>{activeCount}</ThemedText>
         </ThemedView>
       </View>
 
@@ -181,10 +201,14 @@ const SupplierItemRow = memo(function SupplierItemRow({
   row,
   supplierName,
   linkedName,
+  deleted,
+  onRestore,
 }: {
   row: SupplierItem
   supplierName: string
   linkedName: string | null
+  deleted: boolean
+  onRestore: (id: string) => void
 }) {
   return (
     <Pressable
@@ -193,7 +217,7 @@ const SupplierItemRow = memo(function SupplierItemRow({
       }
       style={({ pressed }) => [pressed && styles.cardPressed]}
     >
-      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={[styles.card, deleted && styles.cardDeleted]}>
         <View style={styles.cardLeft}>
           <ThemedText type="defaultSemiBold" numberOfLines={1}>
             {row.name}
@@ -215,7 +239,18 @@ const SupplierItemRow = memo(function SupplierItemRow({
         </View>
         <View style={styles.cardRight}>
           <ThemedText type="defaultSemiBold">{formatCurrency(row.lastPurchasePrice)}</ThemedText>
-          <ThemedText style={styles.unitText}>per {row.unit}</ThemedText>
+          {deleted ? (
+            <>
+              <View style={styles.deletedBadge}>
+                <ThemedText style={styles.deletedBadgeText}>Deleted</ThemedText>
+              </View>
+              <Pressable onPress={() => onRestore(row.id)} hitSlop={8} style={styles.restoreLink}>
+                <ThemedText style={styles.restoreLinkText}>Restore</ThemedText>
+              </Pressable>
+            </>
+          ) : (
+            <ThemedText style={styles.unitText}>per {row.unit}</ThemedText>
+          )}
         </View>
       </ThemedView>
     </Pressable>
@@ -251,6 +286,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     gap: 12,
   },
+  cardDeleted: { opacity: 0.6 },
   cardPressed: { opacity: 0.7 },
   cardLeft: { flex: 1, gap: 3 },
   cardRight: { alignItems: 'flex-end', gap: 2 },
@@ -272,6 +308,10 @@ const styles = StyleSheet.create({
   },
   linkChipText: { fontSize: 10, color: '#166534', fontWeight: '600' },
   unitText: { fontSize: 12, opacity: 0.6 },
+  deletedBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  deletedBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
+  restoreLink: { paddingVertical: 2 },
+  restoreLinkText: { fontSize: 12, fontWeight: '600', color: '#007AFF' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { maxHeight: '80%', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16 },
   modalTitle: { marginBottom: 12 },

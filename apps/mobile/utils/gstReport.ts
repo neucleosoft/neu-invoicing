@@ -14,6 +14,7 @@
 import { and, eq, gte, inArray, lte } from 'drizzle-orm'
 
 import { schema, useDb } from '@/db'
+import { notCancelled, notDeleted } from '@/db/softDelete'
 
 type Db = ReturnType<typeof useDb>
 
@@ -130,6 +131,7 @@ async function fetchInvoices(db: Db, range: GstRange): Promise<InvoiceRow[]> {
         eq(schema.salesInvoice.type, 'INVOICE'),
         gte(schema.salesInvoice.invoiceDate, range.start),
         lte(schema.salesInvoice.invoiceDate, range.end),
+        notDeleted(schema.salesInvoice.deletedAt),
       ),
     )
   return rows
@@ -157,6 +159,8 @@ async function fetchBills(db: Db, range: GstRange): Promise<BillRow[]> {
       and(
         gte(schema.purchaseBill.billDate, range.start),
         lte(schema.purchaseBill.billDate, range.end),
+        notDeleted(schema.purchaseBill.deletedAt),
+        notCancelled(schema.purchaseBill.cancelledAt),
       ),
     )
 }
@@ -180,6 +184,8 @@ async function fetchNotes(db: Db, range: GstRange): Promise<NoteRow[]> {
         eq(schema.creditDebitNote.status, 'ACTIVE'),
         gte(schema.creditDebitNote.noteDate, range.start),
         lte(schema.creditDebitNote.noteDate, range.end),
+        notDeleted(schema.creditDebitNote.deletedAt),
+        notCancelled(schema.creditDebitNote.cancelledAt),
       ),
     )
 }
@@ -321,6 +327,7 @@ export async function getHSNSummary(db: Db, range: GstRange): Promise<HsnRow[]> 
         eq(schema.salesInvoice.type, 'INVOICE'),
         gte(schema.salesInvoice.invoiceDate, range.start),
         lte(schema.salesInvoice.invoiceDate, range.end),
+        notDeleted(schema.salesInvoice.deletedAt),
       ),
     )
   const invIds = invoices.map((i) => i.id)

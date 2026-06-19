@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
+import { notDeleted } from './softDelete'
 
 export const setupCashBankHandlers = () => {
   const prisma = getPrisma()
@@ -91,8 +92,11 @@ export const setupCashBankHandlers = () => {
         return { success: false, error: 'Account not found' }
       }
 
-      await prisma.bankAccount.delete({
-        where: { id }
+      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row stays put so
+      // a restore brings the account back intact.
+      await prisma.bankAccount.update({
+        where: { id },
+        data: { deletedAt: new Date() }
       })
 
       return { success: true }
@@ -104,10 +108,35 @@ export const setupCashBankHandlers = () => {
     }
   })
 
+  // Restore account
+  ipcMain.handle('cashBank:restore', async (_, id: string) => {
+    try {
+      const account = await prisma.bankAccount.findUnique({
+        where: { id }
+      })
+
+      if (!account) {
+        return { success: false, error: 'Account not found' }
+      }
+
+      await prisma.bankAccount.update({
+        where: { id },
+        data: { deletedAt: null }
+      })
+
+      return { success: true }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to restore account'
+      }
+    }
+  })
+
   // Get total balance (cash, bank, total)
   ipcMain.handle('cashBank:getTotalBalance', async () => {
     try {
-      const accounts = await prisma.bankAccount.findMany()
+      const accounts = await prisma.bankAccount.findMany({ where: { ...notDeleted } })
 
       let cash = 0
       let bank = 0

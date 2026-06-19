@@ -56,8 +56,12 @@ export default function CreditNotesScreen() {
     })
   }, [notes, search, filter, customerName])
 
+  // Count chip shows live notes only — cancelled notes stay visible in the list
+  // (marked) but never count toward a number.
+  const activeCount = useMemo(() => notes.filter((n) => !n.cancelledAt).length, [notes])
+
   const renderItem = useCallback<ListRenderItem<Note>>(
-    ({ item }) => <Row n={item} customerName={customerName(item.customerId)} />,
+    ({ item }) => <Row n={item} customerName={customerName(item.customerId)} cancelled={!!item.cancelledAt} />,
     [customerName],
   )
 
@@ -69,7 +73,7 @@ export default function CreditNotesScreen() {
         </Pressable>
         <ThemedText type="title" style={styles.headerTitle}>Credit / Debit Notes</ThemedText>
         <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
-          <ThemedText style={styles.countText}>{notes.length}</ThemedText>
+          <ThemedText style={styles.countText}>{activeCount}</ThemedText>
         </ThemedView>
       </View>
 
@@ -106,11 +110,11 @@ export default function CreditNotesScreen() {
   )
 }
 
-const Row = memo(function Row({ n, customerName }: { n: Note; customerName: string }) {
+const Row = memo(function Row({ n, customerName, cancelled }: { n: Note; customerName: string; cancelled: boolean }) {
   const badge = TYPE_BADGE[n.type] ?? TYPE_BADGE.CREDIT_NOTE
   return (
     <Pressable onPress={() => router.push({ pathname: '/creditNote/[id]', params: { id: n.id } })} style={({ pressed }) => [pressed && styles.cardPressed]}>
-      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={[styles.card, cancelled && styles.cardCancelled]}>
         <View style={styles.cardLeft}>
           <ThemedText type="defaultSemiBold" numberOfLines={1}>{n.noteNumber}</ThemedText>
           <ThemedText style={styles.metaText} numberOfLines={1}>{customerName}</ThemedText>
@@ -118,9 +122,15 @@ const Row = memo(function Row({ n, customerName }: { n: Note; customerName: stri
         </View>
         <View style={styles.cardRight}>
           <ThemedText type="defaultSemiBold">{formatCurrency(n.totalAmount)}</ThemedText>
-          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-            <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>{badge.short}</ThemedText>
-          </View>
+          {cancelled ? (
+            <View style={styles.cancelledBadge}>
+              <ThemedText style={styles.cancelledBadgeText}>Cancelled</ThemedText>
+            </View>
+          ) : (
+            <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+              <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>{badge.short}</ThemedText>
+            </View>
+          )}
         </View>
       </ThemedView>
     </Pressable>
@@ -151,4 +161,7 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 11, opacity: 0.5 },
   statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   statusBadgeText: { fontSize: 10, fontWeight: '600' },
+  cardCancelled: { opacity: 0.6 },
+  cancelledBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  cancelledBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
 })

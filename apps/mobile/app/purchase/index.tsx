@@ -54,8 +54,10 @@ export default function PurchaseBillsScreen() {
     )
   }, [bills, search, supplierName])
 
+  const activeCount = useMemo(() => bills.filter((b) => !b.cancelledAt).length, [bills])
+
   const renderItem = useCallback<ListRenderItem<PurchaseBill>>(
-    ({ item }) => <BillRow bill={item} supplierName={supplierName(item.supplierId)} />,
+    ({ item }) => <BillRow bill={item} supplierName={supplierName(item.supplierId)} cancelled={!!item.cancelledAt} />,
     [supplierName],
   )
   const keyExtractor = useCallback((row: PurchaseBill) => row.id, [])
@@ -68,7 +70,7 @@ export default function PurchaseBillsScreen() {
         </Pressable>
         <ThemedText type="title" style={styles.headerTitle}>Purchase Bills</ThemedText>
         <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
-          <ThemedText style={styles.countText}>{bills.length}</ThemedText>
+          <ThemedText style={styles.countText}>{activeCount}</ThemedText>
         </ThemedView>
       </View>
 
@@ -108,9 +110,11 @@ export default function PurchaseBillsScreen() {
 const BillRow = memo(function BillRow({
   bill,
   supplierName,
+  cancelled,
 }: {
   bill: PurchaseBill
   supplierName: string
+  cancelled: boolean
 }) {
   const badge = BILL_STATUS[bill.status] ?? BILL_STATUS.DRAFT
   return (
@@ -120,7 +124,7 @@ const BillRow = memo(function BillRow({
       }
       style={({ pressed }) => [pressed && styles.cardPressed]}
     >
-      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={[styles.card, cancelled && styles.cardCancelled]}>
         <View style={styles.cardLeft}>
           <ThemedText type="defaultSemiBold" numberOfLines={1}>
             {bill.billNumber}
@@ -132,20 +136,28 @@ const BillRow = memo(function BillRow({
         </View>
         <View style={styles.cardRight}>
           <ThemedText type="defaultSemiBold">{formatCurrency(bill.totalAmount)}</ThemedText>
-          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-            <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>
-              {badge.label}
-            </ThemedText>
-          </View>
-          <Pressable
-            onPress={() =>
-              router.push({ pathname: '/purchase/edit/[id]', params: { id: bill.id } })
-            }
-            hitSlop={8}
-            style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
-          >
-            <ThemedText style={styles.editChipText}>Edit</ThemedText>
-          </Pressable>
+          {cancelled ? (
+            <View style={styles.cancelledBadge}>
+              <ThemedText style={styles.cancelledBadgeText}>Cancelled</ThemedText>
+            </View>
+          ) : (
+            <>
+              <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+                <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>
+                  {badge.label}
+                </ThemedText>
+              </View>
+              <Pressable
+                onPress={() =>
+                  router.push({ pathname: '/purchase/edit/[id]', params: { id: bill.id } })
+                }
+                hitSlop={8}
+                style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
+              >
+                <ThemedText style={styles.editChipText}>Edit</ThemedText>
+              </Pressable>
+            </>
+          )}
         </View>
       </ThemedView>
     </Pressable>
@@ -181,4 +193,7 @@ const styles = StyleSheet.create({
   editChip: { paddingHorizontal: 6, paddingVertical: 2 },
   editChipPressed: { opacity: 0.5 },
   editChipText: { fontSize: 12, fontWeight: '600', color: '#16a34a' },
+  cardCancelled: { opacity: 0.6 },
+  cancelledBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  cancelledBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
 })

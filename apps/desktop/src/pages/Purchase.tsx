@@ -196,14 +196,17 @@ const Purchase = () => {
     }
   }
 
-  const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this purchase bill?', danger: true })
+  const handleCancel = async (id: string) => {
+    const confirmed = await confirm({
+      message: 'Cancel this purchase bill? The supplier balance and any stock it added are reversed, and it is marked Cancelled for your records. This cannot be undone.',
+      danger: true,
+    })
     if (confirmed) {
-      const result = await window.electronAPI.purchase.delete(id)
+      const result = await window.electronAPI.purchase.cancel(id)
       if (result.success) {
         loadBills()
       } else {
-        toast.error('Failed to delete purchase bill: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to cancel purchase bill: ' + (result.error || 'Unknown error'))
       }
     }
   }
@@ -1120,7 +1123,7 @@ const Purchase = () => {
             </thead>
             <tbody>
               {filteredBills.map((bill, index) => (
-                <tr key={bill.id} className="border-t">
+                <tr key={bill.id} className={`border-t ${bill.cancelledAt ? 'opacity-60' : ''}`}>
                   <td className="table-cell">{index + 1}</td>
                   <td className="table-cell font-medium">
                     {bill.billNumber}
@@ -1138,11 +1141,12 @@ const Purchase = () => {
                   <td className="table-cell">{formatCurrency(bill.totalAmount)}</td>
                   <td className="table-cell">
                     <span className={`px-2 py-1 rounded-full text-xs ${
+                      bill.cancelledAt ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' :
                       bill.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
                       bill.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
                       'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                     }`}>
-                      {formatInvoiceStatus(bill.status)}
+                      {bill.cancelledAt ? 'Cancelled' : formatInvoiceStatus(bill.status)}
                     </span>
                   </td>
                   <td className="table-cell">
@@ -1153,12 +1157,14 @@ const Purchase = () => {
                       >
                         View
                       </button>
-                      <button
-                        onClick={() => handleEdit(bill)}
-                        className="text-green-600 hover:text-green-700"
-                      >
-                        Edit
-                      </button>
+                      {!bill.cancelledAt && (
+                        <button
+                          onClick={() => handleEdit(bill)}
+                          className="text-green-600 hover:text-green-700"
+                        >
+                          Edit
+                        </button>
+                      )}
                       {(bill as any).attachmentMimeType && (
                         <button
                           onClick={() => handleOpenAttachment(bill.id)}
@@ -1175,7 +1181,9 @@ const Purchase = () => {
                         email={bill.party?.email}
                         partyName={bill.party?.name}
                       />
-                      <button onClick={() => handleDelete(bill.id)} className="text-red-600 hover:text-red-700">Delete</button>
+                      {!bill.cancelledAt && (
+                        <button onClick={() => handleCancel(bill.id)} className="text-red-600 hover:text-red-700">Cancel</button>
+                      )}
                     </div>
                   </td>
                 </tr>

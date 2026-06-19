@@ -1,4 +1,4 @@
-import { desc } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 import { router, useFocusEffect } from 'expo-router'
 import { memo, useCallback, useMemo, useState } from 'react'
 import { FlatList, type ListRenderItem, Pressable, StyleSheet, TextInput, View } from 'react-native'
@@ -28,17 +28,35 @@ export default function QuotationsScreen() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
 
+  const load = useCallback(() => {
+    return Promise.all([
+      db.select().from(schema.quotation).orderBy(desc(schema.quotation.invoiceDate)),
+      db.select().from(schema.customer),
+    ]).then(([q, c]) => {
+      setQuotations(q)
+      setCustomers(c)
+    })
+  }, [db])
+
   useFocusEffect(
     useCallback(() => {
-      Promise.all([
-        db.select().from(schema.quotation).orderBy(desc(schema.quotation.invoiceDate)),
-        db.select().from(schema.customer),
-      ]).then(([q, c]) => {
-        setQuotations(q)
-        setCustomers(c)
-      })
-    }, [db]),
+      load()
+    }, [load]),
   )
+
+  const handleRestore = useCallback(
+    (id: string) => {
+      db.update(schema.quotation)
+        .set({ deletedAt: null })
+        .where(eq(schema.quotation.id, id))
+        .then(load)
+    },
+    [db, load],
+  )
+
+  // The count chip shows live quotations only — deleted ones stay visible in the
+  // list (marked) but never count toward a number.
+  const activeCount = useMemo(() => quotations.filter((q) => !q.deletedAt).length, [quotations])
 
   const customerName = useMemo(() => {
     const m = new Map(customers.map((c) => [c.id, c.name]))
@@ -54,8 +72,15 @@ export default function QuotationsScreen() {
   }, [quotations, search, customerName])
 
   const renderItem = useCallback<ListRenderItem<Quotation>>(
-    ({ item }) => <Row q={item} customerName={customerName(item.customerId)} />,
-    [customerName],
+    ({ item }) => (
+      <Row
+        q={item}
+        customerName={customerName(item.customerId)}
+        deleted={!!item.deletedAt}
+        onRestore={handleRestore}
+      />
+    ),
+    [customerName, handleRestore],
   )
 
   return (
@@ -66,7 +91,7 @@ export default function QuotationsScreen() {
         </Pressable>
         <ThemedText type="title" style={styles.headerTitle}>Quotations</ThemedText>
         <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
-          <ThemedText style={styles.countText}>{quotations.length}</ThemedText>
+          <ThemedText style={styles.countText}>{activeCount}</ThemedText>
         </ThemedView>
       </View>
 
@@ -93,11 +118,21 @@ export default function QuotationsScreen() {
   )
 }
 
-const Row = memo(function Row({ q, customerName }: { q: Quotation; customerName: string }) {
+const Row = memo(function Row({
+  q,
+  customerName,
+  deleted,
+  onRestore,
+}: {
+  q: Quotation
+  customerName: string
+  deleted: boolean
+  onRestore: (id: string) => void
+}) {
   const badge = STATUS_COLORS[q.status] ?? STATUS_COLORS.DRAFT
   return (
     <Pressable onPress={() => router.push({ pathname: '/quotation/[id]', params: { id: q.id } })} style={({ pressed }) => [pressed && styles.cardPressed]}>
-      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={[styles.card, deleted && styles.cardDeleted]}>
         <View style={styles.cardLeft}>
           <ThemedText type="defaultSemiBold" numberOfLines={1}>{q.invoiceNumber}</ThemedText>
           <ThemedText style={styles.metaText} numberOfLines={1}>{customerName}</ThemedText>
@@ -105,9 +140,20 @@ const Row = memo(function Row({ q, customerName }: { q: Quotation; customerName:
         </View>
         <View style={styles.cardRight}>
           <ThemedText type="defaultSemiBold">{formatCurrency(q.totalAmount)}</ThemedText>
-          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-            <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>{q.status}</ThemedText>
-          </View>
+          {deleted ? (
+            <>
+              <View style={styles.deletedBadge}>
+                <ThemedText style={styles.deletedBadgeText}>Deleted</ThemedText>
+              </View>
+              <Pressable onPress={() => onRestore(q.id)} hitSlop={8} style={styles.restoreLink}>
+                <ThemedText style={styles.restoreLinkText}>Restore</ThemedText>
+              </Pressable>
+            </>
+          ) : (
+            <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
+              <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>{q.status}</ThemedText>
+            </View>
+          )}
         </View>
       </ThemedView>
     </Pressable>
@@ -126,6 +172,7 @@ const styles = StyleSheet.create({
   searchInput: { paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: '#111827' },
   listContent: { paddingBottom: 96 },
   card: { flexDirection: 'row', alignItems: 'center', padding: 14, borderRadius: 12, marginBottom: 10, gap: 12 },
+  cardDeleted: { opacity: 0.6 },
   cardPressed: { opacity: 0.7 },
   cardLeft: { flex: 1, gap: 3 },
   cardRight: { alignItems: 'flex-end', gap: 4 },
@@ -133,4 +180,8 @@ const styles = StyleSheet.create({
   dateText: { fontSize: 11, opacity: 0.5 },
   statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
   statusBadgeText: { fontSize: 10, fontWeight: '600' },
+  deletedBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  deletedBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
+  restoreLink: { paddingVertical: 2 },
+  restoreLinkText: { fontSize: 12, fontWeight: '600', color: '#007AFF' },
 })

@@ -22,6 +22,7 @@ import { SectionHeader } from '@/components/ui/SectionHeader'
 import { useColors } from '@/hooks/use-colors'
 import { Radius, Spacing, Type } from '@/constants/tokens'
 import { schema, useDb } from '@/db'
+import { notDeleted } from '@/db/softDelete'
 import { generateInvoiceNumber } from '@/utils/invoiceNumber'
 
 type Customer = typeof schema.customer.$inferSelect
@@ -112,8 +113,16 @@ export default function NewInvoiceScreen() {
   const [showPaymentModePicker, setShowPaymentModePicker] = useState(false)
 
   useEffect(() => {
-    db.select().from(schema.customer).then(setCustomers)
-    db.select().from(schema.item).then(setItems)
+    db
+      .select()
+      .from(schema.customer)
+      .where(notDeleted(schema.customer.deletedAt))
+      .then(setCustomers)
+    db
+      .select()
+      .from(schema.item)
+      .where(notDeleted(schema.item.deletedAt))
+      .then(setItems)
     db.select().from(schema.company).limit(1).then((r) => setCompany(r[0] ?? null))
     generateInvoiceNumber(db).then(setInvoiceNumber)
   }, [db])

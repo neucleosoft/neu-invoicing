@@ -36,42 +36,40 @@ export default function SupplierDetailScreen() {
 
   function handleDelete() {
     if (!id) return
-    Alert.alert('Delete supplier', `Delete "${supplier?.name ?? ''}"? This cannot be undone.`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            // Guard (mirrors desktop supplier:delete): block if the supplier has
-            // any purchase bills or payments — deleting would orphan those and
-            // corrupt the payable ledger. Remove those records first.
-            const [bill] = await db
-              .select({ id: schema.purchaseBill.id })
-              .from(schema.purchaseBill)
-              .where(eq(schema.purchaseBill.supplierId, id))
-              .limit(1)
-            const [pay] = await db
-              .select({ id: schema.paymentTransaction.id })
-              .from(schema.paymentTransaction)
-              .where(eq(schema.paymentTransaction.supplierId, id))
-              .limit(1)
-            if (bill || pay) {
-              Alert.alert(
-                'Cannot delete',
-                'This supplier has purchase bills or payments. Delete those records first.',
-              )
-              return
+    Alert.alert(
+      'Delete supplier',
+      "It will be marked Deleted and left out of totals and reports. You can restore it anytime.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row stays
+              // put so a restore brings the supplier back intact.
+              await db
+                .update(schema.supplier)
+                .set({ deletedAt: new Date() })
+                .where(eq(schema.supplier.id, id))
+              router.back()
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : 'Failed to delete'
+              Alert.alert('Error', msg)
             }
-            await db.delete(schema.supplier).where(eq(schema.supplier.id, id))
-            router.back()
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : 'Failed to delete'
-            Alert.alert('Error', msg)
-          }
+          },
         },
-      },
-    ])
+      ],
+    )
+  }
+
+  function handleRestore() {
+    if (!id) return
+    db.update(schema.supplier)
+      .set({ deletedAt: null })
+      .where(eq(schema.supplier.id, id))
+      .then(() => router.back())
+      .catch((e) => Alert.alert('Error', e instanceof Error ? e.message : 'Failed to restore'))
   }
 
   useEffect(() => {
@@ -117,10 +115,20 @@ export default function SupplierDetailScreen() {
     [supplier.city, supplier.district].filter(Boolean).join(', ') ||
     null
 
+  const isDeleted = !!supplier.deletedAt
+
   return (
     <ThemedView style={styles.container}>
       <Header onBack={() => router.back()} onEdit={onEdit} editEnabled={!!supplier} />
       <ScrollView contentContainerStyle={styles.content}>
+        {isDeleted ? (
+          <ThemedView style={styles.deletedBanner}>
+            <ThemedText style={styles.deletedBannerText}>
+              This supplier is deleted — it's left out of totals and reports. Restore it to use it again.
+            </ThemedText>
+          </ThemedView>
+        ) : null}
+
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.hero}>
           <View style={styles.heroLeft}>
             <ThemedText type="title" numberOfLines={2}>
@@ -181,9 +189,15 @@ export default function SupplierDetailScreen() {
           <Row label="Updated" value={formatDate(supplier.updatedAt)} />
         </Section>
 
-        <Pressable style={styles.deleteButton} onPress={handleDelete}>
-          <ThemedText style={styles.deleteButtonText}>Delete supplier</ThemedText>
-        </Pressable>
+        {isDeleted ? (
+          <Pressable style={styles.restoreButton} onPress={handleRestore}>
+            <ThemedText style={styles.restoreButtonText}>Restore supplier</ThemedText>
+          </Pressable>
+        ) : (
+          <Pressable style={styles.deleteButton} onPress={handleDelete}>
+            <ThemedText style={styles.deleteButtonText}>Delete supplier</ThemedText>
+          </Pressable>
+        )}
       </ScrollView>
     </ThemedView>
   )
@@ -259,6 +273,16 @@ const styles = StyleSheet.create({
     borderColor: '#FF3B30',
   },
   deleteButtonText: { color: '#FF3B30', fontSize: 16, fontWeight: '600' },
+  deletedBanner: { backgroundColor: '#fef2f2', borderRadius: 10, padding: 12, borderWidth: 1, borderColor: '#fecaca' },
+  deletedBannerText: { color: '#991b1b', fontSize: 13, lineHeight: 18 },
+  restoreButton: {
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+    backgroundColor: '#16a34a',
+  },
+  restoreButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
   ledgerButton: {
     paddingVertical: 12,
     borderRadius: 8,

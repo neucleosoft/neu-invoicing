@@ -1,4 +1,5 @@
 import { asc, desc } from 'drizzle-orm'
+import { notDeleted } from '@/db/softDelete'
 import { router, useFocusEffect } from 'expo-router'
 import { useCallback, useMemo, useState } from 'react'
 import {
@@ -18,8 +19,8 @@ import { schema, useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
 import {
+  cancelPayment,
   createPayment,
-  deletePayment,
   updatePayment,
   type PaymentInput,
 } from '@/utils/paymentSave'
@@ -56,8 +57,8 @@ export default function PaymentsScreen() {
   const reload = useCallback(() => {
     Promise.all([
       db.select().from(schema.paymentTransaction).orderBy(desc(schema.paymentTransaction.paymentDate)),
-      db.select().from(schema.customer).orderBy(asc(schema.customer.name)),
-      db.select().from(schema.supplier).orderBy(asc(schema.supplier.name)),
+      db.select().from(schema.customer).where(notDeleted(schema.customer.deletedAt)).orderBy(asc(schema.customer.name)),
+      db.select().from(schema.supplier).where(notDeleted(schema.supplier.deletedAt)).orderBy(asc(schema.supplier.name)),
     ]).then(([p, c, s]) => {
       setPayments(p)
       setCustomers(c)
@@ -145,21 +146,21 @@ export default function PaymentsScreen() {
     }
   }
 
-  function handleDelete(p: Payment) {
+  function handleCancel(p: Payment) {
     Alert.alert(
-      'Delete payment',
-      'This reverses the party balance (and any linked invoice/bill). Continue?',
+      'Cancel payment',
+      'This reverses the party balance (and any linked invoice/bill) and marks the payment Cancelled for your records. It cannot be undone.',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Keep payment', style: 'cancel' },
         {
-          text: 'Delete',
+          text: 'Cancel payment',
           style: 'destructive',
           onPress: async () => {
             try {
-              await deletePayment(db, p.id)
+              await cancelPayment(db, p.id)
               reload()
             } catch (e) {
-              Alert.alert('Error', e instanceof Error ? e.message : 'Failed to delete')
+              Alert.alert('Error', e instanceof Error ? e.message : 'Failed to cancel')
             }
           },
         },
@@ -211,9 +212,13 @@ export default function PaymentsScreen() {
         }
         renderItem={({ item }) => {
           const isIn = item.type === 'PAYMENT_IN'
+          const isCancelled = !!item.cancelledAt
           return (
-            <Pressable onPress={() => openEdit(item)} style={({ pressed }) => [pressed && styles.cardPressed]}>
-              <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+            <Pressable
+              onPress={() => { if (!isCancelled) openEdit(item) }}
+              style={({ pressed }) => [pressed && styles.cardPressed]}
+            >
+              <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={[styles.card, isCancelled && styles.cardCancelled]}>
                 <View style={styles.cardLeft}>
                   <ThemedText type="defaultSemiBold" numberOfLines={1}>{partyName(item)}</ThemedText>
                   <ThemedText style={styles.metaText}>
@@ -227,18 +232,26 @@ export default function PaymentsScreen() {
                   <ThemedText type="defaultSemiBold" style={{ color: isIn ? '#16a34a' : '#dc2626' }}>
                     {isIn ? '+' : '−'}{formatCurrency(item.amount)}
                   </ThemedText>
-                  <View style={[styles.typeBadge, { backgroundColor: isIn ? '#dcfce7' : '#fee2e2' }]}>
-                    <ThemedText style={[styles.typeBadgeText, { color: isIn ? '#166534' : '#991b1b' }]}>
-                      {isIn ? 'IN' : 'OUT'}
-                    </ThemedText>
-                  </View>
-                  <Pressable
-                    onPress={() => handleDelete(item)}
-                    hitSlop={8}
-                    style={({ pressed }) => [styles.delChip, pressed && styles.delChipPressed]}
-                  >
-                    <ThemedText style={styles.delChipText}>Delete</ThemedText>
-                  </Pressable>
+                  {isCancelled ? (
+                    <View style={styles.cancelledBadge}>
+                      <ThemedText style={styles.cancelledBadgeText}>Cancelled</ThemedText>
+                    </View>
+                  ) : (
+                    <>
+                      <View style={[styles.typeBadge, { backgroundColor: isIn ? '#dcfce7' : '#fee2e2' }]}>
+                        <ThemedText style={[styles.typeBadgeText, { color: isIn ? '#166534' : '#991b1b' }]}>
+                          {isIn ? 'IN' : 'OUT'}
+                        </ThemedText>
+                      </View>
+                      <Pressable
+                        onPress={() => handleCancel(item)}
+                        hitSlop={8}
+                        style={({ pressed }) => [styles.delChip, pressed && styles.delChipPressed]}
+                      >
+                        <ThemedText style={styles.delChipText}>Cancel</ThemedText>
+                      </Pressable>
+                    </>
+                  )}
                 </View>
               </ThemedView>
             </Pressable>
@@ -424,6 +437,9 @@ const styles = StyleSheet.create({
   delChip: { paddingHorizontal: 6, paddingVertical: 2 },
   delChipPressed: { opacity: 0.5 },
   delChipText: { fontSize: 12, fontWeight: '600', color: '#dc2626' },
+  cardCancelled: { opacity: 0.6 },
+  cancelledBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: '#e5e7eb' },
+  cancelledBadgeText: { fontSize: 10, fontWeight: '600', color: '#6b7280' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
   modalContent: { maxHeight: '85%', borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 16 },
   modalTitle: { marginBottom: 12 },

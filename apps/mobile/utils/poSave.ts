@@ -236,10 +236,13 @@ export async function updatePurchaseOrder(db: Db, id: string, header: PoHeaderIn
 }
 
 export async function deletePurchaseOrder(db: Db, id: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.delete(schema.purchaseOrderItem).where(eq(schema.purchaseOrderItem.purchaseOrderId, id))
-    await tx.delete(schema.purchaseOrder).where(eq(schema.purchaseOrder.id, id))
-  })
+  // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The header and its line
+  // items stay put so a restore brings the whole document back intact.
+  await db.update(schema.purchaseOrder).set({ deletedAt: new Date() }).where(eq(schema.purchaseOrder.id, id))
+}
+
+export async function restorePurchaseOrder(db: Db, id: string): Promise<void> {
+  await db.update(schema.purchaseOrder).set({ deletedAt: null }).where(eq(schema.purchaseOrder.id, id))
 }
 
 // Mark received quantities on PO lines, then recompute header status:

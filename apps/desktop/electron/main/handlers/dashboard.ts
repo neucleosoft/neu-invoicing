@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
+import { notCancelled, notDeleted } from './softDelete'
 
 export const setupDashboardHandlers = () => {
   const prisma = getPrisma()
@@ -13,7 +14,8 @@ export const setupDashboardHandlers = () => {
           type: 'INVOICE',
           status: {
             in: ['DRAFT', 'PARTIAL', 'OVERDUE']
-          }
+          },
+          ...notDeleted
         },
         _sum: {
           balanceDue: true
@@ -25,7 +27,9 @@ export const setupDashboardHandlers = () => {
         where: {
           status: {
             in: ['DRAFT', 'PARTIAL', 'OVERDUE']
-          }
+          },
+          ...notDeleted,
+          ...notCancelled
         },
         _sum: {
           balanceDue: true
@@ -49,7 +53,8 @@ export const setupDashboardHandlers = () => {
           type: 'INVOICE',
           invoiceDate: {
             gte: fiscalYearStartDate
-          }
+          },
+          ...notDeleted
         },
         _sum: {
           totalAmount: true
@@ -59,7 +64,8 @@ export const setupDashboardHandlers = () => {
       // Low Stock Items Count - fetch items and compare fields
       const stockItems = await prisma.item.findMany({
         where: {
-          trackStock: true
+          trackStock: true,
+          ...notDeleted
         },
         select: {
           currentStock: true,
@@ -74,14 +80,15 @@ export const setupDashboardHandlers = () => {
         where: {
           type: 'INVOICE',
           status: { in: ['DRAFT', 'PARTIAL'] },
-          dueDate: { lt: now }
+          dueDate: { lt: now },
+          ...notDeleted
         }
       })
 
       // Cash & Bank total
       let cashBankTotal = 0
       try {
-        const accounts = await prisma.bankAccount.findMany()
+        const accounts = await prisma.bankAccount.findMany({ where: { ...notDeleted } })
         cashBankTotal = accounts.reduce((sum: number, a: any) => sum + a.currentBalance, 0)
       } catch {}
 
@@ -109,7 +116,8 @@ export const setupDashboardHandlers = () => {
     try {
       const invoices = await prisma.salesInvoice.findMany({
         where: {
-          type: 'INVOICE'
+          type: 'INVOICE',
+          ...notDeleted
         },
         include: {
           customer: true
@@ -132,12 +140,13 @@ export const setupDashboardHandlers = () => {
     try {
       const [invoices, payments, challans] = await Promise.all([
         prisma.salesInvoice.findMany({
-          where: { type: 'INVOICE' },
+          where: { type: 'INVOICE', ...notDeleted },
           include: { customer: true },
           orderBy: { invoiceDate: 'desc' },
           take: limit
         }),
         prisma.paymentTransaction.findMany({
+          where: { ...notDeleted, ...notCancelled },
           include: {
             customer: true,
             supplier: true
@@ -146,6 +155,7 @@ export const setupDashboardHandlers = () => {
           take: limit
         }),
         prisma.deliveryChallan.findMany({
+          where: { ...notDeleted, ...notCancelled },
           include: { customer: true },
           orderBy: { challanDate: 'desc' },
           take: limit
@@ -211,7 +221,7 @@ export const setupDashboardHandlers = () => {
         startDate.setDate(startDate.getDate() - (days - 1))
       } else {
         const earliest = await prisma.salesInvoice.findFirst({
-          where: { type: 'INVOICE' },
+          where: { type: 'INVOICE', ...notDeleted },
           orderBy: { invoiceDate: 'asc' },
           select: { invoiceDate: true }
         })
@@ -228,7 +238,8 @@ export const setupDashboardHandlers = () => {
       const invoices = await prisma.salesInvoice.findMany({
         where: {
           type: 'INVOICE',
-          invoiceDate: { gte: startDate }
+          invoiceDate: { gte: startDate },
+          ...notDeleted
         },
         select: { invoiceDate: true, totalAmount: true }
       })

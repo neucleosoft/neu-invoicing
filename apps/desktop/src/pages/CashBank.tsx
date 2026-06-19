@@ -16,6 +16,7 @@ interface BankAccount {
   currentBalance: number
   createdAt: string
   updatedAt: string
+  deletedAt?: string | null
 }
 
 interface TotalBalance {
@@ -113,7 +114,7 @@ const CashBank = () => {
   }
 
   const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this account?', danger: true })
+    const confirmed = await confirm({ message: 'Delete this account? It will be marked Deleted and left out of totals and reports. You can restore it anytime.', danger: true })
     if (confirmed) {
       const result = await window.electronAPI.cashBank.delete(id)
       if (result.success) {
@@ -122,6 +123,16 @@ const CashBank = () => {
       } else {
         toast.error('Failed to delete account: ' + (result.error || 'Unknown error'))
       }
+    }
+  }
+
+  const handleRestore = async (id: string) => {
+    const result = await window.electronAPI.cashBank.restore(id)
+    if (result.success) {
+      loadAccounts()
+      loadTotalBalance()
+    } else {
+      toast.error('Failed to restore account: ' + (result.error || 'Unknown error'))
     }
   }
 
@@ -261,18 +272,26 @@ const CashBank = () => {
                 </tr>
               </thead>
               <tbody>
-                {filteredAccounts.map((account, index) => (
-                  <tr key={account.id} className="border-t">
+                {filteredAccounts.map((account, index) => {
+                  const isDeleted = !!account.deletedAt
+                  return (
+                  <tr key={account.id} className={`border-t ${isDeleted ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{account.name}</td>
                     <td className="table-cell">
-                      <span className={`px-2 py-1 rounded-full text-xs ${
-                        account.type === 'CASH'
-                          ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
-                          : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
-                      }`}>
-                        {account.type}
-                      </span>
+                      {isDeleted ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                          Deleted
+                        </span>
+                      ) : (
+                        <span className={`px-2 py-1 rounded-full text-xs ${
+                          account.type === 'CASH'
+                            ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300'
+                            : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300'
+                        }`}>
+                          {account.type}
+                        </span>
+                      )}
                     </td>
                     <td className="table-cell">{account.accountNumber || '-'}</td>
                     <td className="table-cell">{account.bankName || '-'}</td>
@@ -283,27 +302,39 @@ const CashBank = () => {
                       </span>
                     </td>
                     <td className="table-cell">
-                      <button
-                        onClick={() => handleOpenAdjust(account)}
-                        className="text-purple-600 hover:text-purple-700 mr-3"
-                      >
-                        Adjust
-                      </button>
-                      <button
-                        onClick={() => handleEdit(account)}
-                        className="text-primary-600 hover:text-primary-700 mr-3"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(account.id)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        Delete
-                      </button>
+                      {isDeleted ? (
+                        <button
+                          onClick={() => handleRestore(account.id)}
+                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                        >
+                          Restore
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleOpenAdjust(account)}
+                            className="text-purple-600 hover:text-purple-700 mr-3"
+                          >
+                            Adjust
+                          </button>
+                          <button
+                            onClick={() => handleEdit(account)}
+                            className="text-primary-600 hover:text-primary-700 mr-3"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDelete(account.id)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            Delete
+                          </button>
+                        </>
+                      )}
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
