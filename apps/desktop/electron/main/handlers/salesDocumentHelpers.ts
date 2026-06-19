@@ -1,3 +1,13 @@
+// Paid-status is DERIVED from the money, never hand-set: amountPaid vs total.
+// Mirrors the shared computePaymentStatus / desktop computeStatus rule so the
+// invoice's label can never contradict what was actually paid. OVERDUE is NOT
+// produced here — it's a function of the due date, handled separately at the call site.
+export const derivePaymentStatus = (total: number, paid: number): 'PAID' | 'PARTIAL' | 'DRAFT' => {
+  if (total - paid <= 0) return 'PAID'
+  if (paid > 0) return 'PARTIAL'
+  return 'DRAFT'
+}
+
 export const normalizeSalesDocumentNumber = (num: string): string => {
   const parts = num.trim().split('/')
   const last = parts[parts.length - 1]

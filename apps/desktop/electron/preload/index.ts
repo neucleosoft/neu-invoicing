@@ -98,6 +98,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (id: string, data: any) =>
       ipcRenderer.invoke("sales:update", id, data),
     cancel: (id: string) => ipcRenderer.invoke("sales:cancel", id),
+    cancelWithCreditNote: (id: string, payload: any) =>
+      ipcRenderer.invoke("sales:cancelWithCreditNote", id, payload),
     generateInvoiceNumber: () =>
       ipcRenderer.invoke("sales:generateInvoiceNumber"),
     generatePDF: (id: string) => ipcRenderer.invoke("sales:generatePDF", id),

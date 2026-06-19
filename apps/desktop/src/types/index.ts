@@ -127,7 +127,7 @@ export interface SupplierItem {
 }
 
 export type SalesDocumentType = 'INVOICE'
-export type InvoiceStatus = 'DRAFT' | 'PAID' | 'PARTIAL' | 'OVERDUE'
+export type InvoiceStatus = 'DRAFT' | 'PAID' | 'PARTIAL' | 'OVERDUE' | 'REVERSED'
 export type QuotationStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'
 export type ProformaInvoiceStatus = QuotationStatus
 export type SalesDocumentStatus = InvoiceStatus | QuotationStatus
@@ -669,6 +669,7 @@ declare global {
         create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         cancel: (id: string) => Promise<{ success: boolean; error?: string }>
+        cancelWithCreditNote: (id: string, payload: { noteNumber: string; noteDate?: string; reason?: string }) => Promise<{ success: boolean; data?: any; error?: string }>
         generateInvoiceNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
         generatePDF: (id: string) => Promise<{ success: boolean; message?: string; error?: string }>
       }
