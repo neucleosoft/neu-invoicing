@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { notCancelled, notDeleted } from './softDelete'
+import { creditNoteNet, notCancelled, notDeleted } from './softDelete'
 
 export const setupReportHandlers = () => {
   const prisma = getPrisma()
@@ -58,6 +58,17 @@ export const setupReportHandlers = () => {
         amountPaid: invoices.reduce((sum, inv) => sum + inv.amountPaid, 0),
         balanceDue: invoices.reduce((sum, inv) => sum + inv.balanceDue, 0)
       }
+
+      // Net out credit notes for the same period (a return/reversal reduces sales).
+      // amountPaid/balanceDue/discount are receivable-side — left as-is.
+      const cn = await creditNoteNet(prisma, {
+        gte: filters.startDate ? new Date(filters.startDate) : undefined,
+        lte: filters.endDate ? new Date(filters.endDate) : undefined,
+        customerId: filters.customerId || undefined,
+      })
+      totals.subtotal += cn.subtotal
+      totals.taxAmount += cn.taxAmount
+      totals.totalAmount += cn.totalAmount
 
       return { success: true, data: { invoices, totals } }
     } catch (error) {
@@ -248,7 +259,12 @@ export const setupReportHandlers = () => {
         }
       })
 
-      const taxCollected = salesInvoices.reduce((sum, inv) => sum + inv.taxAmount, 0)
+      // Credit notes reduce the tax you collected (a return gives the GST back).
+      const cnTax = await creditNoteNet(prisma, {
+        gte: filters.startDate ? new Date(filters.startDate) : undefined,
+        lte: filters.endDate ? new Date(filters.endDate) : undefined,
+      })
+      const taxCollected = salesInvoices.reduce((sum, inv) => sum + inv.taxAmount, 0) + cnTax.taxAmount
       const taxPaid = purchaseBills.reduce((sum, bill) => sum + bill.taxAmount, 0)
       const netTax = taxCollected - taxPaid
 

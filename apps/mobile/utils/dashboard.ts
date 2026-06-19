@@ -79,7 +79,21 @@ export async function getTotalInvoicedThisFY(
         notCancelled(schema.salesInvoice.cancelledAt),
       ),
     )
-  return rows[0]?.total ?? 0
+  // Net out credit/debit notes issued this FY (a return reduces what you invoiced).
+  const noteRows = await db
+    .select({
+      netTotal: sql<number>`COALESCE(SUM(CASE WHEN ${schema.creditDebitNote.type} = 'CREDIT_NOTE' THEN -${schema.creditDebitNote.totalAmount} ELSE ${schema.creditDebitNote.totalAmount} END), 0)`,
+    })
+    .from(schema.creditDebitNote)
+    .where(
+      and(
+        gte(schema.creditDebitNote.noteDate, fyStartDate),
+        eq(schema.creditDebitNote.status, 'ACTIVE'),
+        notDeleted(schema.creditDebitNote.deletedAt),
+        notCancelled(schema.creditDebitNote.cancelledAt),
+      ),
+    )
+  return (rows[0]?.total ?? 0) + (noteRows[0]?.netTotal ?? 0)
 }
 
 // Count of unpaid invoices whose dueDate is strictly before today.

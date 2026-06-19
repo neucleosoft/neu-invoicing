@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
-import { notCancelled, notDeleted } from './softDelete'
+import { creditNoteNet, notCancelled, notDeleted } from './softDelete'
 
 export const setupDashboardHandlers = () => {
   const prisma = getPrisma()
@@ -63,6 +63,9 @@ export const setupDashboardHandlers = () => {
         }
       })
 
+      // Net out credit notes issued this FY so returns/reversals don't inflate sales.
+      const cnFy = await creditNoteNet(prisma, { gte: fiscalYearStartDate })
+
       // Low Stock Items Count - fetch items and compare fields
       const stockItems = await prisma.item.findMany({
         where: {
@@ -100,7 +103,7 @@ export const setupDashboardHandlers = () => {
         data: {
           totalReceivables: receivables._sum.balanceDue || 0,
           totalPayables: payables._sum.balanceDue || 0,
-          totalSales: totalSales._sum.totalAmount || 0,
+          totalSales: (totalSales._sum.totalAmount || 0) + cnFy.totalAmount,
           lowStockCount: lowStockItems,
           overdueCount: overdueInvoices,
           cashBankTotal
@@ -249,6 +252,13 @@ export const setupDashboardHandlers = () => {
         select: { invoiceDate: true, totalAmount: true }
       })
 
+      // Credit notes net the chart per bucket, keyed on their own noteDate (a
+      // CREDIT_NOTE subtracts, a DEBIT_NOTE adds).
+      const chartNotes = await prisma.creditDebitNote.findMany({
+        where: { noteDate: { gte: startDate }, ...notDeleted, ...notCancelled, status: 'ACTIVE' },
+        select: { noteDate: true, type: true, totalAmount: true }
+      })
+
       const spanDays = Math.floor((today.getTime() - startDate.getTime()) / 86_400_000) + 1
       const bucketByMonth = spanDays > 120
 
@@ -267,6 +277,11 @@ export const setupDashboardHandlers = () => {
         invoices.forEach(invoice => {
           const key = monthKey(invoice.invoiceDate)
           if (key in monthlyData) monthlyData[key] += invoice.totalAmount
+        })
+
+        chartNotes.forEach((n: any) => {
+          const key = monthKey(n.noteDate)
+          if (key in monthlyData) monthlyData[key] += (n.type === 'DEBIT_NOTE' ? 1 : -1) * n.totalAmount
         })
 
         const chartData = Object.entries(monthlyData).map(([key, amount]) => {
@@ -289,6 +304,11 @@ export const setupDashboardHandlers = () => {
       invoices.forEach(invoice => {
         const key = dayKey(invoice.invoiceDate)
         if (key in dailyData) dailyData[key] += invoice.totalAmount
+      })
+
+      chartNotes.forEach((n: any) => {
+        const key = dayKey(n.noteDate)
+        if (key in dailyData) dailyData[key] += (n.type === 'DEBIT_NOTE' ? 1 : -1) * n.totalAmount
       })
 
       const chartData = Object.entries(dailyData).map(([date, amount]) => {

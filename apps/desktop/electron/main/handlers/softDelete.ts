@@ -24,3 +24,41 @@ export const notDeletedWhere = { where: { deletedAt: null } } as const
 // exclude archived AND cancelled: `where: { ...notDeleted, ...notCancelled }`.
 export const notCancelled = { cancelledAt: null } as const
 export const notCancelledWhere = { where: { cancelledAt: null } } as const
+
+// Credit-note netting for SALES/TAX SUMMARY reports. Credit notes live in their own
+// table, so they're absent from every salesInvoice sum — a return or a reversed sale
+// stays counted. This returns the net delta to ADD to a gross sales/tax figure for a
+// period: a CREDIT_NOTE subtracts, a DEBIT_NOTE adds (the direction lives in `type`;
+// stored amounts are always positive). Period is filtered by the note's own noteDate
+// (GST-correct — the credit lands when the note is issued), excluding archived +
+// cancelled notes. Do NOT use on receivables/ledgers — those already reflect credit
+// notes via currentBalance/balanceDue.
+export async function creditNoteNet(
+  prisma: any,
+  opts: { gte?: Date; lte?: Date; customerId?: string },
+): Promise<{ totalAmount: number; taxAmount: number; subtotal: number; cgst: number; sgst: number; igst: number }> {
+  const where: any = { ...notDeleted, ...notCancelled, status: 'ACTIVE' }
+  if (opts.gte || opts.lte) {
+    where.noteDate = {}
+    if (opts.gte) where.noteDate.gte = opts.gte
+    if (opts.lte) where.noteDate.lte = opts.lte
+  }
+  if (opts.customerId) where.customerId = opts.customerId
+  const rows = await prisma.creditDebitNote.groupBy({
+    by: ['type'],
+    where,
+    _sum: { subtotal: true, taxAmount: true, totalAmount: true, cgstAmount: true, sgstAmount: true, igstAmount: true },
+  })
+  const sumFor = (t: string) => rows.find((r: any) => r.type === t)?._sum ?? {}
+  const cn: any = sumFor('CREDIT_NOTE')
+  const dn: any = sumFor('DEBIT_NOTE')
+  const d = (k: string) => (dn[k] || 0) - (cn[k] || 0)
+  return {
+    totalAmount: d('totalAmount'),
+    taxAmount: d('taxAmount'),
+    subtotal: d('subtotal'),
+    cgst: d('cgstAmount'),
+    sgst: d('sgstAmount'),
+    igst: d('igstAmount'),
+  }
+}
