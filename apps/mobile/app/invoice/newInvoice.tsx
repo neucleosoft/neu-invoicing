@@ -139,7 +139,15 @@ export default function NewInvoiceScreen() {
     0,
   )
   const total = subtotal + taxAmount
-  const paid = parseFloat(amountPaid) || 0
+  // The Status drives the paid amount (mirrors desktop): Paid = full total, Partial =
+  // the entered amount, Unpaid/Overdue = nothing paid — so the label can never
+  // contradict the money.
+  const paid =
+    status === 'PAID'
+      ? total
+      : status === 'PARTIAL'
+      ? parseFloat(amountPaid) || 0
+      : 0
   const balanceDue = total - paid
 
   function pickItem(it: Item) {
@@ -177,6 +185,10 @@ export default function NewInvoiceScreen() {
     const invDate = parseDate(invoiceDate)
     if (!invDate) {
       Alert.alert('Validation', 'Invalid invoice date (use YYYY-MM-DD)')
+      return
+    }
+    if (status === 'PARTIAL' && (paid <= 0 || paid >= total)) {
+      Alert.alert('Validation', 'For a Partial invoice, enter an amount between 0 and the total')
       return
     }
     const due = parseDate(dueDate)
@@ -230,7 +242,10 @@ export default function NewInvoiceScreen() {
           .values({
             invoiceNumber: finalNumber,
             customerId,
-            status: 'DRAFT',
+            // Insert unpaid; applyPayment below derives PAID/PARTIAL from the money.
+            // OVERDUE is the one status not derivable from the amount (it's about the
+            // due date), so we set it directly here.
+            status: status === 'OVERDUE' ? 'OVERDUE' : 'DRAFT',
             invoiceDate: invDate,
             dueDate: due,
             subtotal: gst.subtotal,
@@ -328,6 +343,9 @@ export default function NewInvoiceScreen() {
             referenceType: 'INVOICE',
             referenceId: inserted.id,
             salesInvoiceId: inserted.id,
+            // Tag the up-front payment so the edit screen can find & re-sync exactly
+            // this row (matches desktop's INLINE_PAYMENT_NOTE).
+            notes: 'Paid with invoice',
           })
           await applyPayment(tx, {
             type: 'PAYMENT_IN',
@@ -503,24 +521,45 @@ export default function NewInvoiceScreen() {
       </Card>
 
       <SectionHeader title="Payment" />
-      <Field
-        label="Amount Paid (₹)"
-        value={amountPaid}
-        onChangeText={setAmountPaid}
-        keyboardType="numeric"
-      />
-      <View style={styles.fieldGroup}>
-        <Text style={[styles.label, { color: c.muted }]}>Payment Mode</Text>
-        <Pressable
-          style={[
-            styles.picker,
-            { backgroundColor: c.surfaceAlt, borderColor: c.border },
-          ]}
-          onPress={() => setShowPaymentModePicker(true)}
-        >
-          <Text style={[Type.body, { color: c.text }]}>{paymentMode}</Text>
-        </Pressable>
-      </View>
+      {/* Amount Paid is driven by the Status above: editable only for Partial; for
+          Paid it's the full total, for Unpaid/Overdue it's zero — both locked, so the
+          amount can never disagree with the status. */}
+      {status === 'PARTIAL' ? (
+        <Field
+          label="Amount Paid (₹)"
+          value={amountPaid}
+          onChangeText={setAmountPaid}
+          keyboardType="numeric"
+        />
+      ) : (
+        <View style={styles.fieldGroup}>
+          <Text style={[styles.label, { color: c.muted }]}>Amount Paid (₹)</Text>
+          <View
+            style={[
+              styles.picker,
+              { backgroundColor: c.surfaceAlt, borderColor: c.border },
+            ]}
+          >
+            <Text style={[Type.body, { color: c.muted }]}>
+              ₹{(status === 'PAID' ? total : 0).toFixed(2)} — set by status
+            </Text>
+          </View>
+        </View>
+      )}
+      {status === 'PAID' || status === 'PARTIAL' ? (
+        <View style={styles.fieldGroup}>
+          <Text style={[styles.label, { color: c.muted }]}>Payment Mode</Text>
+          <Pressable
+            style={[
+              styles.picker,
+              { backgroundColor: c.surfaceAlt, borderColor: c.border },
+            ]}
+            onPress={() => setShowPaymentModePicker(true)}
+          >
+            <Text style={[Type.body, { color: c.text }]}>{paymentMode}</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <SectionHeader title="Notes & Terms" />
       <Field

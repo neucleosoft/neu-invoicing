@@ -8,6 +8,7 @@ const LABELS: Record<string, string> = {
   PAID: 'Paid',
   PARTIAL: 'Partial',
   OVERDUE: 'Overdue',
+  REVERSED: 'Reversed',
 }
 
 export const formatInvoiceStatus = (status?: string | null): string => {
@@ -64,6 +65,7 @@ export const STATUS_BADGE_COLORS: Record<string, { bg: string; text: string }> =
   PARTIAL: { bg: '#fef3c7', text: '#a16207' },
   OVERDUE: { bg: '#fee2e2', text: '#b91c1c' },
   DRAFT: { bg: '#f3f4f6', text: '#4b5563' },
+  REVERSED: { bg: '#f3e8ff', text: '#7e22ce' },
 }
 
 // Map a tone from getDueCountdown to a single hex color for inline text.
@@ -85,6 +87,8 @@ export const deriveDisplayStatus = (
   totalAmount: number = 0,
 ): string => {
   if (!status) return 'DRAFT'
+  // Reversed is terminal — never let the due-date branch below relabel it OVERDUE.
+  if (status === 'REVERSED') return 'REVERSED'
   if (status === 'PAID') return 'PAID'
   if (totalAmount > 0 && amountPaid >= totalAmount) return 'PAID'
   if (!dueDate) return status

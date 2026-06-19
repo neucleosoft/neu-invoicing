@@ -120,6 +120,9 @@ export default function InvoicesScreen() {
 const InvoiceRow = memo(function InvoiceRow({ row }: { row: Row }) {
   // OVERDUE is computed at render time, not stored — so the pill stays correct
   // without a nightly status-bump job.
+  const isCancelled = !!row.cancelledAt
+  const isReversed = row.status === 'REVERSED'
+  const isInactive = isCancelled || isReversed
   const displayStatus = deriveDisplayStatus(
     row.status,
     row.dueDate,
@@ -127,6 +130,11 @@ const InvoiceRow = memo(function InvoiceRow({ row }: { row: Row }) {
     row.totalAmount,
   )
   const badge = STATUS_BADGE_COLORS[displayStatus] ?? STATUS_BADGE_COLORS.DRAFT
+  // Cancelled is the cancelledAt flag (not a stored status); Reversed flows through
+  // displayStatus → STATUS_BADGE_COLORS.REVERSED.
+  const chip = isCancelled
+    ? { label: 'Cancelled', bg: '#f3f4f6', text: '#4b5563' }
+    : { label: formatInvoiceStatus(displayStatus), bg: badge.bg, text: badge.text }
 
   return (
     <Pressable
@@ -135,7 +143,11 @@ const InvoiceRow = memo(function InvoiceRow({ row }: { row: Row }) {
       }
       style={({ pressed }) => [pressed && styles.cardPressed]}
     >
-      <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.card}>
+      <ThemedView
+        lightColor="#f9fafb"
+        darkColor="#1f2937"
+        style={[styles.card, isInactive && styles.cardDimmed]}
+      >
         <View style={styles.cardLeft}>
           <ThemedText type="defaultSemiBold" numberOfLines={1}>
             {row.invoiceNumber}
@@ -151,24 +163,26 @@ const InvoiceRow = memo(function InvoiceRow({ row }: { row: Row }) {
           <ThemedText type="defaultSemiBold">
             {formatCurrency(row.totalAmount)}
           </ThemedText>
-          <View style={[styles.statusBadge, { backgroundColor: badge.bg }]}>
-            <ThemedText style={[styles.statusBadgeText, { color: badge.text }]}>
-              {formatInvoiceStatus(displayStatus)}
+          <View style={[styles.statusBadge, { backgroundColor: chip.bg }]}>
+            <ThemedText style={[styles.statusBadgeText, { color: chip.text }]}>
+              {chip.label}
             </ThemedText>
           </View>
           {/* Nested Pressable: in RN the inner press wins, so tapping Edit
               navigates to the edit screen without also triggering the card's
               View navigation. Hitslop widens the touch target without
-              enlarging the visible chip. */}
-          <Pressable
-            onPress={() =>
-              router.push({ pathname: '/invoice/edit/[id]', params: { id: row.id } })
-            }
-            hitSlop={8}
-            style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
-          >
-            <ThemedText style={styles.editChipText}>Edit</ThemedText>
-          </Pressable>
+              enlarging the visible chip. Hidden once cancelled/reversed. */}
+          {!isInactive ? (
+            <Pressable
+              onPress={() =>
+                router.push({ pathname: '/invoice/edit/[id]', params: { id: row.id } })
+              }
+              hitSlop={8}
+              style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
+            >
+              <ThemedText style={styles.editChipText}>Edit</ThemedText>
+            </Pressable>
+          ) : null}
         </View>
       </ThemedView>
     </Pressable>
@@ -193,6 +207,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   cardPressed: { opacity: 0.7 },
+  cardDimmed: { opacity: 0.6 },
   cardLeft: { flex: 1, gap: 2 },
   cardRight: { alignItems: 'flex-end', gap: 4 },
   customerName: { fontSize: 13 },

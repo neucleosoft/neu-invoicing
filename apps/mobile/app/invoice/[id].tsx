@@ -1,7 +1,7 @@
 import { eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import { PdfActions } from '@/components/PdfActions'
 import { Row, Section } from '@/components/DetailSection'
@@ -22,6 +22,7 @@ import {
   getDueCountdown,
   STATUS_BADGE_COLORS,
 } from '@/utils/invoiceStatus'
+import { cancelInvoice, cancelInvoiceWithCreditNote } from '@/utils/salesCancel'
 
 type Invoice = typeof schema.salesInvoice.$inferSelect
 type Customer = typeof schema.customer.$inferSelect
@@ -38,6 +39,55 @@ export default function InvoiceDetailScreen() {
   const [customer, setCustomer] = useState<Customer | null>(null)
   const [lines, setLines] = useState<LineRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [refresh, setRefresh] = useState(0)
+
+  // Cancel a paid invoice via credit note, an unpaid one with a plain void. Mirrors
+  // desktop's handleCancel fork (Sales.tsx). Re-loads the screen so the new
+  // Cancelled/Reversed state shows immediately.
+  const handleCancel = () => {
+    if (!invoice) return
+    if ((invoice.amountPaid ?? 0) > 0) {
+      Alert.alert(
+        'Reverse with credit note?',
+        "This invoice has a payment, so it can't just be voided. A full credit note will be issued, the sale reversed, stock returned, and the customer left in credit. The invoice stays on record.",
+        [
+          { text: 'Keep invoice', style: 'cancel' },
+          {
+            text: 'Issue credit note',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await cancelInvoiceWithCreditNote(db, id)
+                setRefresh((n) => n + 1)
+              } catch (e) {
+                Alert.alert('Error', e instanceof Error ? e.message : 'Failed to reverse invoice')
+              }
+            },
+          },
+        ],
+      )
+    } else {
+      Alert.alert(
+        'Cancel this invoice?',
+        'The customer balance and any stock it moved are reversed, and it is marked Cancelled. This cannot be undone.',
+        [
+          { text: 'Keep invoice', style: 'cancel' },
+          {
+            text: 'Cancel invoice',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await cancelInvoice(db, id)
+                setRefresh((n) => n + 1)
+              } catch (e) {
+                Alert.alert('Error', e instanceof Error ? e.message : 'Failed to cancel invoice')
+              }
+            },
+          },
+        ],
+      )
+    }
+  }
 
   useEffect(() => {
     if (!id) {
@@ -72,7 +122,7 @@ export default function InvoiceDetailScreen() {
       )
       setLoading(false)
     })
-  }, [id, db])
+  }, [id, db, refresh])
 
   if (loading) {
     return (
@@ -97,6 +147,10 @@ export default function InvoiceDetailScreen() {
     )
   }
 
+  const isCancelled = !!invoice.cancelledAt
+  const isReversed = invoice.status === 'REVERSED'
+  const isInactive = isCancelled || isReversed
+
   const displayStatus = deriveDisplayStatus(
     invoice.status,
     invoice.dueDate,
@@ -104,12 +158,19 @@ export default function InvoiceDetailScreen() {
     invoice.totalAmount,
   )
   const badge = STATUS_BADGE_COLORS[displayStatus] ?? STATUS_BADGE_COLORS.DRAFT
-  const countdown = getDueCountdown(
-    invoice.dueDate,
-    invoice.status,
-    invoice.amountPaid,
-    invoice.totalAmount,
-  )
+  // Cancelled isn't a stored status (it's the cancelledAt flag), so label the chip
+  // here; Reversed flows through displayStatus → STATUS_BADGE_COLORS.REVERSED.
+  const chip = isCancelled
+    ? { label: 'Cancelled', bg: '#f3f4f6', text: '#4b5563' }
+    : { label: formatInvoiceStatus(displayStatus), bg: badge.bg, text: badge.text }
+  const countdown = isInactive
+    ? null
+    : getDueCountdown(
+        invoice.dueDate,
+        invoice.status,
+        invoice.amountPaid,
+        invoice.totalAmount,
+      )
 
   const hasDiscount = invoice.discount > 0
   const hasCess = invoice.cessAmount > 0
@@ -118,9 +179,23 @@ export default function InvoiceDetailScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
-      <Header c={c} onBack={() => router.back()} onEdit={onEdit} editEnabled={!!invoice} />
+      <Header
+        c={c}
+        onBack={() => router.back()}
+        onEdit={onEdit}
+        editEnabled={!!invoice && !isInactive}
+      />
       <ScrollView contentContainerStyle={styles.content}>
-        <Card style={styles.hero}>
+        {isInactive ? (
+          <View style={[styles.banner, { backgroundColor: chip.bg }]}>
+            <ThemedText style={[Type.bodySemibold, { color: chip.text }]}>
+              {isReversed
+                ? 'Reversed — a credit note was issued against this invoice.'
+                : 'Cancelled — this invoice has been voided.'}
+            </ThemedText>
+          </View>
+        ) : null}
+        <Card style={[styles.hero, isInactive && styles.dimmed]}>
           <View style={styles.heroLeft}>
             <ThemedText style={[Type.title, { color: c.text }]} numberOfLines={1}>
               {invoice.invoiceNumber}
@@ -134,11 +209,7 @@ export default function InvoiceDetailScreen() {
           </View>
           <View style={styles.heroRight}>
             <MoneyText value={invoice.totalAmount} style={styles.heroAmount} />
-            <Chip
-              label={formatInvoiceStatus(displayStatus)}
-              bg={badge.bg}
-              color={badge.text}
-            />
+            <Chip label={chip.label} bg={chip.bg} color={chip.text} />
             {countdown ? (
               <ThemedText
                 style={[Type.caption, { color: dueCountdownColor[countdown.tone] }]}
@@ -272,6 +343,17 @@ export default function InvoiceDetailScreen() {
           <Row label="Created" value={formatDate(invoice.createdAt)} />
           <Row label="Updated" value={formatDate(invoice.updatedAt)} />
         </Section>
+
+        {!isInactive ? (
+          <Pressable
+            onPress={handleCancel}
+            style={[styles.cancelButton, { borderColor: c.danger }]}
+          >
+            <ThemedText style={[Type.bodySemibold, { color: c.danger }]}>
+              {(invoice.amountPaid ?? 0) > 0 ? 'Reverse with Credit Note' : 'Cancel Invoice'}
+            </ThemedText>
+          </Pressable>
+        ) : null}
       </ScrollView>
     </View>
   )
@@ -324,6 +406,18 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xxxl, gap: Spacing.lg },
   centered: { textAlign: 'center', marginTop: 64 },
   centeredBlock: { alignItems: 'center', marginTop: 64, gap: Spacing.sm, paddingHorizontal: Spacing.xxxl },
+  banner: {
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.md,
+    paddingHorizontal: Spacing.lg,
+  },
+  dimmed: { opacity: 0.6 },
+  cancelButton: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: Radius.lg,
+    paddingVertical: Spacing.md,
+    alignItems: 'center',
+  },
   hero: {
     flexDirection: 'row',
     alignItems: 'flex-start',
