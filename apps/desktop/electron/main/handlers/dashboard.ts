@@ -15,7 +15,8 @@ export const setupDashboardHandlers = () => {
           status: {
             in: ['DRAFT', 'PARTIAL', 'OVERDUE']
           },
-          ...notDeleted
+          ...notDeleted,
+          ...notCancelled
         },
         _sum: {
           balanceDue: true
@@ -54,7 +55,8 @@ export const setupDashboardHandlers = () => {
           invoiceDate: {
             gte: fiscalYearStartDate
           },
-          ...notDeleted
+          ...notDeleted,
+          ...notCancelled
         },
         _sum: {
           totalAmount: true
@@ -81,7 +83,8 @@ export const setupDashboardHandlers = () => {
           type: 'INVOICE',
           status: { in: ['DRAFT', 'PARTIAL'] },
           dueDate: { lt: now },
-          ...notDeleted
+          ...notDeleted,
+          ...notCancelled
         }
       })
 
@@ -117,7 +120,8 @@ export const setupDashboardHandlers = () => {
       const invoices = await prisma.salesInvoice.findMany({
         where: {
           type: 'INVOICE',
-          ...notDeleted
+          ...notDeleted,
+          ...notCancelled
         },
         include: {
           customer: true
@@ -140,7 +144,7 @@ export const setupDashboardHandlers = () => {
     try {
       const [invoices, payments, challans] = await Promise.all([
         prisma.salesInvoice.findMany({
-          where: { type: 'INVOICE', ...notDeleted },
+          where: { type: 'INVOICE', ...notDeleted, ...notCancelled },
           include: { customer: true },
           orderBy: { invoiceDate: 'desc' },
           take: limit
@@ -239,7 +243,8 @@ export const setupDashboardHandlers = () => {
         where: {
           type: 'INVOICE',
           invoiceDate: { gte: startDate },
-          ...notDeleted
+          ...notDeleted,
+          ...notCancelled
         },
         select: { invoiceDate: true, totalAmount: true }
       })

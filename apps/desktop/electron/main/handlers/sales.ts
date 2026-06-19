@@ -260,61 +260,79 @@ export const setupSalesHandlers = () => {
     }
   })
 
-  // Delete invoice
-  ipcMain.handle('sales:delete', async (_, id: string) => {
+  // Cancel invoice (Mode B): reverse the customer balance + stock (appending a
+  // reversing movement), then stamp cancelledAt. Wrapped in a $transaction so the
+  // reversal is atomic — the old delete was NOT, and could FK-crash on a paid invoice
+  // after already moving balance/stock. The invoice, its items, and its movements all
+  // stay on record. Terminal — there is no restore.
+  ipcMain.handle('sales:cancel', async (_, id: string) => {
     try {
-      // Get the invoice with items before deleting
-      const invoice = await prisma.salesInvoice.findUnique({
-        where: { id },
-        include: {
-          items: true
+      await prisma.$transaction(async (tx: any) => {
+        const invoice = await tx.salesInvoice.findUnique({
+          where: { id },
+          include: {
+            items: true
+          }
+        })
+
+        if (!invoice || invoice.type !== 'INVOICE') {
+          throw new Error('Invoice not found')
         }
-      })
 
-      if (!invoice || invoice.type !== 'INVOICE') {
-        throw new Error('Invoice not found')
-      }
+        // Already cancelled — never reverse the balance/stock twice (idempotency guard).
+        if (invoice.cancelledAt) {
+          return
+        }
 
-      await prisma.customer.update({
-        where: { id: invoice.customerId },
-        data: {
-          currentBalance: {
-            decrement: invoice.balanceDue
+        await tx.customer.update({
+          where: { id: invoice.customerId },
+          data: {
+            currentBalance: {
+              decrement: invoice.balanceDue
+            }
+          }
+        })
+
+        // Put tracked stock back AND append a "returned" movement per line. We do NOT
+        // delete the original movements: cancel preserves the record, and a deleted
+        // stockMovement can't sync (the table has no soft-delete column).
+        for (const item of invoice.items) {
+          const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
+          if (dbItem && dbItem.trackStock) {
+            await tx.item.update({
+              where: { id: item.itemId },
+              data: {
+                currentStock: {
+                  increment: item.quantity
+                }
+              }
+            })
+            await tx.stockMovement.create({
+              data: {
+                itemId: item.itemId,
+                movementType: 'SALE',
+                quantity: item.quantity, // positive = goods returned by the cancel
+                referenceType: 'INVOICE',
+                referenceId: id,
+                notes: 'Invoice cancelled — stock returned'
+              }
+            })
           }
         }
-      })
 
-      for (const item of invoice.items) {
-        const dbItem = await prisma.item.findUnique({ where: { id: item.itemId } })
-        if (dbItem && dbItem.trackStock) {
-          await prisma.item.update({
-            where: { id: item.itemId },
-            data: {
-              currentStock: {
-                increment: item.quantity
-              }
-            }
-          })
-        }
-      }
-
-      await prisma.stockMovement.deleteMany({
-        where: {
-          referenceType: 'INVOICE',
-          referenceId: id
-        }
-      })
-
-      // Delete the invoice (items will cascade delete)
-      await prisma.salesInvoice.delete({
-        where: { id }
+        // CANCEL, not delete: stamp cancelledAt; the invoice, its items, and its
+        // stock movements all stay on record.
+        await tx.salesInvoice.update({
+          where: { id },
+          data: { cancelledAt: new Date() }
+        })
       })
 
       return { success: true }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to delete invoice'
+        error: error instanceof Error ? error.message : 'Failed to cancel invoice'
       }
     }
   })

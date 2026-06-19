@@ -171,6 +171,7 @@ export interface SalesInvoice {
   items: SalesInvoiceItem[]
   createdAt: string
   updatedAt: string
+  cancelledAt?: string | null
 }
 
 export interface SalesInvoiceItem {
@@ -667,7 +668,7 @@ declare global {
         getById: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
-        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        cancel: (id: string) => Promise<{ success: boolean; error?: string }>
         generateInvoiceNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
         generatePDF: (id: string) => Promise<{ success: boolean; message?: string; error?: string }>
       }

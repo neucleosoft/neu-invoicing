@@ -86,6 +86,7 @@ export async function buildCustomerLedger(
           eq(schema.salesInvoice.customerId, customerId),
           eq(schema.salesInvoice.type, 'INVOICE'),
           notDeleted(schema.salesInvoice.deletedAt),
+          notCancelled(schema.salesInvoice.cancelledAt),
         ),
       ),
     db

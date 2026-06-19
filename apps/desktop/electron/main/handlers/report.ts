@@ -10,7 +10,8 @@ export const setupReportHandlers = () => {
     try {
       const where: any = {
         type: 'INVOICE',
-        ...notDeleted
+        ...notDeleted,
+        ...notCancelled
       }
 
       if (filters.startDate) {
@@ -207,7 +208,8 @@ export const setupReportHandlers = () => {
         where: {
           ...where,
           type: 'INVOICE',
-          ...notDeleted
+          ...notDeleted,
+          ...notCancelled
         },
         select: {
           invoiceDate: true,

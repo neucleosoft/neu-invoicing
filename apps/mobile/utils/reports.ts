@@ -41,6 +41,7 @@ export async function getSalesReport(
   const conds: SQL[] = [
     eq(schema.salesInvoice.type, 'INVOICE'),
     notDeleted(schema.salesInvoice.deletedAt),
+    notCancelled(schema.salesInvoice.cancelledAt),
   ]
   if (range.startDate) conds.push(gte(schema.salesInvoice.invoiceDate, range.startDate))
   if (range.endDate) conds.push(lte(schema.salesInvoice.invoiceDate, range.endDate))
@@ -161,6 +162,7 @@ export async function getTaxReport(db: Db, range: DateRange): Promise<TaxReport>
   const sConds: SQL[] = [
     eq(schema.salesInvoice.type, 'INVOICE'),
     notDeleted(schema.salesInvoice.deletedAt),
+    notCancelled(schema.salesInvoice.cancelledAt),
   ]
   if (range.startDate) sConds.push(gte(schema.salesInvoice.invoiceDate, range.startDate))
   if (range.endDate) sConds.push(lte(schema.salesInvoice.invoiceDate, range.endDate))

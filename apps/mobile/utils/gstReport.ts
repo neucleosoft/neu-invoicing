@@ -132,6 +132,7 @@ async function fetchInvoices(db: Db, range: GstRange): Promise<InvoiceRow[]> {
         gte(schema.salesInvoice.invoiceDate, range.start),
         lte(schema.salesInvoice.invoiceDate, range.end),
         notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
       ),
     )
   return rows
@@ -328,6 +329,7 @@ export async function getHSNSummary(db: Db, range: GstRange): Promise<HsnRow[]> 
         gte(schema.salesInvoice.invoiceDate, range.start),
         lte(schema.salesInvoice.invoiceDate, range.end),
         notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
       ),
     )
   const invIds = invoices.map((i) => i.id)

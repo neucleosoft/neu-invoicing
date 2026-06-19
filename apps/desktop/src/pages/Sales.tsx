@@ -354,14 +354,17 @@ const Sales = () => {
     }
   }
 
-  const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this invoice?', danger: true })
+  const handleCancel = async (id: string) => {
+    const confirmed = await confirm({
+      message: 'Cancel this invoice? The customer balance and any stock it moved are reversed, and it is marked Cancelled for your records. This cannot be undone.',
+      danger: true,
+    })
     if (confirmed) {
-      const result = await window.electronAPI.sales.delete(id)
+      const result = await window.electronAPI.sales.cancel(id)
       if (result.success) {
         loadInvoices()
       } else {
-        toast.error('Failed to delete invoice: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to cancel invoice: ' + (result.error || 'Unknown error'))
       }
     }
   }
@@ -737,35 +740,41 @@ const Sales = () => {
               </thead>
               <tbody>
                 {sortedInvoices.map((invoice, index) => (
-                  <tr key={invoice.id} className="border-t">
+                  <tr key={invoice.id} className={`border-t ${invoice.cancelledAt ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{invoice.invoiceNumber}</td>
                     <td className="table-cell">{new Date(invoice.invoiceDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{invoice.customer?.name}</td>
                     <td className="table-cell">{formatCurrency(invoice.totalAmount)}</td>
                     <td className="table-cell">
-                      <div className="flex flex-col items-start gap-1">
-                        <span className={`px-2 py-1 rounded-full text-xs ${
-                          invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                          invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                          'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
-                        }`}>
-                          {formatInvoiceStatus(invoice.status)}
+                      {invoice.cancelledAt ? (
+                        <span className="px-2 py-1 rounded-full text-xs bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
+                          Cancelled
                         </span>
-                        {(() => {
-                          const cd = getDueCountdown(
-                            invoice.dueDate,
-                            invoice.status,
-                            invoice.amountPaid,
-                            invoice.totalAmount
-                          )
-                          return cd ? (
-                            <span className={`text-xs font-medium ${dueCountdownColorClass[cd.tone]}`}>
-                              {cd.text}
-                            </span>
-                          ) : null
-                        })()}
-                      </div>
+                      ) : (
+                        <div className="flex flex-col items-start gap-1">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                            invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                          }`}>
+                            {formatInvoiceStatus(invoice.status)}
+                          </span>
+                          {(() => {
+                            const cd = getDueCountdown(
+                              invoice.dueDate,
+                              invoice.status,
+                              invoice.amountPaid,
+                              invoice.totalAmount
+                            )
+                            return cd ? (
+                              <span className={`text-xs font-medium ${dueCountdownColorClass[cd.tone]}`}>
+                                {cd.text}
+                              </span>
+                            ) : null
+                          })()}
+                        </div>
+                      )}
                     </td>
                     <td className="table-cell">
                       <div className="flex items-center space-x-2">
@@ -775,12 +784,14 @@ const Sales = () => {
                         >
                           View
                         </button>
-                        <button
-                          onClick={() => handleEdit(invoice)}
-                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-                        >
-                          Edit
-                        </button>
+                        {!invoice.cancelledAt && (
+                          <button
+                            onClick={() => handleEdit(invoice)}
+                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                          >
+                            Edit
+                          </button>
+                        )}
                         <DownloadMenu getOpts={() => buildDownloadOpts(invoice.id)} />
                         <ShareMenu
                           onShare={(target) => handleShare(invoice.id, target)}
@@ -788,9 +799,11 @@ const Sales = () => {
                           email={invoice.customer?.email}
                           partyName={invoice.customer?.name}
                         />
-                        <button onClick={() => handleDelete(invoice.id)} className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
-                          Delete
-                        </button>
+                        {!invoice.cancelledAt && (
+                          <button onClick={() => handleCancel(invoice.id)} className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                            Cancel
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1185,11 +1198,12 @@ const Sales = () => {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
+                    viewingInvoice.cancelledAt ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' :
                     viewingInvoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
                     viewingInvoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
                     'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                   }`}>
-                    {formatInvoiceStatus(viewingInvoice.status)}
+                    {viewingInvoice.cancelledAt ? 'Cancelled' : formatInvoiceStatus(viewingInvoice.status)}
                   </span>
                 </div>
               </div>

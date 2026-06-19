@@ -18,7 +18,7 @@ import {
 } from 'drizzle-orm'
 
 import { schema, useDb } from '@/db'
-import { notDeleted } from '@/db/softDelete'
+import { notCancelled, notDeleted } from '@/db/softDelete'
 
 // Reuse useDb's inferred return type so callers and helpers stay in sync.
 type Db = ReturnType<typeof useDb>
@@ -48,6 +48,7 @@ export async function getTotalReceivables(db: Db): Promise<number> {
       and(
         ne(schema.salesInvoice.status, 'PAID'),
         notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
       ),
     )
   return rows[0]?.total ?? 0
@@ -75,6 +76,7 @@ export async function getTotalInvoicedThisFY(
       and(
         gte(schema.salesInvoice.invoiceDate, fyStartDate),
         notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
       ),
     )
   return rows[0]?.total ?? 0
@@ -93,6 +95,7 @@ export async function getOverdueCount(db: Db): Promise<number> {
         isNotNull(schema.salesInvoice.dueDate),
         lt(schema.salesInvoice.dueDate, today),
         notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
       ),
     )
   return rows[0]?.count ?? 0
@@ -135,7 +138,7 @@ export async function getRecentInvoices(
       schema.customer,
       eq(schema.salesInvoice.customerId, schema.customer.id),
     )
-    .where(notDeleted(schema.salesInvoice.deletedAt))
+    .where(and(notDeleted(schema.salesInvoice.deletedAt), notCancelled(schema.salesInvoice.cancelledAt)))
     .orderBy(desc(schema.salesInvoice.invoiceDate))
     .limit(limit)
   return rows.map((r) => ({ ...r.invoice, customerName: r.customerName }))

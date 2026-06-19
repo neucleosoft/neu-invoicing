@@ -425,6 +425,7 @@ export const setupGSTReportHandlers = () => {
       const where: any = {
         type: 'INVOICE',
         ...notDeleted,
+        ...notCancelled,
         invoiceDate: {
           gte: new Date(filters.startDate),
           lte: new Date(filters.endDate)
@@ -697,6 +698,7 @@ export const setupGSTReportHandlers = () => {
         where: {
           type: 'INVOICE',
           ...notDeleted,
+          ...notCancelled,
           invoiceDate: { gte: startDate, lte: endDate }
         },
         include: {
@@ -870,6 +872,7 @@ export const setupGSTReportHandlers = () => {
         where: {
           type: 'INVOICE',
           ...notDeleted,
+          ...notCancelled,
           invoiceDate: { gte: startDate, lte: endDate }
         },
         include: {
@@ -1070,6 +1073,7 @@ export const setupGSTReportHandlers = () => {
         where: {
           type: 'INVOICE',
           ...notDeleted,
+          ...notCancelled,
           invoiceDate: { gte: startDate, lte: endDate }
         },
         include: {

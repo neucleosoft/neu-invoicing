@@ -192,6 +192,7 @@ export const setupCustomerHandlers = () => {
               type: 'INVOICE',
               invoiceDate: { lte: to },
               ...notDeleted,
+              ...notCancelled,
             },
             select: { id: true, invoiceNumber: true, invoiceDate: true, totalAmount: true },
           }),
