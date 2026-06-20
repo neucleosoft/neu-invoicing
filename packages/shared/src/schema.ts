@@ -156,6 +156,9 @@ export const item = sqliteTable("Item", {
     .notNull()
     .default(false),
   currentStock: real("currentStock").notNull().default(0),
+  // Stock before any recorded movement — lets recompute rebuild
+  // currentStock = openingStock + Σ(stockMovements), mirroring party openingBalance.
+  openingStock: real("openingStock").notNull().default(0),
   lowStockWarning: real("lowStockWarning").notNull().default(10),
   createdAt: prismaDate("createdAt")
     .notNull()

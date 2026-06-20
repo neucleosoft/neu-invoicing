@@ -1,6 +1,59 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 
+// One-time data backfill — runs on every launch, no-op once aligned. Old desktop invoices
+// stamped `amountPaid` as a column with NO PaymentTransaction row behind it. The recompute
+// engine sums payment ROWS, so it can't see that money. This records the MISSING receipt as
+// a real PAYMENT_IN row (it does NOT touch currentBalance / amountPaid — those are already
+// correct; it only adds the ledger row so the rebuild matches). Additive + deterministic, so
+// safe to run automatically on every device. Desktop-only: mobile always wrote a real row.
+// (Leaves cancelled/reversed invoices and the ambiguous "PAID with amountPaid 0" cases alone.)
+export async function backfillInlinePayments(): Promise<void> {
+  const prisma = getPrisma()
+  try {
+    const [invoices, payments] = await Promise.all([
+      prisma.salesInvoice.findMany({
+        where: { type: 'INVOICE' },
+        select: { id: true, customerId: true, invoiceDate: true, amountPaid: true, status: true, deletedAt: true, cancelledAt: true },
+      }),
+      prisma.paymentTransaction.findMany({
+        where: { type: 'PAYMENT_IN' },
+        select: { salesInvoiceId: true, amount: true, deletedAt: true, cancelledAt: true },
+      }),
+    ])
+    const paidRows = new Map<string, number>()
+    for (const p of payments)
+      if (p.salesInvoiceId && p.deletedAt == null && p.cancelledAt == null)
+        paidRows.set(p.salesInvoiceId, (paidRows.get(p.salesInvoiceId) ?? 0) + p.amount)
+
+    const gaps = invoices
+      .filter((inv) => inv.deletedAt == null && inv.cancelledAt == null && inv.status !== 'REVERSED')
+      .map((inv) => ({ inv, gap: (inv.amountPaid || 0) - (paidRows.get(inv.id) ?? 0) }))
+      .filter(({ gap }) => gap > 0.01)
+    if (gaps.length === 0) return
+
+    await prisma.$transaction(
+      gaps.map(({ inv, gap }) =>
+        prisma.paymentTransaction.create({
+          data: {
+            type: 'PAYMENT_IN',
+            customerId: inv.customerId,
+            amount: gap,
+            paymentMode: 'CASH',
+            paymentDate: inv.invoiceDate,
+            referenceType: 'INVOICE',
+            salesInvoiceId: inv.id,
+            notes: 'Paid with invoice (backfilled)',
+          },
+        }),
+      ),
+    )
+    console.log(`[inlinePaymentBackfill] recorded ${gaps.length} missing payment(s)`)
+  } catch (e) {
+    console.error('[inlinePaymentBackfill] failed, app continues:', e)
+  }
+}
+
 // Recompute an invoice/bill payment status from its total and amount paid.
 const computeStatus = (total: number, paid: number): 'PAID' | 'PARTIAL' | 'DRAFT' => {
   if (total - paid <= 0) return 'PAID'

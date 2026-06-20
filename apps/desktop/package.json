@@ -17,7 +17,10 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
-    "import:invoices": "node scripts/import-invoices.js"
+    "import:invoices": "node scripts/import-invoices.js",
+    "verify:recompute": "node scripts/verify-recompute.js",
+    "backfill:payments": "node scripts/backfill-inline-payments.js",
+    "backfill:openingstock": "node scripts/backfill-opening-stock.js"
   },
   "keywords": [
     "invoicing",

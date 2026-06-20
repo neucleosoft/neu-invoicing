@@ -29,6 +29,13 @@
       "when": 1781790324537,
       "tag": "0003_thin_tempest",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1781872909771,
+      "tag": "0004_purple_miek",
+      "breakpoints": true
     }
   ]
 }

@@ -81,6 +81,8 @@ apps/desktop/scripts/_diff-dbs.cjs
 apps/desktop/scripts/_premerge-check.cjs
 apps/desktop/scripts/_merge-into-boss.cjs
 apps/desktop/scripts/insert-extracted-bills.mjs
+apps/desktop/scripts
+/scripts
 
 # Scraping tools (not part of the app)
 platform-tools/
@@ -96,4 +98,5 @@ learning_pdf.md
 # Local-only originals of pre-blur README screenshots
 docs/screenshots/.originals/
 engineering_notes.pdf
-/
+sync-design.md
+gst-design.md

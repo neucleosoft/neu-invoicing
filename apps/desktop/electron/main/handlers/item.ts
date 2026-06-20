@@ -2,6 +2,40 @@ import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 import { notDeleted } from './softDelete'
 
+// One-time data backfill — runs on every launch, but writes only what's wrong, so it's a
+// no-op once aligned (mirrors migrateLegacySuppliersFromParty). Sets Item.openingStock so
+// stock is rebuildable from rows: openingStock = currentStock − Σ(movements). New items set
+// it at create; this fixes items that predate the openingStock column. Because it runs in
+// the app's startup, EVERY device aligns itself automatically on update — no per-customer
+// manual step.
+export async function backfillOpeningStock(): Promise<void> {
+  const prisma = getPrisma()
+  try {
+    const [items, movements] = await Promise.all([
+      prisma.item.findMany({ select: { id: true, currentStock: true, openingStock: true } }),
+      prisma.stockMovement.findMany({ select: { itemId: true, quantity: true } }),
+    ])
+    const movByItem = new Map<string, number>()
+    for (const m of movements) movByItem.set(m.itemId, (movByItem.get(m.itemId) ?? 0) + m.quantity)
+    const fixes = items.filter((it) => {
+      const needed = it.currentStock - (movByItem.get(it.id) ?? 0)
+      return Math.abs(needed - (it.openingStock ?? 0)) > 0.0001
+    })
+    if (fixes.length === 0) return
+    await prisma.$transaction(
+      fixes.map((it) =>
+        prisma.item.update({
+          where: { id: it.id },
+          data: { openingStock: it.currentStock - (movByItem.get(it.id) ?? 0) },
+        }),
+      ),
+    )
+    console.log(`[openingStockBackfill] aligned ${fixes.length} item(s)`)
+  } catch (e) {
+    console.error('[openingStockBackfill] failed, app continues:', e)
+  }
+}
+
 export const setupItemHandlers = () => {
   const prisma = getPrisma()
 
@@ -57,6 +91,9 @@ export const setupItemHandlers = () => {
           gstType: data.gstType || 'GST',
           trackStock: data.trackStock || false,
           currentStock: data.currentStock || 0,
+          // At birth, the opening stock IS the current stock (no movements yet). This is
+          // the anchor recompute replays movements on top of.
+          openingStock: data.currentStock || 0,
           lowStockWarning: data.lowStockWarning || 10
         }
       })
@@ -73,6 +110,14 @@ export const setupItemHandlers = () => {
   // Update item
   ipcMain.handle('item:update', async (_, id: string, data) => {
     try {
+      const existing = await prisma.item.findUnique({ where: { id } })
+      if (!existing) return { success: false, error: 'Item not found' }
+      // Editing the stock directly (no movement is written) is treated as adjusting the
+      // OPENING stock by the same delta, so currentStock = openingStock + Σ(movements)
+      // stays true and recompute keeps matching.
+      const stockDelta =
+        data.currentStock == null ? 0 : data.currentStock - existing.currentStock
+
       const item = await prisma.item.update({
         where: { id },
         data: {
@@ -86,6 +131,7 @@ export const setupItemHandlers = () => {
           taxRate: data.taxRate,
           trackStock: data.trackStock,
           currentStock: data.currentStock,
+          openingStock: existing.openingStock + stockDelta,
           lowStockWarning: data.lowStockWarning
         }
       })

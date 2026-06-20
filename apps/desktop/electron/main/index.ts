@@ -12,13 +12,13 @@ import { setupSyncHandlers, startBackupScheduler } from './sync'
 import { setupCustomerHandlers } from './handlers/customer'
 import { setupSupplierHandlers, migrateLegacySuppliersFromParty } from './handlers/supplier'
 import { setupSupplierItemHandlers } from './handlers/supplierItem'
-import { setupItemHandlers } from './handlers/item'
+import { setupItemHandlers, backfillOpeningStock } from './handlers/item'
 import { setupSalesHandlers } from './handlers/sales'
 import { setupQuotationHandlers } from './handlers/quotation'
 import { setupProformaInvoiceHandlers } from './handlers/proformaInvoice'
 import { setupPurchaseHandlers } from './handlers/purchase'
 import { setupPurchaseOrderHandlers } from './handlers/purchaseOrder'
-import { setupPaymentHandlers } from './handlers/payment'
+import { setupPaymentHandlers, backfillInlinePayments } from './handlers/payment'
 import { setupDashboardHandlers } from './handlers/dashboard'
 import { setupReportHandlers } from './handlers/report'
 import { setupGSTReportHandlers } from './handlers/gstReport'
@@ -138,6 +138,15 @@ app.whenReady().then(async () => {
   // table with type='SUPPLIER'. Move them into the dedicated Supplier table.
   // Idempotent — no-op once everything's been migrated.
   migrateLegacySuppliersFromParty()
+
+  // One-shot data fix: align item.openingStock so stock rebuilds from rows. Idempotent —
+  // no-op once aligned. Runs automatically on every device, so no per-customer manual step.
+  backfillOpeningStock()
+
+  // One-shot data fix: record old inline payments (amountPaid with no payment row) as real
+  // PAYMENT_IN rows, so the rebuild can see that money. Idempotent; additive (never edits a
+  // balance). Leaves ambiguous "PAID with ₹0" invoices alone — those need a human.
+  backfillInlinePayments()
 
   // Kick off scheduled-backup watchdog. Runs an immediate due-check, then
   // ticks every hour for as long as the app is open.

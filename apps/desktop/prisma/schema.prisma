@@ -151,6 +151,7 @@ model Item {
   gstType         String    @default("GST") // GST, EXEMPT, NIL_RATED, NON_GST
   trackStock      Boolean   @default(false)
   currentStock    Float     @default(0)
+  openingStock    Float     @default(0) // stock before any recorded movement — lets recompute rebuild currentStock = openingStock + Σ(stockMovements), mirroring party openingBalance
   lowStockWarning Float     @default(10)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
