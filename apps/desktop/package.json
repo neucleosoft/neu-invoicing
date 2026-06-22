@@ -19,6 +19,7 @@
     "prisma:studio": "prisma studio",
     "import:invoices": "node scripts/import-invoices.js",
     "verify:recompute": "node scripts/verify-recompute.js",
+    "recompute": "esbuild scripts/recompute-runner.ts --bundle --platform=node --format=cjs --external:@prisma/client --outfile=scripts/.recompute-runner.cjs --log-level=warning && node scripts/.recompute-runner.cjs",
     "backfill:payments": "node scripts/backfill-inline-payments.js",
     "backfill:openingstock": "node scripts/backfill-opening-stock.js"
   },
@@ -31,6 +32,7 @@
   "author": "Neu Invoicing",
   "license": "MIT",
   "dependencies": {
+    "@neu/shared": "workspace:*",
     "@prisma/client": "^5.20.0",
     "@types/pdf-parse": "^1.1.5",
     "@types/react-datepicker": "^6.2.0",
