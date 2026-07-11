@@ -27,10 +27,15 @@ const Settings = () => {
   const [syncActivity, setSyncActivity] = useState<
     { at: number; kind: string; detail: string }[]
   >([])
+  const [rowSyncStatus, setRowSyncStatus] = useState<{
+    lastSyncAt: number | null
+    pendingRemovals: number | null
+  }>({ lastSyncAt: null, pendingRemovals: null })
 
   const refreshSyncActivity = async () => {
     try {
       setSyncActivity(await window.electronAPI.sync.getSyncActivityLog())
+      setRowSyncStatus(await window.electronAPI.sync.getRowSyncStatus())
     } catch { /* log display is best-effort */ }
   }
 
@@ -77,13 +82,10 @@ const Settings = () => {
   const { connect: connectGoogle, isConnecting, dialog: connectDialog } = useConnectGoogle()
   const confirm = useConfirm()
 
-  // Sync activity receipts load once; each sync refreshes them.
+  // Sync activity receipts + status load once; each sync refreshes them.
   useEffect(() => {
-    void (async () => {
-      try {
-        setSyncActivity(await window.electronAPI.sync.getSyncActivityLog())
-      } catch { /* best-effort */ }
-    })()
+    void refreshSyncActivity()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   const [activeTab, setActiveTab] = useState<SettingsTab>('company')
   const [backupInfo, setBackupInfo] = useState<{
@@ -751,6 +753,15 @@ const Settings = () => {
                     Nothing is wiped wholesale — each document merges newest-edit-wins, and every
                     balance is rebuilt from the documents after the merge.
                   </p>
+                  {rowSyncStatus.pendingRemovals != null && (
+                    <div className="flex items-start gap-2 mb-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                      <div className="text-xs text-amber-800 dark:text-amber-200">
+                        Incoming sync wants to remove {rowSyncStatus.pendingRemovals} records — auto-sync
+                        has paused. Press <strong>Sync changes now</strong> to review and decide.
+                      </div>
+                    </div>
+                  )}
                   <button
                     className="btn btn-primary"
                     onClick={handleRowSync}
@@ -758,6 +769,11 @@ const Settings = () => {
                   >
                     {rowSyncing ? 'Syncing changes…' : 'Sync changes now'}
                   </button>
+                  {rowSyncStatus.lastSyncAt && (
+                    <p className="text-xs mt-2 text-gray-500 dark:text-gray-400">
+                      Last synced {new Date(rowSyncStatus.lastSyncAt).toLocaleString()} · auto-syncs every 5 minutes while the app is open
+                    </p>
+                  )}
                   {rowSyncSummary && (
                     <p className="text-xs mt-3 text-gray-700 dark:text-gray-300">{rowSyncSummary}</p>
                   )}

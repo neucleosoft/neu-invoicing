@@ -9,7 +9,7 @@ import { app, BrowserWindow, protocol } from 'electron'
 import { setupDatabase } from './database'
 import { setupAuthHandlers } from './auth'
 import { setupSyncHandlers, startBackupScheduler } from './sync'
-import { setupRowSyncHandlers } from './rowSync'
+import { setupRowSyncHandlers, startRowSyncScheduler } from './rowSync'
 import { setupCustomerHandlers } from './handlers/customer'
 import { setupSupplierHandlers, migrateLegacySuppliersFromParty } from './handlers/supplier'
 import { setupSupplierItemHandlers } from './handlers/supplierItem'
@@ -166,6 +166,10 @@ app.whenReady().then(async () => {
   // Kick off scheduled-backup watchdog. Runs an immediate due-check, then
   // ticks every hour for as long as the app is open.
   startBackupScheduler()
+
+  // Row-sync auto ticks (S3): first run delayed past the backfills above,
+  // then every 5 minutes. Tripwire pauses always wait for the manual button.
+  startRowSyncScheduler()
 
   createWindow()
 

@@ -629,6 +629,10 @@ declare global {
           rowId?: string
           detail: string
         }[]>
+        getRowSyncStatus: () => Promise<{
+          lastSyncAt: number | null
+          pendingRemovals: number | null
+        }>
         getBackupInfo: () => Promise<{
           cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
           thisDeviceLastUpload: string | null

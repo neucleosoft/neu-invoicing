@@ -260,11 +260,18 @@ async function downloadPeerDiaries(
 
 // ── The whole flow ───────────────────────────────────────────────────────────
 
+// One sync at a time — the AutoSync ticker and the manual Settings button can
+// both fire; overlapping transactions help nobody, and skipped runs are free
+// (the diary model means the next run covers everything).
+let inFlight = false
+
 export async function rowSyncNow(
   db: Db,
   accessToken: string,
   opts: { confirmRemovals?: boolean } = {},
 ): Promise<RowSyncResult> {
+  if (inFlight) return { success: false, error: 'Sync is already running.' }
+  inFlight = true
   try {
     const deviceId = await getDeviceId()
     const now = Date.now()
@@ -327,5 +334,7 @@ export async function rowSyncNow(
     }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'Sync failed' }
+  } finally {
+    inFlight = false
   }
 }

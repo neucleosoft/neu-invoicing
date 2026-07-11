@@ -30,6 +30,7 @@ if (typeof (globalThis as { Buffer?: unknown }).Buffer === 'undefined') {
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { runMigrations, schema, useDb } from '@/db';
 import { AuthProvider, useAuth } from '@/auth';
+import { AutoSync } from '@/sync/AutoSync';
 
 export default function RootLayout() {
   // Hold the app until Inter is ready so text doesn't flash in the system font
@@ -148,6 +149,10 @@ function RootLayoutInner() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+      {/* Foreground auto-sync (S3): renders nothing; pulls+pushes on focus and
+          every minute while active. Tripwire pauses still require the manual
+          Sync button in Settings. */}
+      <AutoSync />
       {/* Default headerShown: false — detail/edit/new screens render their
           own header. Without this, unregistered routes (invoice/[id], etc.)
           fall back to Expo's default header which shows the raw filename. */}

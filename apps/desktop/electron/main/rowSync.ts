@@ -53,14 +53,37 @@ export interface SyncActivityEntry {
 
 const appendActivity = (entries: Omit<SyncActivityEntry, 'at'>[]) => {
   if (entries.length === 0) return
-  const now = Date.now()
   const existing = (store.get(ACTIVITY_LOG_KEY) as SyncActivityEntry[] | undefined) ?? []
-  const next = [...entries.map((e) => ({ at: now, ...e })), ...existing].slice(0, ACTIVITY_LOG_CAP)
+  // Dedupe against everything still in the log: with auto-sync ticking every
+  // few minutes, a sticky-skip or tripwire pause would otherwise re-log on
+  // EVERY pull for as long as the stale packet sits in the peer's 30-day diary.
+  const seen = new Set(existing.map((e) => `${e.kind}|${e.table}|${e.rowId}|${e.detail}`))
+  const fresh = entries.filter((e) => !seen.has(`${e.kind}|${e.table}|${e.rowId}|${e.detail}`))
+  if (fresh.length === 0) return
+  const now = Date.now()
+  const next = [...fresh.map((e) => ({ at: now, ...e })), ...existing].slice(0, ACTIVITY_LOG_CAP)
   store.set(ACTIVITY_LOG_KEY, next)
 }
 
 export const getSyncActivity = (): SyncActivityEntry[] =>
   ((store.get(ACTIVITY_LOG_KEY) as SyncActivityEntry[] | undefined) ?? [])
+
+// ── Auto-sync status ─────────────────────────────────────────────────────────
+
+const LAST_ROW_SYNC_KEY = 'last_row_sync_at'
+// Set when an AUTO tick hit the tripwire: the user must press the manual Sync
+// button (which owns the confirm dialog) to resolve it. Cleared on any
+// successful completed sync.
+const PENDING_REMOVALS_KEY = 'row_sync_pending_removals'
+
+export const getRowSyncStatus = (): { lastSyncAt: number | null; pendingRemovals: number | null } => ({
+  lastSyncAt: (store.get(LAST_ROW_SYNC_KEY) as number | undefined) ?? null,
+  pendingRemovals: (store.get(PENDING_REMOVALS_KEY) as number | undefined) ?? null,
+})
+
+// One sync at a time — overlapping transactions help nobody, and the diary
+// model makes skipped ticks free (the next one covers everything).
+let rowSyncInFlight = false
 
 // ── Drive diary IO ───────────────────────────────────────────────────────────
 
@@ -113,6 +136,8 @@ export const rowSyncNow = async (
 ): Promise<RowSyncResult> => {
   if (store.get('demo_mode')) return { success: true, pushedPackets: 0, applied: 0 }
   if (!store.get('google_tokens')) return { success: false, error: 'Connect your Google account to sync.' }
+  if (rowSyncInFlight) return { success: false, error: 'Sync is already running.' }
+  rowSyncInFlight = true
 
   try {
     const prisma = getPrisma()
@@ -141,6 +166,7 @@ export const rowSyncNow = async (
       // human before ANYTHING is applied or pushed.
       if (plan.incomingRemovals >= TRIPWIRE_THRESHOLD && !opts.confirmRemovals) {
         appendActivity([{ kind: 'TRIPWIRE_PAUSED', detail: `Incoming sync wanted to remove ${plan.incomingRemovals} records — paused for confirmation` }])
+        store.set(PENDING_REMOVALS_KEY, plan.incomingRemovals)
         return { success: false, needsConfirmation: true, removalsPending: plan.incomingRemovals }
       }
 
@@ -166,6 +192,9 @@ export const rowSyncNow = async (
     const diary = await collectDiary(prisma, deviceId, now)
     await uploadOwnDiary(drive, deviceId, JSON.stringify(diary))
 
+    store.set(LAST_ROW_SYNC_KEY, Date.now())
+    store.delete(PENDING_REMOVALS_KEY)
+
     return {
       success: true,
       pushedPackets: diary.packets.length,
@@ -182,7 +211,34 @@ export const rowSyncNow = async (
       ? 'Google sign-in expired. Please sign in again.'
       : error instanceof Error ? error.message : 'Sync failed'
     return { success: false, error: friendly }
+  } finally {
+    rowSyncInFlight = false
   }
+}
+
+// ── Auto-sync scheduler (S3) ─────────────────────────────────────────────────
+// Foreground-only by nature (the app is open), fires every 5 minutes plus one
+// delayed run at startup — delayed so the boot backfills (openingStock, inline
+// payments) always finish before the first recompute-after-merge can run.
+// Auto ticks NEVER confirm the tripwire; a pause waits for the manual button.
+
+const ROW_SYNC_TICK_MS = 5 * 60 * 1000
+const ROW_SYNC_FIRST_RUN_DELAY_MS = 20_000
+
+let rowSyncTimer: NodeJS.Timeout | null = null
+
+const autoTick = async () => {
+  if (store.get('demo_mode') || !store.get('google_tokens')) return
+  const r = await rowSyncNow()
+  if (!r.success && r.error && !r.needsConfirmation && r.error !== 'Sync is already running.') {
+    console.log('[rowSync auto] skipped:', r.error)
+  }
+}
+
+export const startRowSyncScheduler = () => {
+  if (rowSyncTimer) return
+  setTimeout(() => void autoTick(), ROW_SYNC_FIRST_RUN_DELAY_MS)
+  rowSyncTimer = setInterval(() => void autoTick(), ROW_SYNC_TICK_MS)
 }
 
 export const setupRowSyncHandlers = () => {
@@ -190,4 +246,5 @@ export const setupRowSyncHandlers = () => {
     rowSyncNow({ confirmRemovals }),
   )
   ipcMain.handle('sync:getActivityLog', async () => getSyncActivity())
+  ipcMain.handle('sync:getRowSyncStatus', async () => getRowSyncStatus())
 }

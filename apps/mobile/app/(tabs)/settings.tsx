@@ -1,6 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, DevSettings, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { ThemedText } from '@/components/themed-text';
@@ -16,6 +17,7 @@ import {
   type CloudBackupInfo,
 } from '@/sync/drive';
 import { getSyncActivity, type SyncActivityEntry } from '@/sync/activityLog';
+import { LAST_ROW_SYNC_KEY } from '@/sync/AutoSync';
 import { rowSyncNow } from '@/sync/rowSync';
 import { getOpenRouterKey, setOpenRouterKey } from '@/utils/billOcr';
 import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
@@ -205,10 +207,18 @@ export default function SettingsScreen() {
   const [rowSyncing, setRowSyncing] = useState(false);
   const [rowSyncSummary, setRowSyncSummary] = useState<string | null>(null);
   const [syncActivity, setSyncActivity] = useState<SyncActivityEntry[]>([]);
+  const [lastRowSyncAt, setLastRowSyncAt] = useState<number | null>(null);
+
+  const refreshSyncInfo = useCallback(() => {
+    getSyncActivity().then(setSyncActivity);
+    SecureStore.getItemAsync(LAST_ROW_SYNC_KEY).then((v) =>
+      setLastRowSyncAt(v ? Number(v) : null),
+    );
+  }, []);
 
   useEffect(() => {
-    getSyncActivity().then(setSyncActivity);
-  }, []);
+    refreshSyncInfo();
+  }, [refreshSyncInfo]);
 
   function finishRowSync(r: Awaited<ReturnType<typeof rowSyncNow>>) {
     if (!r.success) {
@@ -254,7 +264,7 @@ export default function SettingsScreen() {
                   setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
                 } finally {
                   setRowSyncing(false);
-                  getSyncActivity().then(setSyncActivity);
+                  refreshSyncInfo();
                 }
               },
             },
@@ -268,7 +278,7 @@ export default function SettingsScreen() {
       setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setRowSyncing(false);
-      getSyncActivity().then(setSyncActivity);
+      refreshSyncInfo();
     }
   }
 
@@ -392,6 +402,11 @@ export default function SettingsScreen() {
           loading={rowSyncing}
           disabled={!accessToken || backingUp || restoring}
         />
+        {lastRowSyncAt ? (
+          <ThemedText style={styles.businessHint}>
+            Last synced {new Date(lastRowSyncAt).toLocaleString()} · auto-syncs every minute while the app is open
+          </ThemedText>
+        ) : null}
         {rowSyncSummary ? (
           <ThemedText style={styles.businessHint}>{rowSyncSummary}</ThemedText>
         ) : null}

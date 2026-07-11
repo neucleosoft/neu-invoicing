@@ -32,9 +32,15 @@ export async function appendSyncActivity(
 ): Promise<void> {
   if (entries.length === 0) return
   try {
-    const now = Date.now()
     const existing = await getSyncActivity()
-    const next = [...entries.map((e) => ({ at: now, ...e })), ...existing].slice(0, CAP)
+    // Dedupe against everything still in the log: with auto-sync ticking every
+    // minute, a sticky-skip or tripwire pause would otherwise re-log on EVERY
+    // pull for as long as the stale packet sits in the peer's 30-day diary.
+    const seen = new Set(existing.map((e) => `${e.kind}|${e.table}|${e.rowId}|${e.detail}`))
+    const fresh = entries.filter((e) => !seen.has(`${e.kind}|${e.table}|${e.rowId}|${e.detail}`))
+    if (fresh.length === 0) return
+    const now = Date.now()
+    const next = [...fresh.map((e) => ({ at: now, ...e })), ...existing].slice(0, CAP)
     await LegacyFS.writeAsStringAsync(LOG_PATH, JSON.stringify(next))
   } catch {
     // best-effort — receipts are a convenience, not a correctness layer
