@@ -63,9 +63,23 @@ export async function recomputeAll(
     stockAvailable = false
   }
 
+  // Bank journals (P3) — same guard: the BankTransaction table may not exist
+  // on a DB that hasn't run migration 0006 yet; empty arrays keep it quiet.
+  let bankAccounts: { id: string; name: string; currentBalance: number; updatedAt: Date }[] = []
+  let bankTxns: { bankAccountId: string; amount: number; deletedAt: Date | null }[] = []
+  try {
+    ;[bankAccounts, bankTxns] = await Promise.all([
+      db.select({ id: schema.bankAccount.id, name: schema.bankAccount.name, currentBalance: schema.bankAccount.currentBalance, updatedAt: schema.bankAccount.updatedAt }).from(schema.bankAccount),
+      db.select({ bankAccountId: schema.bankTransaction.bankAccountId, amount: schema.bankTransaction.amount, deletedAt: schema.bankTransaction.deletedAt }).from(schema.bankTransaction),
+    ])
+  } catch {
+    bankAccounts = []
+    bankTxns = []
+  }
+
   // --- shared engine + diff (packages/shared) ---------------------------------------
-  const { custBal, supBal, invState, billState, stock, sections, totalChanges } = runRecomputeDiff({
-    customers, suppliers, invoices, bills, payments, notes, stockAvailable, items, movements,
+  const { custBal, supBal, invState, billState, stock, bankBal, sections, totalChanges } = runRecomputeDiff({
+    customers, suppliers, invoices, bills, payments, notes, stockAvailable, items, movements, bankAccounts, bankTxns,
   })
 
   // --- write back (only on apply) --------------------------------------------------
@@ -97,6 +111,10 @@ export async function recomputeAll(
           const v = stock.get(it.id) ?? 0
           if (Math.abs(v - it.currentStock) > EPS) await tx.update(schema.item).set({ currentStock: round2(v), updatedAt: it.updatedAt }).where(eq(schema.item.id, it.id))
         }
+      }
+      for (const a of bankAccounts) {
+        const v = bankBal.get(a.id) ?? 0
+        if (Math.abs(v - a.currentBalance) > EPS) await tx.update(schema.bankAccount).set({ currentBalance: round2(v), updatedAt: a.updatedAt }).where(eq(schema.bankAccount.id, a.id))
       }
     })
   }

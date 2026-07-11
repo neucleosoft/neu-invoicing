@@ -666,6 +666,25 @@ model BankAccount {
   currentBalance Float     @default(0)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
+  transactions   BankTransaction[]
+}
+
+// Append-only bank journal (P3): every balance change is a ROW, so two devices
+// adjusting one account offline both survive any merge order, and
+// currentBalance is rebuildable like every other total. Opening balance = a
+// journal row with deterministic id open-<accountId> (dual-device backfills
+// converge to one row through sync). Rows are immutable — mistakes are fixed
+// by counter-entries, the accounting way.
+model BankTransaction {
+  id              String      @id @default(cuid())
+  deletedAt       DateTime?
+  bankAccountId   String
+  bankAccount     BankAccount @relation(fields: [bankAccountId], references: [id])
+  amount          Float // signed: + money in, − money out
+  description     String?
+  transactionDate DateTime    @default(now())
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
 }
 
 // GST Lookup Cache - Stores fetched GST details to minimize API calls

@@ -6,6 +6,7 @@ import * as schema from '@neu/shared'
 import migrations from '../drizzle/migrations'
 import { repairLegacyTextDates } from './dateRepair'
 import { backfillOpeningStock } from './openingStockBackfill'
+import { backfillBankOpeningJournals } from './bankJournalBackfill'
 
 export { schema }
 
@@ -14,6 +15,7 @@ export async function runMigrations(sqlite: SQLiteDatabase) {
   await migrate(db, migrations)
   await repairLegacyTextDates(sqlite)
   await backfillOpeningStock(sqlite)
+  await backfillBankOpeningJournals(sqlite)
 }
 
 export function useDb() {

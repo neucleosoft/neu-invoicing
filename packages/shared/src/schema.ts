@@ -798,6 +798,36 @@ export const bankAccount = sqliteTable("BankAccount", {
 });
 
 // =============================================================
+// Bank Transaction (append-only journal — P3)
+// =============================================================
+// Every balance change is a ROW, never an in-place counter edit: two devices
+// adjusting the same account offline become two rows that both survive any
+// merge order, and currentBalance becomes rebuildable (recomputeBankBalances)
+// like every other total. The opening balance is itself a journal row with the
+// deterministic id `open-<accountId>`, so both devices' backfills converge to
+// ONE row through sync. Rows are immutable — a mistake is corrected by a
+// counter-entry, the accounting way.
+export const bankTransaction = sqliteTable("BankTransaction", {
+  id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
+  bankAccountId: text("bankAccountId")
+    .notNull()
+    .references(() => bankAccount.id),
+  amount: real("amount").notNull(), // signed: + money in, − money out
+  description: text("description"),
+  transactionDate: prismaDate("transactionDate")
+    .notNull()
+    .$defaultFn(now),
+  createdAt: prismaDate("createdAt")
+    .notNull()
+    .$defaultFn(now),
+  updatedAt: prismaDate("updatedAt")
+    .notNull()
+    .$defaultFn(now)
+    .$onUpdate(now),
+});
+
+// =============================================================
 // GST Lookup Cache
 // =============================================================
 export const gstCache = sqliteTable("GstCache", {

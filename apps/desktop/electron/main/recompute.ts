@@ -58,9 +58,23 @@ export async function recomputeAll(
     stockAvailable = false
   }
 
+  // Bank journals (P3) — same guard: the BankTransaction table may not exist
+  // on a DB that hasn't run the migration yet; empty arrays keep the section quiet.
+  let bankAccounts: { id: string; name: string; currentBalance: number; updatedAt: Date }[] = []
+  let bankTxns: { bankAccountId: string; amount: number; deletedAt: Date | null }[] = []
+  try {
+    ;[bankAccounts, bankTxns] = await Promise.all([
+      prisma.bankAccount.findMany({ select: { id: true, name: true, currentBalance: true, updatedAt: true } }),
+      prisma.bankTransaction.findMany({ select: { bankAccountId: true, amount: true, deletedAt: true } }),
+    ])
+  } catch {
+    bankAccounts = []
+    bankTxns = []
+  }
+
   // --- shared engine + diff (packages/shared) ---------------------------------------
-  const { custBal, supBal, invState, billState, stock, sections, totalChanges } = runRecomputeDiff({
-    customers, suppliers, invoices, bills, payments, notes, stockAvailable, items, movements,
+  const { custBal, supBal, invState, billState, stock, bankBal, sections, totalChanges } = runRecomputeDiff({
+    customers, suppliers, invoices, bills, payments, notes, stockAvailable, items, movements, bankAccounts, bankTxns,
   })
 
   // --- write back (only on apply) --------------------------------------------------
@@ -92,6 +106,10 @@ export async function recomputeAll(
         const v = stock.get(it.id) ?? 0
         if (Math.abs(v - it.currentStock) > EPS) ops.push(prisma.item.update({ where: { id: it.id }, data: { currentStock: round2(v), updatedAt: it.updatedAt } }))
       }
+    }
+    for (const a of bankAccounts) {
+      const v = bankBal.get(a.id) ?? 0
+      if (Math.abs(v - a.currentBalance) > EPS) ops.push(prisma.bankAccount.update({ where: { id: a.id }, data: { currentBalance: round2(v), updatedAt: a.updatedAt } }))
     }
     await prisma.$transaction(ops)
   }

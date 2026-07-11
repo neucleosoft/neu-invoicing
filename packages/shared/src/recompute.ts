@@ -17,10 +17,9 @@
 //   • item.currentStock  — REQUIRES an `openingStock` field on item (mirror of party
 //     `openingBalance`); the opening is typed at create with no movement behind it, so
 //     without that field the typed opening can't be separated from the movement replay.
-//
-// What it does NOT own (no event trail — left to plain newest-edit-wins sync):
-//   • bankAccount.currentBalance — a manually-typed/adjusted figure with no document
-//     behind each change. Isolated: it feeds no other number. ("Journals later" = the fix.)
+//   • bankAccount.currentBalance — since P3 (2026-07-11), every balance change is an
+//     append-only BankTransaction row (the opening balance included, as a journal row
+//     with deterministic id `open-<accountId>`), so the balance is a pure replay.
 
 // --- ORM-agnostic input shapes (the caller maps its Prisma/Drizzle rows to these) ---
 
@@ -123,4 +122,20 @@ export function recomputeStock(items: RItem[], movements: RMovement[]): Map<stri
   for (const it of items) stock.set(it.id, it.openingStock)
   for (const m of movements) bump(stock, m.itemId, m.quantity)
   return stock
+}
+
+// --- 4. Bank balances (P3) ----------------------------------------------------------
+// currentBalance = Σ(active journal rows), opening included (it IS a journal row with
+// id `open-<accountId>`). Journals are append-only and immutable, so the replay is
+// merge-order-independent — the property the whole journal design exists for.
+export interface RBankAccount { id: string }
+export interface RBankTxn { bankAccountId: string; amount: number; deletedAt: Stamp }
+
+export function recomputeBankBalances(
+  accounts: RBankAccount[], txns: RBankTxn[],
+): Map<string, number> {
+  const bal = new Map<string, number>()
+  for (const a of accounts) bal.set(a.id, 0)
+  for (const t of txns) if (t.deletedAt == null) bump(bal, t.bankAccountId, t.amount)
+  return bal
 }

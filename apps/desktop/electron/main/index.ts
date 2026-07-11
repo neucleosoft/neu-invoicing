@@ -29,7 +29,7 @@ import { setupGstHandlers } from './handlers/gst'
 import { setupChallanHandlers } from './handlers/challan'
 import { setupCreditNoteHandlers } from './handlers/creditNote'
 import { setupPreviousInvoiceHandlers } from './handlers/previousInvoice'
-import { setupCashBankHandlers } from './handlers/cashBank'
+import { setupCashBankHandlers, backfillBankOpeningJournals } from './handlers/cashBank'
 import { setupShareHandlers } from './handlers/share'
 
 protocol.registerSchemesAsPrivileged([
@@ -162,6 +162,11 @@ app.whenReady().then(async () => {
   // Stamp legacy payment rows' updatedAt (covers the db-push baseline path,
   // which never runs the migration SQL's backfill UPDATE).
   backfillPaymentUpdatedAt()
+
+  // One-shot data fix (P3): fold each account's typed balance into an
+  // opening-journal row (deterministic id → dual-device backfills converge)
+  // so bank balances are rebuildable like every other total.
+  backfillBankOpeningJournals()
 
   // Kick off scheduled-backup watchdog. Runs an immediate due-check, then
   // ticks every hour for as long as the app is open.

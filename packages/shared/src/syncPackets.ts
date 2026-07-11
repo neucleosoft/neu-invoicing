@@ -109,13 +109,16 @@ export const SYNC_DOCUMENT_TABLES: DocTableSpec[] = [
   { table: 'previousInvoice', childTable: 'previousInvoiceItem', childFk: 'previousInvoiceId', numberColumn: 'serialNumber' },
 ]
 
-/** Single-row packets: master data + payments. company/settings never sync. */
+/** Single-row packets: master data + payments + bank journals (append-only,
+ *  immutable — plain newest-wins degenerates to insert-if-absent for them).
+ *  company/settings never sync. */
 export const SYNC_SINGLE_TABLES = [
   'customer',
   'supplier',
   'supplierItem',
   'item',
   'bankAccount',
+  'bankTransaction',
   'paymentTransaction',
 ] as const
 
@@ -135,6 +138,7 @@ export const SYNC_APPLY_ORDER: string[] = [
   'item',
   'supplierItem',
   'bankAccount',
+  'bankTransaction',
   'quotation',
   'proformaInvoice',
   'salesInvoice',

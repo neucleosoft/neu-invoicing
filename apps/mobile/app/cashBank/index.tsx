@@ -105,13 +105,30 @@ export default function CashBankScreen() {
           })
           .where(eq(schema.bankAccount.id, editingId))
       } else {
-        await db.insert(schema.bankAccount).values({
-          name: name.trim(),
-          type,
-          accountNumber: isBank ? accountNumber.trim() || null : null,
-          bankName: isBank ? bankName.trim() || null : null,
-          ifscCode: isBank ? ifscCode.trim() || null : null,
-          currentBalance: parseFloat(openingBalance) || 0,
+        // The typed opening balance becomes a JOURNAL row (P3) with the
+        // deterministic id open-<accountId>, so the balance is rebuildable
+        // and dual-device replays converge to one opening entry.
+        const opening = parseFloat(openingBalance) || 0
+        await db.transaction(async (tx) => {
+          const [created] = await tx
+            .insert(schema.bankAccount)
+            .values({
+              name: name.trim(),
+              type,
+              accountNumber: isBank ? accountNumber.trim() || null : null,
+              bankName: isBank ? bankName.trim() || null : null,
+              ifscCode: isBank ? ifscCode.trim() || null : null,
+              currentBalance: opening,
+            })
+            .returning({ id: schema.bankAccount.id })
+          if (opening !== 0) {
+            await tx.insert(schema.bankTransaction).values({
+              id: `open-${created.id}`,
+              bankAccountId: created.id,
+              amount: opening,
+              description: 'Opening balance',
+            })
+          }
         })
       }
       setShowModal(false)
@@ -171,12 +188,21 @@ export default function CashBankScreen() {
       return
     }
     try {
-      // Signed increment — positive adds, negative subtracts. Mirrors desktop
-      // cashBank:adjustBalance.
-      await db
-        .update(schema.bankAccount)
-        .set({ currentBalance: sql`${schema.bankAccount.currentBalance} + ${amt}` })
-        .where(eq(schema.bankAccount.id, adjustId))
+      // Every adjustment is a JOURNAL row (P3) — two devices adjusting offline
+      // become two rows that both survive the merge; the stored column stays
+      // live for reads and recompute rebuilds it from the journal after sync.
+      // Mirrors desktop cashBank:adjustBalance.
+      await db.transaction(async (tx) => {
+        await tx.insert(schema.bankTransaction).values({
+          bankAccountId: adjustId,
+          amount: amt,
+          description: 'Manual adjustment',
+        })
+        await tx
+          .update(schema.bankAccount)
+          .set({ currentBalance: sql`${schema.bankAccount.currentBalance} + ${amt}` })
+          .where(eq(schema.bankAccount.id, adjustId))
+      })
       setAdjustId(null)
       reload()
     } catch (e) {

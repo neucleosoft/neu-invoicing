@@ -7,6 +7,7 @@ import m0002 from './0002_romantic_piledriver.sql';
 import m0003 from './0003_thin_tempest.sql';
 import m0004 from './0004_purple_miek.sql';
 import m0005 from './0005_salty_lady_bullseye.sql';
+import m0006 from './0006_redundant_makkari.sql';
 
   export default {
     journal,
@@ -16,7 +17,8 @@ m0001,
 m0002,
 m0003,
 m0004,
-m0005
+m0005,
+m0006
     }
   }
   

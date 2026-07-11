@@ -2,6 +2,44 @@ import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 import { notDeleted } from './softDelete'
 
+// One-shot data fix (P3): every account's typed opening/adjusted balance
+// becomes a journal row, so the balance is rebuildable and mergeable. The
+// deterministic id `open-<accountId>` makes BOTH devices' backfills mint the
+// SAME row — sync converges to one instead of doubling the balance.
+// Idempotent: skips accounts that already have their opening row.
+export async function backfillBankOpeningJournals(): Promise<void> {
+  const prisma = getPrisma()
+  try {
+    const accounts = await prisma.bankAccount.findMany({
+      select: { id: true, currentBalance: true, createdAt: true },
+    })
+    let created = 0
+    for (const account of accounts) {
+      const existing = await prisma.bankTransaction.findUnique({ where: { id: `open-${account.id}` } })
+      if (existing) continue
+      const sums = await prisma.bankTransaction.aggregate({
+        where: { bankAccountId: account.id, deletedAt: null },
+        _sum: { amount: true },
+      })
+      const opening = account.currentBalance - (sums._sum.amount ?? 0)
+      if (Math.abs(opening) < 0.005) continue
+      await prisma.bankTransaction.create({
+        data: {
+          id: `open-${account.id}`,
+          bankAccountId: account.id,
+          amount: opening,
+          description: 'Opening balance',
+          transactionDate: account.createdAt,
+        },
+      })
+      created++
+    }
+    if (created > 0) console.log(`[bankJournalBackfill] recorded ${created} opening journal(s)`)
+  } catch (e) {
+    console.error('[bankJournalBackfill] failed, app continues:', e)
+  }
+}
+
 export const setupCashBankHandlers = () => {
   const prisma = getPrisma()
 
@@ -35,18 +73,34 @@ export const setupCashBankHandlers = () => {
     }
   })
 
-  // Create account
+  // Create account. The typed opening balance becomes a JOURNAL row (P3) with
+  // the deterministic id open-<accountId>, so the balance is rebuildable and
+  // a dual-device replay of this account converges to one opening entry.
   ipcMain.handle('cashBank:create', async (_, data) => {
     try {
-      const account = await prisma.bankAccount.create({
-        data: {
-          name: data.name,
-          type: data.type,
-          accountNumber: data.accountNumber || null,
-          bankName: data.bankName || null,
-          ifscCode: data.ifscCode || null,
-          currentBalance: data.currentBalance || 0
+      const opening = data.currentBalance || 0
+      const account = await prisma.$transaction(async (tx: any) => {
+        const created = await tx.bankAccount.create({
+          data: {
+            name: data.name,
+            type: data.type,
+            accountNumber: data.accountNumber || null,
+            bankName: data.bankName || null,
+            ifscCode: data.ifscCode || null,
+            currentBalance: opening
+          }
+        })
+        if (opening !== 0) {
+          await tx.bankTransaction.create({
+            data: {
+              id: `open-${created.id}`,
+              bankAccountId: created.id,
+              amount: opening,
+              description: 'Opening balance',
+            }
+          })
         }
+        return created
       })
 
       return { success: true, data: account }
@@ -165,8 +219,11 @@ export const setupCashBankHandlers = () => {
     }
   })
 
-  // Adjust balance (increment or decrement)
-  ipcMain.handle('cashBank:adjustBalance', async (_, id: string, amount: number, _notes?: string) => {
+  // Adjust balance (increment or decrement). Every adjustment is a JOURNAL
+  // row (P3) — two devices adjusting offline become two rows that both
+  // survive the merge; the stored column stays live for reads and recompute
+  // rebuilds it from the journal after any sync.
+  ipcMain.handle('cashBank:adjustBalance', async (_, id: string, amount: number, notes?: string) => {
     try {
       const account = await prisma.bankAccount.findUnique({
         where: { id }
@@ -176,11 +233,18 @@ export const setupCashBankHandlers = () => {
         return { success: false, error: 'Account not found' }
       }
 
-      const updated = await prisma.bankAccount.update({
-        where: { id },
-        data: {
-          currentBalance: { increment: amount }
-        }
+      const updated = await prisma.$transaction(async (tx: any) => {
+        await tx.bankTransaction.create({
+          data: {
+            bankAccountId: id,
+            amount,
+            description: notes?.trim() || 'Manual adjustment',
+          }
+        })
+        return tx.bankAccount.update({
+          where: { id },
+          data: { currentBalance: { increment: amount } }
+        })
       })
 
       return { success: true, data: updated }

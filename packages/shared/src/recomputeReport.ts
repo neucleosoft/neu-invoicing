@@ -11,6 +11,7 @@ import {
   recomputeInvoiceStates,
   recomputeBillStates,
   recomputeStock,
+  recomputeBankBalances,
   type DocState,
   type RParty,
   type RInvoice,
@@ -19,6 +20,8 @@ import {
   type RNote,
   type RItem,
   type RMovement,
+  type RBankAccount,
+  type RBankTxn,
 } from './recompute'
 
 export const RECOMPUTE_EPS = 0.01 // float tolerance for money/qty
@@ -88,6 +91,10 @@ export interface RecomputeRows {
   stockAvailable: boolean
   items: Array<RItem & { name?: string | null; currentStock: number }>
   movements: RMovement[]
+  /** Bank journals (P3). Pass empty arrays on a DB that predates the
+   *  BankTransaction table — the section then checks 0 rows and stays quiet. */
+  bankAccounts: Array<RBankAccount & { name?: string | null; currentBalance: number }>
+  bankTxns: RBankTxn[]
 }
 
 export interface RecomputeDiffResult {
@@ -96,6 +103,7 @@ export interface RecomputeDiffResult {
   invState: Map<string, DocState>
   billState: Map<string, DocState>
   stock: Map<string, number>
+  bankBal: Map<string, number>
   sections: RecomputeSection[]
   totalChanges: number
 }
@@ -103,13 +111,14 @@ export interface RecomputeDiffResult {
 // Run the shared engine over the fetched rows and diff stored vs rebuilt.
 // Pure — writes nothing; the caller applies the returned maps if it wants to.
 export function runRecomputeDiff(rows: RecomputeRows): RecomputeDiffResult {
-  const { customers, suppliers, invoices, bills, payments, notes, stockAvailable, items, movements } = rows
+  const { customers, suppliers, invoices, bills, payments, notes, stockAvailable, items, movements, bankAccounts, bankTxns } = rows
 
   const custBal = recomputeCustomerBalances(customers, invoices, payments, notes)
   const supBal = recomputeSupplierBalances(suppliers, bills, payments)
   const invState = recomputeInvoiceStates(invoices, payments, notes)
   const billState = recomputeBillStates(bills, payments)
   const stock = stockAvailable ? recomputeStock(items, movements) : new Map<string, number>()
+  const bankBal = recomputeBankBalances(bankAccounts, bankTxns)
 
   const sections: RecomputeSection[] = [
     diff('Customer balance', customers, (c) => ({ id: c.id, name: c.name || c.id }), (c) => c.currentBalance, (c) => custBal.get(c.id) ?? 0, true),
@@ -124,9 +133,12 @@ export function runRecomputeDiff(rows: RecomputeRows): RecomputeDiffResult {
   if (stockAvailable) {
     sections.push(diff('Item stock', items, (it) => ({ id: it.id, name: it.name || it.id }), (it) => it.currentStock, (it) => stock.get(it.id) ?? 0, true))
   }
+  if (bankAccounts.length > 0) {
+    sections.push(diff('Bank balance', bankAccounts, (a) => ({ id: a.id, name: a.name || a.id }), (a) => a.currentBalance, (a) => bankBal.get(a.id) ?? 0, true))
+  }
   const totalChanges = sections.reduce((s, sec) => s + sec.changes.length, 0)
 
-  return { custBal, supBal, invState, billState, stock, sections, totalChanges }
+  return { custBal, supBal, invState, billState, stock, bankBal, sections, totalChanges }
 }
 
 export function formatRecomputeReport(r: RecomputeReport): string {
