@@ -9,6 +9,7 @@ import { app, BrowserWindow, protocol } from 'electron'
 import { setupDatabase } from './database'
 import { setupAuthHandlers } from './auth'
 import { setupSyncHandlers, startBackupScheduler } from './sync'
+import { setupRowSyncHandlers } from './rowSync'
 import { setupCustomerHandlers } from './handlers/customer'
 import { setupSupplierHandlers, migrateLegacySuppliersFromParty } from './handlers/supplier'
 import { setupSupplierItemHandlers } from './handlers/supplierItem'
@@ -133,6 +134,7 @@ app.whenReady().then(async () => {
   setupPreviousInvoiceHandlers()
   setupCashBankHandlers()
   setupShareHandlers()
+  setupRowSyncHandlers()
 
   // One-shot data fix: pre-split databases held suppliers in the Customer/Party
   // table with type='SUPPLIER'. Move them into the dedicated Supplier table.

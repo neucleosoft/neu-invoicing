@@ -19,6 +19,34 @@ type SettingsTab = 'company' | 'templates' | 'tax' | 'po' | 'backup'
 const Settings = () => {
   const { company, setCompany, authStatus } = useStore()
   const { triggerBackup, isWorking: isBackingUp, conflictDialogProps } = useManualBackup()
+
+  // Row-level "Sync changes now" (S2). Separate from the whole-file backup
+  // above — this merges individual documents instead of replacing databases.
+  const [rowSyncing, setRowSyncing] = useState(false)
+  const [rowSyncSummary, setRowSyncSummary] = useState<string | null>(null)
+
+  const handleRowSync = async () => {
+    setRowSyncing(true)
+    setRowSyncSummary(null)
+    try {
+      const r = await window.electronAPI.sync.rowSyncNow()
+      if (!r.success) {
+        setRowSyncSummary(`Sync failed: ${r.error || 'unknown error'}`)
+        return
+      }
+      const bits = [
+        `pulled ${r.applied ?? 0} change${(r.applied ?? 0) === 1 ? '' : 's'}`,
+        `pushed ${r.pushedPackets ?? 0}`,
+      ]
+      if (r.localRenumbers) bits.push(`${r.localRenumbers} renumbered`)
+      if (r.recomputeChanges) bits.push(`${r.recomputeChanges} totals corrected`)
+      setRowSyncSummary(`Synced ✓ — ${bits.join(', ')}`)
+    } catch (e) {
+      setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setRowSyncing(false)
+    }
+  }
   const { connect: connectGoogle, isConnecting, dialog: connectDialog } = useConnectGoogle()
   const confirm = useConfirm()
   const [activeTab, setActiveTab] = useState<SettingsTab>('company')
@@ -680,6 +708,25 @@ const Settings = () => {
                   </div>
                 ) : (
                   <>
+                <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-2">Device Sync (beta)</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                    Exchanges individual changes with your phone through your own Google Drive.
+                    Nothing is wiped wholesale — each document merges newest-edit-wins, and every
+                    balance is rebuilt from the documents after the merge.
+                  </p>
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleRowSync}
+                    disabled={rowSyncing || isBackingUp || isRestoring}
+                  >
+                    {rowSyncing ? 'Syncing changes…' : 'Sync changes now'}
+                  </button>
+                  {rowSyncSummary && (
+                    <p className="text-xs mt-3 text-gray-700 dark:text-gray-300">{rowSyncSummary}</p>
+                  )}
+                </div>
+
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Google Drive Backup</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
