@@ -23,6 +23,10 @@ export const diaryFileName = (deviceId: string) => `changes-${deviceId}.json`
 export interface RowSyncResult {
   success: boolean
   error?: string
+  /** D6 tripwire: the pull wants to remove this many live rows — nothing was
+   *  applied or pushed; re-run with confirmRemovals after the user agrees. */
+  needsConfirmation?: boolean
+  removalsPending?: number
   pushedPackets?: number
   applied?: number
   skipped?: number

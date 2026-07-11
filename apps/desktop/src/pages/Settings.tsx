@@ -24,12 +24,38 @@ const Settings = () => {
   // above — this merges individual documents instead of replacing databases.
   const [rowSyncing, setRowSyncing] = useState(false)
   const [rowSyncSummary, setRowSyncSummary] = useState<string | null>(null)
+  const [syncActivity, setSyncActivity] = useState<
+    { at: number; kind: string; detail: string }[]
+  >([])
+
+  const refreshSyncActivity = async () => {
+    try {
+      setSyncActivity(await window.electronAPI.sync.getSyncActivityLog())
+    } catch { /* log display is best-effort */ }
+  }
 
   const handleRowSync = async () => {
     setRowSyncing(true)
     setRowSyncSummary(null)
     try {
-      const r = await window.electronAPI.sync.rowSyncNow()
+      let r = await window.electronAPI.sync.rowSyncNow()
+
+      // D6 tripwire: the pull wants to remove many live records — a human
+      // decides before anything is applied.
+      if (r.needsConfirmation) {
+        const ok = await confirm({
+          title: 'Large removal incoming',
+          message: `The other device wants to archive or cancel ${r.removalsPending} records here. Apply them? (Choose Cancel to keep everything and investigate first.)`,
+          confirmText: 'Apply removals',
+          cancelText: 'Cancel',
+        })
+        if (!ok) {
+          setRowSyncSummary(`Sync paused — ${r.removalsPending} incoming removals were NOT applied.`)
+          return
+        }
+        r = await window.electronAPI.sync.rowSyncNow(true)
+      }
+
       if (!r.success) {
         setRowSyncSummary(`Sync failed: ${r.error || 'unknown error'}`)
         return
@@ -45,10 +71,20 @@ const Settings = () => {
       setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setRowSyncing(false)
+      void refreshSyncActivity()
     }
   }
   const { connect: connectGoogle, isConnecting, dialog: connectDialog } = useConnectGoogle()
   const confirm = useConfirm()
+
+  // Sync activity receipts load once; each sync refreshes them.
+  useEffect(() => {
+    void (async () => {
+      try {
+        setSyncActivity(await window.electronAPI.sync.getSyncActivityLog())
+      } catch { /* best-effort */ }
+    })()
+  }, [])
   const [activeTab, setActiveTab] = useState<SettingsTab>('company')
   const [backupInfo, setBackupInfo] = useState<{
     cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
@@ -724,6 +760,20 @@ const Settings = () => {
                   </button>
                   {rowSyncSummary && (
                     <p className="text-xs mt-3 text-gray-700 dark:text-gray-300">{rowSyncSummary}</p>
+                  )}
+                  {syncActivity.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+                      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">
+                        Sync activity — every renumber, conflict and pause gets a receipt
+                      </div>
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {syncActivity.slice(0, 15).map((e, i) => (
+                          <div key={i} className="text-xs text-gray-600 dark:text-gray-300">
+                            {new Date(e.at).toLocaleString()} — {e.detail}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
 

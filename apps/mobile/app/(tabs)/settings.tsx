@@ -15,6 +15,7 @@ import {
   restoreFromCloud,
   type CloudBackupInfo,
 } from '@/sync/drive';
+import { getSyncActivity, type SyncActivityEntry } from '@/sync/activityLog';
 import { rowSyncNow } from '@/sync/rowSync';
 import { getOpenRouterKey, setOpenRouterKey } from '@/utils/billOcr';
 import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
@@ -203,6 +204,22 @@ export default function SettingsScreen() {
   // per-device Drive diaries (S2 row-sync). Idempotent; safe to re-tap.
   const [rowSyncing, setRowSyncing] = useState(false);
   const [rowSyncSummary, setRowSyncSummary] = useState<string | null>(null);
+  const [syncActivity, setSyncActivity] = useState<SyncActivityEntry[]>([]);
+
+  useEffect(() => {
+    getSyncActivity().then(setSyncActivity);
+  }, []);
+
+  function finishRowSync(r: Awaited<ReturnType<typeof rowSyncNow>>) {
+    if (!r.success) {
+      setRowSyncSummary(`Sync failed: ${r.error ?? 'unknown error'}`);
+      return;
+    }
+    const bits = [`pulled ${r.applied ?? 0}`, `pushed ${r.pushedPackets ?? 0}`];
+    if (r.localRenumbers) bits.push(`${r.localRenumbers} renumbered`);
+    if (r.recomputeChanges) bits.push(`${r.recomputeChanges} totals corrected`);
+    setRowSyncSummary(`Synced ✓ — ${bits.join(' · ')}`);
+  }
 
   async function handleRowSync() {
     setRowSyncing(true);
@@ -211,18 +228,47 @@ export default function SettingsScreen() {
       const fresh = await getFreshAccessToken();
       if (!fresh) throw new Error('Session expired — sign in again.');
       const r = await rowSyncNow(db, fresh);
-      if (!r.success) {
-        setRowSyncSummary(`Sync failed: ${r.error ?? 'unknown error'}`);
+
+      // D6 tripwire: the pull wants to remove many live records — a human
+      // decides before anything is applied.
+      if (r.needsConfirmation) {
+        setRowSyncing(false);
+        Alert.alert(
+          'Large removal incoming',
+          `The other device wants to archive or cancel ${r.removalsPending} records here. Apply them? (Cancel keeps everything so you can investigate first.)`,
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: () =>
+                setRowSyncSummary(`Sync paused — ${r.removalsPending} incoming removals were NOT applied.`),
+            },
+            {
+              text: 'Apply removals',
+              style: 'destructive',
+              onPress: async () => {
+                setRowSyncing(true);
+                try {
+                  finishRowSync(await rowSyncNow(db, fresh, { confirmRemovals: true }));
+                } catch (e) {
+                  setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+                } finally {
+                  setRowSyncing(false);
+                  getSyncActivity().then(setSyncActivity);
+                }
+              },
+            },
+          ],
+        );
         return;
       }
-      const bits = [`pulled ${r.applied ?? 0}`, `pushed ${r.pushedPackets ?? 0}`];
-      if (r.localRenumbers) bits.push(`${r.localRenumbers} renumbered`);
-      if (r.recomputeChanges) bits.push(`${r.recomputeChanges} totals corrected`);
-      setRowSyncSummary(`Synced ✓ — ${bits.join(' · ')}`);
+
+      finishRowSync(r);
     } catch (e) {
       setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setRowSyncing(false);
+      getSyncActivity().then(setSyncActivity);
     }
   }
 
@@ -349,6 +395,18 @@ export default function SettingsScreen() {
         {rowSyncSummary ? (
           <ThemedText style={styles.businessHint}>{rowSyncSummary}</ThemedText>
         ) : null}
+        {syncActivity.length > 0 && (
+          <View style={styles.statusBox}>
+            <ThemedText style={styles.activityTitle}>
+              Sync activity — every renumber, conflict and pause gets a receipt
+            </ThemedText>
+            {syncActivity.slice(0, 10).map((e, i) => (
+              <ThemedText key={i} style={styles.activityRow}>
+                {new Date(e.at).toLocaleString()} — {e.detail}
+              </ThemedText>
+            ))}
+          </View>
+        )}
       </ThemedView>
 
       <ThemedView style={styles.section}>
@@ -598,6 +656,8 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   healthSection: { gap: 2 },
+  activityTitle: { fontSize: 12, fontWeight: '600', opacity: 0.7 },
+  activityRow: { fontSize: 12, opacity: 0.7, lineHeight: 17 },
   healthSectionTitle: { color: '#78350f', fontSize: 13, fontWeight: '600' },
   healthChange: { color: '#92400e', fontSize: 13, lineHeight: 18 },
   healthSummary: { color: '#78350f', fontSize: 13, fontWeight: '600' },

@@ -609,9 +609,11 @@ declare global {
         }>
         upload: () => Promise<{ success: boolean; error?: string }>
         download: () => Promise<{ success: boolean; error?: string }>
-        rowSyncNow: () => Promise<{
+        rowSyncNow: (confirmRemovals?: boolean) => Promise<{
           success: boolean
           error?: string
+          needsConfirmation?: boolean
+          removalsPending?: number
           pushedPackets?: number
           applied?: number
           skipped?: number
@@ -620,6 +622,13 @@ declare global {
           recomputeChanges?: number
           log?: { kind: string; table: string; rowId: string; detail: string }[]
         }>
+        getSyncActivityLog: () => Promise<{
+          at: number
+          kind: string
+          table?: string
+          rowId?: string
+          detail: string
+        }[]>
         getBackupInfo: () => Promise<{
           cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
           thisDeviceLastUpload: string | null

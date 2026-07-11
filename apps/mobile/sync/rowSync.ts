@@ -16,6 +16,7 @@ import {
   toEpochMs,
   SYNC_DOCUMENT_TABLES,
   SYNC_SINGLE_TABLES,
+  TRIPWIRE_THRESHOLD,
   type ApplyPlan,
   type DocumentBundle,
   type LocalIndex,
@@ -25,6 +26,7 @@ import {
 import { schema, useDb } from '@/db'
 import { recomputeAll } from '@/utils/recompute'
 
+import { appendSyncActivity } from './activityLog'
 import { getDeviceId } from './deviceId'
 
 type Db = ReturnType<typeof useDb>
@@ -40,6 +42,10 @@ const diaryFileName = (deviceId: string) => `changes-${deviceId}.json`
 export interface RowSyncResult {
   success: boolean
   error?: string
+  /** D6 tripwire: the pull wants to remove this many live rows — nothing was
+   *  applied or pushed; re-run with confirmRemovals after the user agrees. */
+  needsConfirmation?: boolean
+  removalsPending?: number
   pushedPackets?: number
   applied?: number
   skipped?: number
@@ -254,7 +260,11 @@ async function downloadPeerDiaries(
 
 // ── The whole flow ───────────────────────────────────────────────────────────
 
-export async function rowSyncNow(db: Db, accessToken: string): Promise<RowSyncResult> {
+export async function rowSyncNow(
+  db: Db,
+  accessToken: string,
+  opts: { confirmRemovals?: boolean } = {},
+): Promise<RowSyncResult> {
   try {
     const deviceId = await getDeviceId()
     const now = Date.now()
@@ -274,12 +284,21 @@ export async function rowSyncNow(db: Db, accessToken: string): Promise<RowSyncRe
     if (packets.length > 0) {
       const local = await buildLocalIndex(db)
       const plan = planApply(packets, local, now)
+
+      // D6 tripwire: a pull that wants to remove many live rows pauses for a
+      // human before ANYTHING is applied or pushed.
+      if (plan.incomingRemovals >= TRIPWIRE_THRESHOLD && !opts.confirmRemovals) {
+        await appendSyncActivity([{ kind: 'TRIPWIRE_PAUSED', detail: `Incoming sync wanted to remove ${plan.incomingRemovals} records — paused for confirmation` }])
+        return { success: false, needsConfirmation: true, removalsPending: plan.incomingRemovals }
+      }
+
       await executePlan(db, plan)
       applied = plan.upserts.length
       skipped = plan.skipped.length
       localRenumbers = plan.localRenumbers.length
       removalsApplied = plan.incomingRemovals
       log = plan.log
+      await appendSyncActivity(plan.log)
 
       // Recompute ONLY when the merge changed rows. A no-op sync must not
       // silently rewrite numbers that pre-date sync — legacy drift is surfaced

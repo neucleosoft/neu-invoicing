@@ -19,7 +19,7 @@
 import { ipcMain } from 'electron'
 import { google } from 'googleapis'
 import Store from 'electron-store'
-import { parseDiary, planApply, type SyncPacket } from '@neu/shared'
+import { parseDiary, planApply, TRIPWIRE_THRESHOLD, type SyncPacket } from '@neu/shared'
 import { getOAuth2Client, isAuthError } from './auth'
 import { getPrisma } from './database'
 import { recomputeAll } from './recompute'
@@ -35,6 +35,32 @@ import {
 const store = new Store()
 
 export type { RowSyncResult }
+
+// ── Sync activity log (device-local, capped) ────────────────────────────────
+// Every conflict / renumber / sticky event / tripwire pause gets a receipt the
+// user can read in Settings (D5: quiet resolution + full receipts, no popups).
+
+const ACTIVITY_LOG_KEY = 'sync_activity_log'
+const ACTIVITY_LOG_CAP = 100
+
+export interface SyncActivityEntry {
+  at: number
+  kind: string
+  table?: string
+  rowId?: string
+  detail: string
+}
+
+const appendActivity = (entries: Omit<SyncActivityEntry, 'at'>[]) => {
+  if (entries.length === 0) return
+  const now = Date.now()
+  const existing = (store.get(ACTIVITY_LOG_KEY) as SyncActivityEntry[] | undefined) ?? []
+  const next = [...entries.map((e) => ({ at: now, ...e })), ...existing].slice(0, ACTIVITY_LOG_CAP)
+  store.set(ACTIVITY_LOG_KEY, next)
+}
+
+export const getSyncActivity = (): SyncActivityEntry[] =>
+  ((store.get(ACTIVITY_LOG_KEY) as SyncActivityEntry[] | undefined) ?? [])
 
 // ── Drive diary IO ───────────────────────────────────────────────────────────
 
@@ -82,7 +108,9 @@ async function downloadPeerDiaries(
 
 // ── The whole flow ───────────────────────────────────────────────────────────
 
-export const rowSyncNow = async (): Promise<RowSyncResult> => {
+export const rowSyncNow = async (
+  opts: { confirmRemovals?: boolean } = {},
+): Promise<RowSyncResult> => {
   if (store.get('demo_mode')) return { success: true, pushedPackets: 0, applied: 0 }
   if (!store.get('google_tokens')) return { success: false, error: 'Connect your Google account to sync.' }
 
@@ -108,12 +136,21 @@ export const rowSyncNow = async (): Promise<RowSyncResult> => {
     if (packets.length > 0) {
       const local = await buildLocalIndex(prisma)
       const plan = planApply(packets, local, now)
+
+      // D6 tripwire: a pull that wants to remove many live rows pauses for a
+      // human before ANYTHING is applied or pushed.
+      if (plan.incomingRemovals >= TRIPWIRE_THRESHOLD && !opts.confirmRemovals) {
+        appendActivity([{ kind: 'TRIPWIRE_PAUSED', detail: `Incoming sync wanted to remove ${plan.incomingRemovals} records — paused for confirmation` }])
+        return { success: false, needsConfirmation: true, removalsPending: plan.incomingRemovals }
+      }
+
       await executePlan(prisma, plan)
       applied = plan.upserts.length
       skipped = plan.skipped.length
       localRenumbers = plan.localRenumbers.length
       removalsApplied = plan.incomingRemovals
       log = plan.log
+      appendActivity(plan.log)
 
       // Recompute ONLY when the merge changed rows. A no-op sync must not
       // silently rewrite numbers that pre-date sync — legacy drift is surfaced
@@ -149,5 +186,8 @@ export const rowSyncNow = async (): Promise<RowSyncResult> => {
 }
 
 export const setupRowSyncHandlers = () => {
-  ipcMain.handle('sync:rowSyncNow', async () => rowSyncNow())
+  ipcMain.handle('sync:rowSyncNow', async (_, confirmRemovals?: boolean) =>
+    rowSyncNow({ confirmRemovals }),
+  )
+  ipcMain.handle('sync:getActivityLog', async () => getSyncActivity())
 }
