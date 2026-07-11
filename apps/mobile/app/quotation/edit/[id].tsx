@@ -61,6 +61,10 @@ export default function EditQuotationScreen() {
   const [expiryDate, setExpiryDate] = useState('')
   const [deliveryTime, setDeliveryTime] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
+  // Stored document-level discount, preserved through re-save (no input here —
+  // desktop can set it, and dropping it on a mobile edit would silently inflate
+  // the total). totalAmount = subtotal + tax − discount.
+  const [docDiscount, setDocDiscount] = useState(0)
   const [notes, setNotes] = useState('')
   const [termsConditions, setTermsConditions] = useState('')
 
@@ -89,6 +93,7 @@ export default function EditQuotationScreen() {
       setDeliveryTime(toIso(q.deliveryTime))
       setNotes(q.notes ?? '')
       setTermsConditions(q.termsConditions ?? '')
+      setDocDiscount(q.discount ?? 0)
       const [c] = await db.select().from(schema.customer).where(eq(schema.customer.id, q.customerId)).limit(1)
       setCustomer(c ?? null)
       setCustomerName(c?.name ?? 'Unknown')
@@ -106,7 +111,7 @@ export default function EditQuotationScreen() {
 
   const subtotal = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount), 0)
   const taxAmount = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100), 0)
-  const total = subtotal + taxAmount
+  const total = subtotal + taxAmount - docDiscount
 
   function pickItem(it: Item) {
     setLines([...lines, { itemId: it.id, itemName: it.name, qty: 1, rate: it.salePrice, discount: 0, taxRate: it.taxRate }])
@@ -149,6 +154,7 @@ export default function EditQuotationScreen() {
           catalogSkuHsn: cat?.skuHsn,
         }
       }),
+      docDiscount,
     })
 
     setSaving(true)

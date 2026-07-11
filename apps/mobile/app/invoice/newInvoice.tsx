@@ -94,6 +94,10 @@ export default function NewInvoiceScreen() {
   const [invoiceDate, setInvoiceDate] = useState(todayIso())
   const [dueDate, setDueDate] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
+  // Document-level discount, subtracted from the grand total AFTER tax (mirrors
+  // desktop: totalAmount = subtotal + tax − discount). Separate from the per-line
+  // discounts, which reduce each line's taxable base.
+  const [docDiscount, setDocDiscount] = useState('0')
   const [amountPaid, setAmountPaid] = useState('0')
   const [paymentMode, setPaymentMode] = useState<PaymentModeOption>('CASH')
   const [notes, setNotes] = useState('')
@@ -138,7 +142,8 @@ export default function NewInvoiceScreen() {
     (s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100),
     0,
   )
-  const total = subtotal + taxAmount
+  const discount = parseFloat(docDiscount) || 0
+  const total = subtotal + taxAmount - discount
   // The Status drives the paid amount (mirrors desktop): Paid = full total, Partial =
   // the entered amount, Unpaid/Overdue = nothing paid — so the label can never
   // contradict the money.
@@ -225,6 +230,7 @@ export default function NewInvoiceScreen() {
             catalogSkuHsn: cat?.skuHsn,
           }
         }),
+        docDiscount: discount,
       })
 
       // Everything below is one transaction so the invoice, its lines, the
@@ -249,6 +255,7 @@ export default function NewInvoiceScreen() {
             invoiceDate: invDate,
             dueDate: due,
             subtotal: gst.subtotal,
+            discount,
             taxAmount: gst.taxAmount,
             totalAmount: gst.totalAmount,
             amountPaid: 0,
@@ -507,6 +514,17 @@ export default function NewInvoiceScreen() {
         <View style={styles.totalsRow}>
           <Text style={[Type.body, { color: c.muted }]}>Tax</Text>
           <Text style={[Type.body, { color: c.text }]}>₹{taxAmount.toFixed(2)}</Text>
+        </View>
+        <View style={styles.totalsRow}>
+          <Text style={[Type.body, { color: c.muted }]}>Discount</Text>
+          <TextInput
+            style={[styles.discountInput, { backgroundColor: c.surfaceAlt, borderColor: c.border, color: c.text }]}
+            value={docDiscount}
+            onChangeText={setDocDiscount}
+            keyboardType="numeric"
+            placeholder="0"
+            placeholderTextColor={c.muted}
+          />
         </View>
         <View style={styles.totalsRow}>
           <Text style={[Type.bodySemibold, { color: c.text }]}>Total</Text>
@@ -832,6 +850,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.sm,
     fontSize: 15,
+  },
+  discountInput: {
+    borderWidth: 1,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    fontSize: 15,
+    minWidth: 90,
+    textAlign: 'right',
   },
   lineAmountRow: {
     flexDirection: 'row',

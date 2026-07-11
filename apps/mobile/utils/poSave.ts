@@ -83,6 +83,7 @@ async function computePoGst(
   tx: any,
   supplierId: string,
   resolved: { supplierItem: any; line: PoLineInput }[],
+  docDiscount?: number,
 ) {
   const [company] = await tx.select().from(schema.company).limit(1)
   const [supplier] = await tx
@@ -107,6 +108,7 @@ async function computePoGst(
       hsnCode: line.hsnCode,
       catalogHsnCode: supplierItem?.hsnCode,
     })),
+    docDiscount: docDiscount || 0,
   })
 }
 
@@ -187,7 +189,9 @@ export async function updatePurchaseOrder(db: Db, id: string, header: PoHeaderIn
       resolved.push({ supplierItem: si, line })
     }
 
-    const gst = await computePoGst(tx, header.supplierId, resolved)
+    // Preserve the stored document-level discount through the recompute (desktop
+    // can set it; dropping it here would silently inflate the PO total).
+    const gst = await computePoGst(tx, header.supplierId, resolved, existing.discount ?? 0)
 
     await tx.delete(schema.purchaseOrderItem).where(eq(schema.purchaseOrderItem.purchaseOrderId, id))
     await tx

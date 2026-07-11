@@ -89,6 +89,10 @@ export default function EditInvoiceScreen() {
   const [invoiceDate, setInvoiceDate] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
+  // Document-level discount (totalAmount = subtotal + tax − discount, mirrors
+  // desktop). Loaded from the stored invoice so an edit never silently drops a
+  // discount that was applied on the other device.
+  const [docDiscount, setDocDiscount] = useState('0')
   const [notes, setNotes] = useState('')
   const [termsConditions, setTermsConditions] = useState('')
 
@@ -144,6 +148,7 @@ export default function EditInvoiceScreen() {
         allowed.includes(inv.status) ? (inv.status as StatusOption) : 'DRAFT',
       )
       setAmountPaidInput(String(inv.amountPaid ?? 0))
+      setDocDiscount(String(inv.discount ?? 0))
       setInvoiceDate(toIsoDate(inv.invoiceDate))
       setDueDate(toIsoDate(inv.dueDate))
       setNotes(inv.notes ?? '')
@@ -190,7 +195,8 @@ export default function EditInvoiceScreen() {
     (s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100),
     0,
   )
-  const total = subtotal + taxAmount
+  const discount = parseFloat(docDiscount) || 0
+  const total = subtotal + taxAmount - discount
   // Amount Paid is editable, driven by the Status (mirrors desktop): Paid = full
   // total, Partial = the entered amount, Unpaid/Overdue = nothing paid — so the label
   // can never contradict the money.
@@ -288,6 +294,7 @@ export default function EditInvoiceScreen() {
           catalogSkuHsn: cat?.skuHsn,
         }
       }),
+      docDiscount: discount,
     })
 
     setSaving(true)
@@ -337,6 +344,7 @@ export default function EditInvoiceScreen() {
             invoiceDate: invDate,
             dueDate: due,
             subtotal: gst.subtotal,
+            discount,
             taxAmount: gst.taxAmount,
             totalAmount: gst.totalAmount,
             amountPaid: paid,
@@ -616,6 +624,17 @@ export default function EditInvoiceScreen() {
         <View style={styles.totalsRow}>
           <ThemedText>Tax</ThemedText>
           <ThemedText>₹{taxAmount.toFixed(2)}</ThemedText>
+        </View>
+        <View style={styles.totalsRow}>
+          <ThemedText>Discount</ThemedText>
+          <TextInput
+            style={styles.discountInput}
+            value={docDiscount}
+            onChangeText={setDocDiscount}
+            keyboardType="numeric"
+            placeholder="0"
+            placeholderTextColor="#999"
+          />
         </View>
         <View style={styles.totalsRow}>
           <ThemedText type="defaultSemiBold">Total</ThemedText>
@@ -935,6 +954,18 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#000',
     backgroundColor: '#fff',
+  },
+  discountInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    fontSize: 15,
+    color: '#000',
+    backgroundColor: '#fff',
+    minWidth: 90,
+    textAlign: 'right',
   },
   lineAmountRow: {
     flexDirection: 'row',
