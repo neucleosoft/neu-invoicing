@@ -15,11 +15,12 @@ import {
   restoreFromCloud,
   type CloudBackupInfo,
 } from '@/sync/drive';
+import { rowSyncNow } from '@/sync/rowSync';
 import { getOpenRouterKey, setOpenRouterKey } from '@/utils/billOcr';
 import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
 
 export default function SettingsScreen() {
-  const { user, accessToken, signOut, signIn } = useAuth();
+  const { user, accessToken, getFreshAccessToken, signOut, signIn } = useAuth();
   const liveDb = useSQLiteContext();
   const db = useDb();
 
@@ -71,6 +72,8 @@ export default function SettingsScreen() {
 
   // Auto-load cloud backup status when the screen opens so the user sees
   // "Last cloud backup: <date>" without having to tap anything first.
+  // getFreshAccessToken silently renews an expired badge, so this works days
+  // after sign-in instead of only within the first hour.
   useEffect(() => {
     if (!accessToken) {
       setBackupLoading(false);
@@ -79,7 +82,9 @@ export default function SettingsScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const info = await checkCloudBackup(accessToken);
+        const fresh = await getFreshAccessToken();
+        if (!fresh) throw new Error('Session expired — sign in again.');
+        const info = await checkCloudBackup(fresh);
         if (!cancelled) setBackupInfo(info);
       } catch (e) {
         if (!cancelled) setBackupError(e instanceof Error ? e.message : String(e));
@@ -90,7 +95,7 @@ export default function SettingsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [accessToken, getFreshAccessToken]);
 
   function formatBackupDate(iso: string): string {
     return new Date(iso).toLocaleString(undefined, {
@@ -125,7 +130,9 @@ export default function SettingsScreen() {
           onPress: async () => {
             setRestoring(true);
             try {
-              await restoreFromCloud(accessToken, liveDb);
+              const fresh = await getFreshAccessToken();
+              if (!fresh) throw new Error('Session expired — sign in again.');
+              await restoreFromCloud(fresh, liveDb);
               DevSettings.reload();
             } catch (e) {
               setRestoring(false);
@@ -143,7 +150,9 @@ export default function SettingsScreen() {
     if (!accessToken) return;
     setBackingUp(true);
     try {
-      const info = await backupToCloud(accessToken, liveDb);
+      const fresh = await getFreshAccessToken();
+      if (!fresh) throw new Error('Session expired — sign in again.');
+      const info = await backupToCloud(fresh, liveDb);
       setBackupInfo(info);
       setBackupError(null);
       Alert.alert('Backed up', 'Your data is safely in Google Drive.');
@@ -165,7 +174,9 @@ export default function SettingsScreen() {
     }
     setBackingUp(true);
     try {
-      const fresh = await checkCloudBackup(accessToken);
+      const token = await getFreshAccessToken();
+      if (!token) throw new Error('Session expired — sign in again.');
+      const fresh = await checkCloudBackup(token);
       const cloudAhead = await cloudIsAheadOfThisDevice(fresh);
       setBackingUp(false);
 
@@ -185,6 +196,33 @@ export default function SettingsScreen() {
     } catch (e) {
       setBackingUp(false);
       Alert.alert('Backup failed', e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  // Device Sync — exchanges individual document changes with the desktop via
+  // per-device Drive diaries (S2 row-sync). Idempotent; safe to re-tap.
+  const [rowSyncing, setRowSyncing] = useState(false);
+  const [rowSyncSummary, setRowSyncSummary] = useState<string | null>(null);
+
+  async function handleRowSync() {
+    setRowSyncing(true);
+    setRowSyncSummary(null);
+    try {
+      const fresh = await getFreshAccessToken();
+      if (!fresh) throw new Error('Session expired — sign in again.');
+      const r = await rowSyncNow(db, fresh);
+      if (!r.success) {
+        setRowSyncSummary(`Sync failed: ${r.error ?? 'unknown error'}`);
+        return;
+      }
+      const bits = [`pulled ${r.applied ?? 0}`, `pushed ${r.pushedPackets ?? 0}`];
+      if (r.localRenumbers) bits.push(`${r.localRenumbers} renumbered`);
+      if (r.recomputeChanges) bits.push(`${r.recomputeChanges} totals corrected`);
+      setRowSyncSummary(`Synced ✓ — ${bits.join(' · ')}`);
+    } catch (e) {
+      setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRowSyncing(false);
     }
   }
 
@@ -293,6 +331,24 @@ export default function SettingsScreen() {
           </View>
           <ThemedText style={styles.businessChevron}>›</ThemedText>
         </Pressable>
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Device Sync (beta)</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Exchanges individual changes with your desktop through your Google Drive — nothing
+          is wiped wholesale, and every total is rebuilt from the documents after the merge.
+        </ThemedText>
+        <Button
+          title="Sync changes now"
+          variant="primary"
+          onPress={handleRowSync}
+          loading={rowSyncing}
+          disabled={!accessToken || backingUp || restoring}
+        />
+        {rowSyncSummary ? (
+          <ThemedText style={styles.businessHint}>{rowSyncSummary}</ThemedText>
+        ) : null}
       </ThemedView>
 
       <ThemedView style={styles.section}>
