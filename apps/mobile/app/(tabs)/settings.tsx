@@ -16,6 +16,7 @@ import {
   type CloudBackupInfo,
 } from '@/sync/drive';
 import { getOpenRouterKey, setOpenRouterKey } from '@/utils/billOcr';
+import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
 
 export default function SettingsScreen() {
   const { user, accessToken, signOut, signIn } = useAuth();
@@ -187,6 +188,59 @@ export default function SettingsScreen() {
     }
   }
 
+  // Data Health — run the shared recompute engine as a dry run and show what differs.
+  // Checking never writes; "Fix now" applies the rebuilt numbers after a confirm.
+  const [healthReport, setHealthReport] = useState<RecomputeReport | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [fixing, setFixing] = useState(false);
+
+  async function handleHealthCheck() {
+    setChecking(true);
+    try {
+      setHealthReport(await recomputeAll(db));
+    } catch (e) {
+      Alert.alert('Check failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  function handleHealthFix() {
+    const n = healthReport?.totalChanges ?? 0;
+    if (n === 0) return;
+    Alert.alert(
+      'Fix these numbers?',
+      `${n} stored ${n === 1 ? 'number' : 'numbers'} will be rewritten to match your documents. Your invoices, payments and notes themselves are never touched.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Fix now',
+          onPress: async () => {
+            setFixing(true);
+            try {
+              await recomputeAll(db, { apply: true });
+              // Re-check so the box below reflects the fresh state, not the stale diff.
+              setHealthReport(await recomputeAll(db));
+              Alert.alert('Fixed', `${n} ${n === 1 ? 'number' : 'numbers'} corrected.`);
+            } catch (e) {
+              Alert.alert('Fix failed', e instanceof Error ? e.message : String(e));
+            } finally {
+              setFixing(false);
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  // Stock counts are quantities, not rupees.
+  function fmtHealthValue(v: number | string, sectionTitle: string): string {
+    if (typeof v !== 'number') return v;
+    return sectionTitle === 'Item stock' ? String(v) : `₹${v.toFixed(2)}`;
+  }
+
+  const healthChecked = healthReport?.sections.reduce((sum, s) => sum + s.checked, 0) ?? 0;
+
   function handleSignOut() {
     Alert.alert('Sign out?', 'You will need to sign in again to use the app.', [
       { text: 'Cancel', style: 'cancel' },
@@ -304,6 +358,73 @@ export default function SettingsScreen() {
       </ThemedView>
 
       <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Data Health</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Rebuilds every balance, invoice status and stock count from your documents and
+          compares them to what&apos;s stored. Checking changes nothing.
+        </ThemedText>
+
+        <Button
+          title="Check my numbers"
+          variant="secondary"
+          onPress={handleHealthCheck}
+          loading={checking}
+          disabled={fixing}
+        />
+
+        {healthReport && !healthReport.stockAvailable && (
+          <ThemedText style={styles.businessHint}>
+            Stock was skipped — this database hasn&apos;t been migrated yet.
+          </ThemedText>
+        )}
+
+        {healthReport && healthReport.totalChanges === 0 && (
+          <View style={styles.healthOkBox}>
+            <ThemedText style={styles.healthOkText}>
+              ✓ All {healthChecked} numbers match your documents.
+            </ThemedText>
+          </View>
+        )}
+
+        {healthReport && healthReport.totalChanges > 0 && (
+          <>
+            <View style={styles.healthDriftBox}>
+              {healthReport.sections
+                .filter((s) => s.changes.length > 0)
+                .map((s) => (
+                  <View key={s.title} style={styles.healthSection}>
+                    <ThemedText style={styles.healthSectionTitle}>{s.title}</ThemedText>
+                    {s.changes.slice(0, 5).map((ch) => (
+                      <ThemedText key={ch.id} style={styles.healthChange}>
+                        {ch.name}: {fmtHealthValue(ch.stored, s.title)} →{' '}
+                        {fmtHealthValue(ch.rebuilt, s.title)}
+                      </ThemedText>
+                    ))}
+                    {s.changes.length > 5 && (
+                      <ThemedText style={styles.healthChange}>
+                        …and {s.changes.length - 5} more
+                      </ThemedText>
+                    )}
+                  </View>
+                ))}
+              <ThemedText style={styles.healthSummary}>
+                {healthReport.totalChanges}{' '}
+                {healthReport.totalChanges === 1 ? 'difference' : 'differences'} found. Fixing
+                rewrites only these stored totals — never your documents.
+              </ThemedText>
+            </View>
+            <Button
+              title="Fix now"
+              variant="danger"
+              onPress={handleHealthFix}
+              loading={fixing}
+              disabled={checking}
+            />
+          </>
+        )}
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
         <ThemedText type="subtitle">AI Bill Scan</ThemedText>
         <ThemedText style={styles.aiHint}>
           Optional. Add a free OpenRouter API key to scan a photo of a supplier
@@ -404,6 +525,26 @@ const styles = StyleSheet.create({
   },
   signOutText: { color: '#dc2626', fontWeight: '600' },
   error: { color: 'red' },
+  healthOkBox: {
+    backgroundColor: '#f0fdf4',
+    borderLeftWidth: 3,
+    borderLeftColor: '#16a34a',
+    padding: 12,
+    borderRadius: 4,
+  },
+  healthOkText: { color: '#14532d', fontSize: 13 },
+  healthDriftBox: {
+    backgroundColor: '#fffbeb',
+    borderLeftWidth: 3,
+    borderLeftColor: '#d97706',
+    padding: 12,
+    borderRadius: 4,
+    gap: 10,
+  },
+  healthSection: { gap: 2 },
+  healthSectionTitle: { color: '#78350f', fontSize: 13, fontWeight: '600' },
+  healthChange: { color: '#92400e', fontSize: 13, lineHeight: 18 },
+  healthSummary: { color: '#78350f', fontSize: 13, fontWeight: '600' },
   aiHint: { fontSize: 13, opacity: 0.7, lineHeight: 19 },
   keyInput: {
     borderWidth: 1,
