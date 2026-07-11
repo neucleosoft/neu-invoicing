@@ -3,6 +3,7 @@ export * from './gstValidation'
 export * from './gstCompute'
 export * from './paymentLogic'
 export * from './recompute'
+export * from './recomputeReport'
 export * from './convertToInvoice'
 export * from './pdf'
 

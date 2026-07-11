@@ -1,86 +1,30 @@
 // In-app recompute pass — the shared engine, wired to this app's Prisma database.
 //
-// Fetches every raw row, rebuilds all running numbers with the SHARED engine
-// (packages/shared/src/recompute.ts), and compares them to what's stored. DRY RUN by
-// default: it reports what WOULD change and writes nothing. With { apply: true } it writes
-// the rebuilt numbers back in one transaction.
+// Fetches every raw row, hands them to the SHARED diff plumbing
+// (packages/shared/src/recomputeReport.ts → recompute.ts), and writes the rebuilt
+// numbers back on { apply: true }. Everything except the Prisma fetch/write lives
+// in @neu/shared, so desktop and mobile compute — and REPORT — identically.
 //
-// This is the exact call the sync transport runs after a merge ("recompute after merge").
-// Building + proving it here, in isolation, de-risks that step.
+// This is the exact call the sync transport runs after a merge ("recompute after
+// merge"). DRY RUN by default: reports what WOULD change and writes nothing.
 //
-// SAFETY: recompute is only as honest as the documents. If a document lies (e.g. an invoice
-// marked unpaid that was really paid), the rebuild faithfully reproduces the lie. Always read
-// the dry-run diff and fix dirty documents BEFORE you ever pass { apply: true }.
+// SAFETY: recompute is only as honest as the documents. If a document lies (e.g.
+// an invoice marked unpaid that was really paid), the rebuild faithfully
+// reproduces the lie. Always read the dry-run diff and fix dirty documents BEFORE
+// you ever pass { apply: true }.
 
 import type { PrismaClient } from '@prisma/client'
 import {
-  recomputeCustomerBalances,
-  recomputeSupplierBalances,
-  recomputeInvoiceStates,
-  recomputeBillStates,
-  recomputeStock,
-  type RParty,
-  type RInvoice,
-  type RBill,
-  type RPayment,
-  type RNote,
-  type RItem,
-  type RMovement,
+  RECOMPUTE_EPS as EPS,
+  benignStatus,
+  formatRecomputeReport,
+  round2,
+  runRecomputeDiff,
+  type RecomputeReport,
 } from '@neu/shared'
 
-const EPS = 0.01 // float tolerance for money/qty
-const round2 = (n: number) => Math.round(n * 100) / 100
-const money = (n: number) => `₹${(n ?? 0).toFixed(2)}`
-
-export interface Change {
-  id: string
-  name: string
-  stored: number | string
-  rebuilt: number | string
-}
-export interface RecomputeSection {
-  title: string
-  checked: number
-  changes: Change[]
-}
-export interface RecomputeReport {
-  applied: boolean
-  stockAvailable: boolean
-  sections: RecomputeSection[]
-  totalChanges: number
-}
-
-// Compare stored vs rebuilt over a set of rows; collect only the ones that differ.
-// `benign` lets a section ignore a difference that's expected and not real drift
-// (e.g. status OVERDUE → DRAFT, since OVERDUE is a display-only label the engine drops).
-function diff<T>(
-  title: string,
-  rows: T[],
-  labelOf: (r: T) => { id: string; name: string },
-  storedOf: (r: T) => number | string,
-  rebuiltOf: (r: T) => number | string,
-  isMoney: boolean,
-  benign?: (stored: number | string, rebuilt: number | string) => boolean,
-): RecomputeSection {
-  const changes: Change[] = []
-  for (const r of rows) {
-    const stored = storedOf(r)
-    const rebuilt = rebuiltOf(r)
-    const differs = isMoney
-      ? Math.abs((stored as number) - (rebuilt as number)) > EPS
-      : stored !== rebuilt
-    if (differs && !benign?.(stored, rebuilt)) {
-      const { id, name } = labelOf(r)
-      changes.push({ id, name, stored, rebuilt })
-    }
-  }
-  return { title, checked: rows.length, changes }
-}
-
-// OVERDUE is derived at display time from the due date, not stored truth — the engine
-// normalises it back to DRAFT. So a stored OVERDUE rebuilding to DRAFT is not drift.
-const benignStatus = (stored: number | string, rebuilt: number | string) =>
-  stored === 'OVERDUE' && rebuilt === 'DRAFT'
+export { formatRecomputeReport }
+export type { RecomputeReport }
 
 export async function recomputeAll(
   prisma: PrismaClient,
@@ -110,28 +54,10 @@ export async function recomputeAll(
     stockAvailable = false
   }
 
-  // --- run the shared engine -------------------------------------------------------
-  const custBal = recomputeCustomerBalances(customers as RParty[], invoices as RInvoice[], payments as RPayment[], notes as RNote[])
-  const supBal = recomputeSupplierBalances(suppliers as RParty[], bills as RBill[], payments as RPayment[])
-  const invState = recomputeInvoiceStates(invoices as RInvoice[], payments as RPayment[], notes as RNote[])
-  const billState = recomputeBillStates(bills as RBill[], payments as RPayment[])
-  const stock = stockAvailable ? recomputeStock(items as RItem[], movements as RMovement[]) : new Map<string, number>()
-
-  // --- diff stored vs rebuilt ------------------------------------------------------
-  const sections: RecomputeSection[] = [
-    diff('Customer balance', customers, (c) => ({ id: c.id, name: c.name || c.id }), (c) => c.currentBalance, (c) => custBal.get(c.id) ?? 0, true),
-    diff('Supplier balance', suppliers, (s) => ({ id: s.id, name: s.name || s.id }), (s) => s.currentBalance, (s) => supBal.get(s.id) ?? 0, true),
-    diff('Invoice amountPaid', invoices, (i) => ({ id: i.id, name: i.invoiceNumber || i.id }), (i) => i.amountPaid, (i) => invState.get(i.id)?.amountPaid ?? 0, true),
-    diff('Invoice balanceDue', invoices, (i) => ({ id: i.id, name: i.invoiceNumber || i.id }), (i) => i.balanceDue, (i) => invState.get(i.id)?.balanceDue ?? 0, true),
-    diff('Invoice status', invoices, (i) => ({ id: i.id, name: i.invoiceNumber || i.id }), (i) => i.status, (i) => invState.get(i.id)?.status ?? i.status, false, benignStatus),
-    diff('Bill amountPaid', bills, (b) => ({ id: b.id, name: b.billNumber || b.id }), (b) => b.amountPaid, (b) => billState.get(b.id)?.amountPaid ?? 0, true),
-    diff('Bill balanceDue', bills, (b) => ({ id: b.id, name: b.billNumber || b.id }), (b) => b.balanceDue, (b) => billState.get(b.id)?.balanceDue ?? 0, true),
-    diff('Bill status', bills, (b) => ({ id: b.id, name: b.billNumber || b.id }), (b) => b.status, (b) => billState.get(b.id)?.status ?? b.status, false),
-  ]
-  if (stockAvailable) {
-    sections.push(diff('Item stock', items, (it) => ({ id: it.id, name: it.name || it.id }), (it) => it.currentStock, (it) => stock.get(it.id) ?? 0, true))
-  }
-  const totalChanges = sections.reduce((s, sec) => s + sec.changes.length, 0)
+  // --- shared engine + diff (packages/shared) ---------------------------------------
+  const { custBal, supBal, invState, billState, stock, sections, totalChanges } = runRecomputeDiff({
+    customers, suppliers, invoices, bills, payments, notes, stockAvailable, items, movements,
+  })
 
   // --- write back (only on apply) --------------------------------------------------
   if (apply && totalChanges > 0) {
@@ -167,20 +93,4 @@ export async function recomputeAll(
   }
 
   return { applied: apply, stockAvailable, sections, totalChanges }
-}
-
-export function formatRecomputeReport(r: RecomputeReport): string {
-  const lines: string[] = []
-  lines.push(`=== Recompute ${r.applied ? 'APPLY' : 'DRY RUN'} ===`)
-  if (!r.stockAvailable) lines.push(`(item stock skipped — openingStock column not on this DB yet)`)
-  const fmt = (v: number | string) => (typeof v === 'number' ? money(v) : v)
-  for (const s of r.sections) {
-    const verb = r.applied ? 'changed' : 'would change'
-    lines.push(`\n${s.title}: ${s.checked} checked · ${s.changes.length} ${verb}`)
-    for (const c of s.changes.slice(0, 25)) lines.push(`   ✗ ${c.name}: ${fmt(c.stored)} → ${fmt(c.rebuilt)}`)
-    if (s.changes.length > 25) lines.push(`   … and ${s.changes.length - 25} more`)
-  }
-  const tail = r.applied ? `${r.totalChanges} rows written` : `${r.totalChanges} differences (dry run — nothing written)`
-  lines.push(`\n--- ${tail} ---`)
-  return lines.join('\n')
 }
