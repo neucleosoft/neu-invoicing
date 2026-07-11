@@ -14,10 +14,13 @@
 import { useEffect, useRef } from 'react'
 import { AppState } from 'react-native'
 import * as SecureStore from 'expo-secure-store'
+import { useSQLiteContext } from 'expo-sqlite'
 
 import { useAuth } from '@/auth'
 import { useDb } from '@/db'
 
+import { runLadderIfDue } from './ladder'
+import { purgeArchivedDocs } from './purge'
 import { rowSyncNow } from './rowSync'
 
 export const LAST_ROW_SYNC_KEY = 'neu.sync.lastRowSyncAt'
@@ -29,6 +32,7 @@ const FIRST_RUN_DELAY_MS = 15_000
 
 export function AutoSync() {
   const db = useDb()
+  const liveDb = useSQLiteContext()
   const { user, offlineMode, getFreshAccessToken } = useAuth()
   const inFlight = useRef(false)
 
@@ -47,6 +51,11 @@ export function AutoSync() {
         if (r.success) {
           await SecureStore.setItemAsync(LAST_ROW_SYNC_KEY, String(Date.now()))
         }
+        // Housekeeping riding the same tick, both internally throttled and
+        // silent: the backup ladder (~6h checks) and the 21-day archive purge
+        // (~daily). Insurance and hygiene — never gates.
+        await runLadderIfDue(liveDb, token)
+        await purgeArchivedDocs(db, token)
       } catch {
         // transient/offline — auto-sync never surfaces errors
       } finally {
@@ -68,7 +77,7 @@ export function AutoSync() {
       clearInterval(interval)
       sub.remove()
     }
-  }, [db, user, offlineMode, getFreshAccessToken])
+  }, [db, liveDb, user, offlineMode, getFreshAccessToken])
 
   return null
 }

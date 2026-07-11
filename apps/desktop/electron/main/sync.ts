@@ -648,11 +648,15 @@ const runLadderIfDue = async () => {
       const res = await drive.files.list({
         spaces: 'appDataFolder',
         q: `name='${slot.name}' and trashed=false`,
-        fields: 'files(id,modifiedTime)',
+        fields: 'files(id,modifiedTime,size)',
         pageSize: 1,
       })
       const f = res.data.files?.[0]
-      const age = f?.modifiedTime ? now - new Date(f.modifiedTime).getTime() : Infinity
+      // A 0-byte slot (failed two-step upload from the phone) counts as missing.
+      const age =
+        f?.modifiedTime && Number(f.size ?? 0) > 0
+          ? now - new Date(f.modifiedTime).getTime()
+          : Infinity
       if (age >= slot.minAgeMs) due.push({ name: slot.name, fileId: f?.id ?? undefined })
     }
     if (due.length === 0) return

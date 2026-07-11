@@ -285,6 +285,102 @@ async function fetchBillImage(billId: string): Promise<{ success: boolean; error
   }
 }
 
+// ── 21-day purge (design R8/D10) ────────────────────────────────────────────
+// Archived (Mode A) DOCUMENTS past the window are hard-deleted locally for
+// real; both devices converge on their own (shared deletedAt, no sync needed).
+// Deliberately narrowed for safety — see apps/mobile/sync/purge.ts for the
+// full rationale: 35 days (not 21) because diaries re-offer rows for 30 days
+// and an earlier purge would be resurrected by a stale packet; documents only
+// (masters stay archived — tiny rows, heavy FK fan-in); conversion-referenced
+// docs are skipped; cancelled money docs are NEVER purged (GST audit trail).
+
+const PURGE_AFTER_MS = 35 * 24 * 60 * 60 * 1000
+const PURGE_THROTTLE_MS = 24 * 60 * 60 * 1000
+const LAST_PURGE_KEY = 'last_purge_check_at'
+
+async function purgeArchivedDocs(drive: any): Promise<void> {
+  try {
+    const now = Date.now()
+    const last = store.get(LAST_PURGE_KEY) as number | undefined
+    if (last && now - last < PURGE_THROTTLE_MS) return
+    store.set(LAST_PURGE_KEY, now)
+
+    const prisma = getPrisma()
+    const cutoff = new Date(now - PURGE_AFTER_MS)
+    let purged = 0
+
+    const quotes = await prisma.quotation.findMany({
+      where: { deletedAt: { not: null, lte: cutoff } },
+      select: { id: true },
+    })
+    for (const q of quotes) {
+      const ref = await prisma.salesInvoice.count({ where: { convertedFromQuotationId: q.id } })
+      if (ref > 0) continue
+      await prisma.$transaction([
+        prisma.quotationItem.deleteMany({ where: { quotationId: q.id } }),
+        prisma.quotation.delete({ where: { id: q.id } }),
+      ])
+      purged++
+    }
+
+    const proformas = await prisma.proformaInvoice.findMany({
+      where: { deletedAt: { not: null, lte: cutoff } },
+      select: { id: true },
+    })
+    for (const p of proformas) {
+      const ref = await prisma.salesInvoice.count({ where: { convertedFromProformaId: p.id } })
+      if (ref > 0) continue
+      await prisma.$transaction([
+        prisma.proformaInvoiceItem.deleteMany({ where: { proformaInvoiceId: p.id } }),
+        prisma.proformaInvoice.delete({ where: { id: p.id } }),
+      ])
+      purged++
+    }
+
+    const pos = await prisma.purchaseOrder.findMany({
+      where: { deletedAt: { not: null, lte: cutoff } },
+      select: { id: true },
+    })
+    for (const po of pos) {
+      const ref = await prisma.purchaseBill.count({ where: { purchaseOrderId: po.id } })
+      if (ref > 0) continue
+      await prisma.$transaction([
+        prisma.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: po.id } }),
+        prisma.purchaseOrder.delete({ where: { id: po.id } }),
+      ])
+      purged++
+    }
+
+    const prevs = await prisma.previousInvoice.findMany({
+      where: { deletedAt: { not: null, lte: cutoff } },
+      select: { id: true },
+    })
+    for (const pi of prevs) {
+      await prisma.$transaction([
+        prisma.previousInvoiceItem.deleteMany({ where: { previousInvoiceId: pi.id } }),
+        prisma.previousInvoice.delete({ where: { id: pi.id } }),
+      ])
+      purged++
+      // Free the archived file's Drive object — best-effort.
+      try {
+        const found = await findDriveImage(drive, previousInvoiceFileName(pi.id))
+        if (found) await drive.files.delete({ fileId: found.id })
+      } catch { /* the next purge run (or the other device) retries */ }
+    }
+
+    if (purged > 0) {
+      appendActivity([
+        {
+          kind: 'PURGE',
+          detail: `Purged ${purged} archived document(s) deleted more than 35 days ago (${new Date(now).toDateString()})`,
+        },
+      ])
+    }
+  } catch (e) {
+    console.error('[purge] failed, app continues:', e)
+  }
+}
+
 // ── The whole flow ───────────────────────────────────────────────────────────
 
 export const rowSyncNow = async (
@@ -402,6 +498,12 @@ const autoTick = async () => {
   if (!r.success && r.error && !r.needsConfirmation && r.error !== 'Sync is already running.') {
     console.log('[rowSync auto] skipped:', r.error)
   }
+  // Housekeeping riding the same tick, internally throttled to ~daily.
+  try {
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    await purgeArchivedDocs(drive)
+  } catch { /* hygiene only */ }
 }
 
 export const startRowSyncScheduler = () => {
