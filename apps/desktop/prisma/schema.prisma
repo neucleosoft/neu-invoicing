@@ -523,6 +523,7 @@ model PaymentTransaction {
   purchaseBill   PurchaseBill? @relation(fields: [purchaseBillId], references: [id])
   notes          String?
   createdAt      DateTime      @default(now())
+  updatedAt      DateTime?     @updatedAt // nullable: SQLite ADD COLUMN can't take now(); legacy rows backfilled to createdAt. Needed so payment edits can sync newest-wins.
 }
 
 // Stock Movement Audit Log

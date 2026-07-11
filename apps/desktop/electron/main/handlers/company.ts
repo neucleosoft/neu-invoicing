@@ -1,7 +1,41 @@
-import { ipcMain, dialog, app } from "electron";
+import { ipcMain, dialog } from "electron";
 import { getPrisma } from "../database";
 import fs from "fs";
 import path from "path";
+
+// One-shot data fix: convert a filesystem logoPath/signaturePath into an inline
+// base64 data URL so the image lives inside the DB — and therefore inside every
+// backup (a path under userData was never backed up, and dies on any other
+// machine). Idempotent: data: values and missing files are left alone.
+export async function backfillInlineImages(): Promise<void> {
+  const prisma = getPrisma();
+  try {
+    const company = await prisma.company.findFirst();
+    if (!company) return;
+
+    const inline = (p: string | null): string | null => {
+      if (!p || p.startsWith("data:") || !fs.existsSync(p)) return null;
+      const ext = path.extname(p).toLowerCase();
+      const mime = ext === ".png" ? "image/png" : "image/jpeg";
+      return `data:${mime};base64,${fs.readFileSync(p).toString("base64")}`;
+    };
+
+    const logo = inline(company.logoPath);
+    const sign = inline(company.signaturePath);
+    if (!logo && !sign) return;
+
+    await prisma.company.update({
+      where: { id: company.id },
+      data: {
+        ...(logo ? { logoPath: logo } : {}),
+        ...(sign ? { signaturePath: sign } : {}),
+      },
+    });
+    console.log("[inlineImageBackfill] converted stored image path(s) to inline data URLs");
+  } catch (e) {
+    console.error("[inlineImageBackfill] failed, app continues:", e);
+  }
+}
 
 export const setupCompanyHandlers = () => {
   const prisma = getPrisma();
@@ -109,21 +143,15 @@ export const setupCompanyHandlers = () => {
 
       const sourcePath = result.filePaths[0];
 
-      const uploadsDir = path.join(app.getPath("userData"), "uploads");
-
-      if (!fs.existsSync(uploadsDir)) {
-        fs.mkdirSync(uploadsDir, { recursive: true });
-      }
-
-      const ext = path.extname(sourcePath);
-
-      const fileName = `signature-${Date.now()}${ext}`;
-
-      const destPath = path.join(uploadsDir, fileName);
-
-      fs.copyFileSync(sourcePath, destPath);
-
-      return { success: true, path: destPath };
+      // Return the image as an inline base64 data URL, not a copied file path.
+      // Stored inline (logoPath/signaturePath), it lives inside the DB — so it
+      // survives backup/restore and cross-device moves. A path under userData
+      // did neither: it was the one asset the Drive backup could never carry,
+      // and the shared PDF code only renders data: URIs anyway. Mirrors mobile.
+      const ext = path.extname(sourcePath).toLowerCase();
+      const mime = ext === ".png" ? "image/png" : "image/jpeg";
+      const base64 = fs.readFileSync(sourcePath).toString("base64");
+      return { success: true, path: `data:${mime};base64,${base64}` };
     } catch (error) {
       return {
         success: false,

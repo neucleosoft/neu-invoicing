@@ -79,8 +79,11 @@ export async function restoreFromCloud(
     throw new Error('No cloud backup found — sync from desktop first.')
   }
 
-  // Release Android's lock on the live DB so we can overwrite the file.
-  await liveDb.closeAsync()
+  // A 0-byte cloud file is the residue of a failed upload — restoring it would
+  // wipe the local data it was supposed to protect.
+  if (!info.size) {
+    throw new Error('The cloud backup file is empty (a previous upload failed). Back up again from the device that has your data.')
+  }
 
   // expo-sqlite stores DBs at <documentDirectory>/SQLite/<name>. Be defensive
   // — the directory exists after first launch but not on a fresh install
@@ -90,18 +93,40 @@ export async function restoreFromCloud(
     sqliteDir.create({ intermediates: true })
   }
 
-  // Stream Drive's response straight to disk via the native downloader. The
-  // previous arrayBuffer-based version held the entire file in JS memory,
-  // which OOM'd Android's ~256MB JVM heap on any DB above that size.
-  const dbFile = new File(sqliteDir, MOBILE_DB_NAME)
+  // Download to a TEMP file — never straight onto the live DB. A dropped
+  // connection mid-download used to leave a truncated, corrupt database with
+  // no way back; with the temp file, a failed download leaves the live DB
+  // untouched (it isn't even closed yet). Streams to disk via the native
+  // downloader — an arrayBuffer round-trip would OOM on large DBs.
+  const tmpFile = new File(sqliteDir, `${MOBILE_DB_NAME}.download`)
+  if (tmpFile.exists) tmpFile.delete()
   await File.downloadFileAsync(
     `${DRIVE_FILES_URL}/${info.fileId}?alt=media`,
-    dbFile,
+    tmpFile,
     {
       headers: { Authorization: `Bearer ${accessToken}` },
       idempotent: true,
     }
   )
+
+  // Verify the download is complete before touching the live DB.
+  const gotSize = tmpFile.size ?? 0
+  if (gotSize === 0 || gotSize !== info.size) {
+    tmpFile.delete()
+    throw new Error(`Download incomplete (${gotSize} of ${info.size} bytes) — your local data is untouched. Try again.`)
+  }
+
+  // Swap: release Android's lock on the live DB, clear stale WAL/SHM sidecars
+  // (they belong to the OLD file and would corrupt the new one on first open),
+  // then move the verified download into place.
+  await liveDb.closeAsync()
+  for (const suffix of ['-wal', '-shm']) {
+    const sidecar = new File(sqliteDir, `${MOBILE_DB_NAME}${suffix}`)
+    if (sidecar.exists) sidecar.delete()
+  }
+  const dbFile = new File(sqliteDir, MOBILE_DB_NAME)
+  if (dbFile.exists) dbFile.delete()
+  tmpFile.move(dbFile)
 
   // The imported file came from Prisma — it has every table our schema
   // expects, but no __drizzle_migrations table. Without intervention the next
@@ -217,6 +242,7 @@ export async function backupToCloud(
 
   // (3) Find the existing cloud file or create an empty one to PATCH into.
   let fileId = (await checkCloudBackup(accessToken)).fileId
+  let createdFresh = false
   if (!fileId) {
     const createRes = await fetch(DRIVE_FILES_URL, {
       method: 'POST',
@@ -230,33 +256,59 @@ export async function backupToCloud(
       throw new Error(`Drive create failed (${createRes.status}): ${await createRes.text()}`)
     }
     fileId = ((await createRes.json()) as { id: string }).id
+    createdFresh = true
   }
 
   // (4) Stream the DB file up. expo-sqlite stores it at documentDirectory/SQLite/.
+  // If the upload fails (or arrives incomplete) right after WE created the file,
+  // delete the empty slot — otherwise a 0-byte "backup" sits in Drive looking
+  // restorable, and restoring it would wipe a device's data.
   const dbUri = `${LegacyFS.documentDirectory}SQLite/${MOBILE_DB_NAME}`
-  const uploadRes = await LegacyFS.uploadAsync(
-    `${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media&fields=modifiedTime,size`,
-    dbUri,
-    {
-      httpMethod: 'PATCH',
-      uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        'Content-Type': 'application/x-sqlite3',
-      },
+  try {
+    const localInfo = await LegacyFS.getInfoAsync(dbUri)
+    const localSize = localInfo.exists && !localInfo.isDirectory ? localInfo.size : undefined
+
+    const uploadRes = await LegacyFS.uploadAsync(
+      `${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media&fields=modifiedTime,size`,
+      dbUri,
+      {
+        httpMethod: 'PATCH',
+        uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/x-sqlite3',
+        },
+      }
+    )
+    if (uploadRes.status < 200 || uploadRes.status >= 300) {
+      throw new Error(`Drive upload failed (${uploadRes.status}): ${uploadRes.body}`)
     }
-  )
-  if (uploadRes.status < 200 || uploadRes.status >= 300) {
-    throw new Error(`Drive upload failed (${uploadRes.status}): ${uploadRes.body}`)
-  }
 
-  const body = JSON.parse(uploadRes.body) as { modifiedTime?: string; size?: string }
-  if (body.modifiedTime) await setLastKnownCloudMtime(body.modifiedTime)
+    const body = JSON.parse(uploadRes.body) as { modifiedTime?: string; size?: string }
 
-  return {
-    exists: true,
-    fileId,
-    modifiedTime: body.modifiedTime,
-    size: body.size ? Number(body.size) : undefined,
+    // Verify Drive holds the complete file — a half-written cloud backup is
+    // worse than none, because it LOOKS restorable.
+    const cloudSize = body.size ? Number(body.size) : undefined
+    if (localSize != null && cloudSize != null && cloudSize !== localSize) {
+      throw new Error(`Backup incomplete: Drive holds ${cloudSize} of ${localSize} bytes. Try again.`)
+    }
+
+    if (body.modifiedTime) await setLastKnownCloudMtime(body.modifiedTime)
+
+    return {
+      exists: true,
+      fileId,
+      modifiedTime: body.modifiedTime,
+      size: cloudSize,
+    }
+  } catch (e) {
+    if (createdFresh) {
+      // Best-effort: remove the empty/partial slot we just created.
+      await fetch(`${DRIVE_FILES_URL}/${fileId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      }).catch(() => {})
+    }
+    throw e
   }
 }

@@ -282,13 +282,16 @@ export const syncState = async (): Promise<{
   const lastKnownCloud = getLastKnownCloudMtime()
   const lastKnownLocal = getLastKnownLocalMtime()
   if (!lastKnownCloud || !lastKnownLocal) {
-    // Either tracker missing → this device hasn't completed a conflict-aware
-    // sync yet (brand-new install, or pre-fix existing user). Don't surface a
-    // fake conflict; caller uploads and primes both trackers in lockstep.
+    // Either tracker missing → this device has no baseline for THIS account's
+    // cloud file (brand-new install, or trackers wiped by sign-out/switch). A
+    // cloud backup EXISTS and we cannot prove it's ours — so report it as
+    // cloudChanged and let the caller put a human in the loop. Reporting the
+    // old all-clear here was the exact gap that let a re-signed-in desktop
+    // silently overwrite a newer mobile backup (the May data-loss incident).
     return {
       cloudExists: true,
       localChanged: false,
-      cloudChanged: false,
+      cloudChanged: true,
       isConflict: false,
       firstSync: true,
       ...cloudInfo,
@@ -396,7 +399,7 @@ export const syncDownload = async (): Promise<{ success: boolean; error?: string
     const response = await drive.files.list({
       spaces: 'appDataFolder',
       q: `name='${CLOUD_DB_FILENAME}'`,
-      fields: 'files(id, modifiedTime)',
+      fields: 'files(id, modifiedTime, size)',
       pageSize: 1,
     })
     const files = response.data.files || []
@@ -407,15 +410,67 @@ export const syncDownload = async (): Promise<{ success: boolean; error?: string
     }
 
     const cloudFile = files[0]
-    const dest = fs.createWriteStream(dbPath)
-    const fileResponse = await drive.files.get(
-      { fileId: cloudFile.id!, alt: 'media' },
-      { responseType: 'stream' }
-    )
+    const expectedSize = cloudFile.size ? Number(cloudFile.size) : null
 
-    await new Promise((resolve, reject) => {
-      fileResponse.data.on('end', resolve).on('error', reject).pipe(dest)
-    })
+    // A 0-byte cloud file is the residue of a failed upload — restoring it
+    // would wipe the local data it was supposed to protect.
+    if (expectedSize === 0) {
+      updateSyncStatus({ status: 'idle', lastSync: new Date() })
+      return { success: false, error: 'The cloud backup file is empty (a previous upload failed). Back up again from the device that has your data.' }
+    }
+
+    // PHASE 1 — download to a TEMP file; a failure here must leave the live DB
+    // completely untouched (streaming straight over it used to leave a
+    // truncated, corrupt database on a dropped connection). Resolve on the
+    // WRITE stream's 'finish' — the source's 'end' fires before the bytes have
+    // been flushed to disk, and the size check would read a short file.
+    const tmpPath = `${dbPath}.download`
+    try {
+      const fileResponse = await drive.files.get(
+        { fileId: cloudFile.id!, alt: 'media' },
+        { responseType: 'stream' }
+      )
+
+      await new Promise<void>((resolve, reject) => {
+        const dest = fs.createWriteStream(tmpPath)
+        fileResponse.data.on('error', reject)
+        dest.on('error', reject)
+        dest.on('finish', () => resolve())
+        fileResponse.data.pipe(dest)
+      })
+
+      const gotSize = fs.statSync(tmpPath).size
+      if (gotSize === 0 || (expectedSize != null && gotSize !== expectedSize)) {
+        throw new Error(`Download incomplete (${gotSize} of ${expectedSize ?? 'unknown'} bytes) — local data untouched.`)
+      }
+    } catch (e) {
+      // Download failed — the temp file is worthless, the live DB is intact.
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+      } catch { /* best-effort cleanup */ }
+      throw e
+    }
+
+    // PHASE 2 — swap. Close Prisma's handle FIRST (Windows locks the open
+    // file), clear stale WAL/SHM/journal sidecars (they belong to the OLD file
+    // and would corrupt the new one), then move the download into place.
+    // From the moment the old DB is unlinked, the temp file is the ONLY local
+    // copy — it must never be deleted on failure, so this phase has no
+    // tmp-cleanup catch; rename gets a copy fallback instead.
+    await getPrisma().$disconnect()
+    for (const suffix of ['-wal', '-shm', '-journal']) {
+      const sidecar = `${dbPath}${suffix}`
+      if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar)
+    }
+    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath)
+    try {
+      fs.renameSync(tmpPath, dbPath)
+    } catch {
+      // Rename can fail while AV/indexers briefly hold the fresh file — fall
+      // back to copying it into place; the temp copy stays on disk regardless.
+      fs.copyFileSync(tmpPath, dbPath)
+      try { fs.unlinkSync(tmpPath) } catch { /* keep the spare copy */ }
+    }
 
     ensureTablesExist(`file:${dbPath}`)
     await reconnectDatabase()

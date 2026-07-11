@@ -18,11 +18,11 @@ import { setupQuotationHandlers } from './handlers/quotation'
 import { setupProformaInvoiceHandlers } from './handlers/proformaInvoice'
 import { setupPurchaseHandlers } from './handlers/purchase'
 import { setupPurchaseOrderHandlers } from './handlers/purchaseOrder'
-import { setupPaymentHandlers, backfillInlinePayments } from './handlers/payment'
+import { setupPaymentHandlers, backfillInlinePayments, backfillInlinePurchasePayments, backfillPaymentUpdatedAt } from './handlers/payment'
 import { setupDashboardHandlers } from './handlers/dashboard'
 import { setupReportHandlers } from './handlers/report'
 import { setupGSTReportHandlers } from './handlers/gstReport'
-import { setupCompanyHandlers } from './handlers/company'
+import { setupCompanyHandlers, backfillInlineImages } from './handlers/company'
 import { setupSettingsHandlers } from './handlers/settings'
 import { setupGstHandlers } from './handlers/gst'
 import { setupChallanHandlers } from './handlers/challan'
@@ -147,6 +147,19 @@ app.whenReady().then(async () => {
   // PAYMENT_IN rows, so the rebuild can see that money. Idempotent; additive (never edits a
   // balance). Leaves ambiguous "PAID with ₹0" invoices alone — those need a human.
   backfillInlinePayments()
+
+  // Purchase twin of the above: bills saved with an up-front amountPaid but no
+  // PAYMENT_OUT row behind it. Must exist before any recompute-apply, or the
+  // rebuild erases those payments and inflates supplier balances.
+  backfillInlinePurchasePayments()
+
+  // One-shot data fix: fold filesystem logo/signature images into the DB as
+  // base64 data URLs so backups (and future sync) actually carry them.
+  backfillInlineImages()
+
+  // Stamp legacy payment rows' updatedAt (covers the db-push baseline path,
+  // which never runs the migration SQL's backfill UPDATE).
+  backfillPaymentUpdatedAt()
 
   // Kick off scheduled-backup watchdog. Runs an immediate due-check, then
   // ticks every hour for as long as the app is open.

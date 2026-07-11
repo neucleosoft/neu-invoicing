@@ -114,15 +114,18 @@ export function useManualBackup() {
     try {
       const state = await window.electronAPI.sync.syncState()
 
-      // Cloud empty OR first conflict-aware sync from this device → just upload.
-      if (!state.cloudExists || state.firstSync) {
+      // Cloud empty → nothing to overwrite, just upload.
+      if (!state.cloudExists) {
         setIsWorking(false)
         await doUpload()
         return
       }
 
-      // Real conflict — hand control to the dialog.
-      if (state.isConflict) {
+      // No baseline for this account's cloud file (fresh install or trackers
+      // wiped by a sign-out/switch) while a cloud backup EXISTS: we can't prove
+      // the cloud copy is ours, so never silently overwrite it — let the user
+      // pick a direction. This closes the re-sign-in silent-clobber gap.
+      if (state.firstSync || state.isConflict) {
         setIsWorking(false)
         setConflictDialog({ open: true, cloudModifiedTime: state.cloudModifiedTime })
         return

@@ -596,6 +596,9 @@ export const paymentTransaction = sqliteTable("PaymentTransaction", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  // Nullable to mirror Prisma (SQLite ADD COLUMN can't take now()); legacy rows
+  // are backfilled to createdAt. Needed so payment edits can sync newest-wins.
+  updatedAt: prismaDate("updatedAt").$defaultFn(now).$onUpdate(now),
 });
 
 // =============================================================
