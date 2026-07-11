@@ -118,7 +118,10 @@ async function buildLocalIndex(db: Db): Promise<LocalIndex> {
     if (numberColumn) numbers[name] = {}
     for (const r of rows) {
       headers[name][r.id] = {
-        updatedAt: toEpochMs(r.updatedAt),
+        // Same fallback the collector uses when stamping packets: a legacy
+        // null updatedAt compares as createdAt, so an unchanged row is
+        // NOT_NEWER instead of re-applying on every sync.
+        updatedAt: toEpochMs(r.updatedAt) ?? toEpochMs(r.createdAt),
         createdAt: toEpochMs(r.createdAt),
         deletedAt: toEpochMs(r.deletedAt),
         cancelledAt: toEpochMs(r.cancelledAt),
