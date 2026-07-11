@@ -10,7 +10,7 @@
 
 import { eq, inArray, isNotNull, and } from 'drizzle-orm'
 import * as LegacyFS from 'expo-file-system/legacy'
-import { billImageFileName, toEpochMs } from '@neu/shared'
+import { billImageFileName, previousInvoiceFileName, toEpochMs } from '@neu/shared'
 
 import { schema, useDb } from '@/db'
 
@@ -131,6 +131,91 @@ export async function pushBillImages(
     }
   }
   return pushed
+}
+
+/**
+ * Push the archived files of the given (recently changed) previous-invoices.
+ * Archive files are immutable — upload only when missing or 0-byte. An empty
+ * local blob is the "on Drive, not fetched" sentinel: nothing to push.
+ */
+export async function pushPreviousInvoiceFiles(
+  db: Db,
+  accessToken: string,
+  ids: string[],
+): Promise<number> {
+  if (ids.length === 0) return 0
+  const rows = await db
+    .select({
+      id: schema.previousInvoice.id,
+      fileData: schema.previousInvoice.fileData,
+      fileMimeType: schema.previousInvoice.fileMimeType,
+    })
+    .from(schema.previousInvoice)
+    .where(inArray(schema.previousInvoice.id, ids))
+
+  let pushed = 0
+  for (const row of rows) {
+    const data = row.fileData as unknown as Uint8Array | null
+    if (!data || data.length === 0) continue
+    try {
+      const name = previousInvoiceFileName(row.id)
+      const existing = await findDriveImage(accessToken, name)
+      if (existing && existing.size > 0) continue
+      await uploadImage(
+        accessToken,
+        name,
+        existing?.id ?? null,
+        data,
+        row.fileMimeType || 'application/octet-stream',
+      )
+      pushed++
+    } catch {
+      // best-effort — never fail the sync over a file
+    }
+  }
+  return pushed
+}
+
+/**
+ * Make sure a previous-invoice's archived file is available locally (empty
+ * blob = the synced-in sentinel). Machine write — updatedAt preserved (F5).
+ * Never throws.
+ */
+export async function ensurePreviousInvoiceFile(
+  db: Db,
+  accessToken: string,
+  id: string,
+): Promise<boolean> {
+  try {
+    const [row] = await db
+      .select({
+        fileData: schema.previousInvoice.fileData,
+        updatedAt: schema.previousInvoice.updatedAt,
+      })
+      .from(schema.previousInvoice)
+      .where(eq(schema.previousInvoice.id, id))
+      .limit(1)
+    if (!row) return false
+    const local = row.fileData as unknown as Uint8Array | null
+    if (local && local.length > 0) return true
+
+    const found = await findDriveImage(accessToken, previousInvoiceFileName(id))
+    if (!found || found.size === 0) return false
+    const res = await fetch(`${DRIVE_FILES_URL}/${found.id}?alt=media`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (!res.ok) return false
+    const bytes = Buffer.from(await res.arrayBuffer())
+    if (bytes.length === 0) return false
+
+    await db
+      .update(schema.previousInvoice)
+      .set({ fileData: bytes, updatedAt: row.updatedAt })
+      .where(eq(schema.previousInvoice.id, id))
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**

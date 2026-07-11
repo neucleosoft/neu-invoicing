@@ -28,7 +28,7 @@ import { recomputeAll } from '@/utils/recompute'
 
 import { appendSyncActivity } from './activityLog'
 import { getDeviceId } from './deviceId'
-import { pushBillImages } from './imageStore'
+import { pushBillImages, pushPreviousInvoiceFiles } from './imageStore'
 
 type Db = ReturnType<typeof useDb>
 
@@ -106,8 +106,8 @@ async function buildLocalIndex(db: Db): Promise<LocalIndex> {
   const numbers: NonNullable<LocalIndex['numbers']> = {}
 
   const indexTable = async (name: string, numberColumn?: string) => {
-    // purchaseBill rows carry the scanned-bill BLOB — never load those just to
-    // build an id→timestamp index (a real archive would OOM the phone).
+    // purchaseBill / previousInvoice rows carry BLOBs — never load those just
+    // to build an id→timestamp index (a real archive would OOM the phone).
     const rows: any[] =
       name === 'purchaseBill'
         ? await db
@@ -121,7 +121,17 @@ async function buildLocalIndex(db: Db): Promise<LocalIndex> {
               status: schema.purchaseBill.status,
             })
             .from(schema.purchaseBill)
-        : await db.select().from(tableOf(name))
+        : name === 'previousInvoice'
+          ? await db
+              .select({
+                id: schema.previousInvoice.id,
+                serialNumber: schema.previousInvoice.serialNumber,
+                updatedAt: schema.previousInvoice.updatedAt,
+                createdAt: schema.previousInvoice.createdAt,
+                deletedAt: schema.previousInvoice.deletedAt,
+              })
+              .from(schema.previousInvoice)
+          : await db.select().from(tableOf(name))
     headers[name] = {}
     if (numberColumn) numbers[name] = {}
     for (const r of rows) {
@@ -165,7 +175,19 @@ async function executePlan(db: Db, plan: ApplyPlan): Promise<void> {
     for (const u of plan.upserts) {
       const table = tableOf(u.table)
       const data = reviveRowDates(u.row)
-      await tx.insert(table).values(data).onConflictDoUpdate({ target: table.id, set: data })
+      let createData = data
+      let updateData = data
+      // previousInvoice's NOT-NULL fileData is stripped from packets: inserts
+      // get the empty-blob sentinel ("on Drive, not fetched yet"); updates
+      // must NEVER touch fileData, or a packet would wipe a fetched file.
+      if (u.table === 'previousInvoice' && !('fileData' in data)) {
+        createData = { ...data, fileData: Buffer.alloc(0) }
+      }
+      if (u.table === 'previousInvoice' && 'fileData' in updateData) {
+        const { fileData: _dropped, ...rest } = updateData
+        updateData = rest
+      }
+      await tx.insert(table).values(createData).onConflictDoUpdate({ target: table.id, set: updateData })
       if (u.children) {
         const childTable = tableOf(u.children.table)
         await tx.delete(childTable).where(eq(childTable[u.children.fk], u.rowId))
@@ -329,7 +351,12 @@ export async function rowSyncNow(
     const changedBillIds = diary.packets
       .filter((p) => p.table === 'purchaseBill')
       .map((p) => p.rowId)
-    const photosPushed = await pushBillImages(db, accessToken, changedBillIds)
+    const changedPrevInvIds = diary.packets
+      .filter((p) => p.table === 'previousInvoice')
+      .map((p) => p.rowId)
+    const photosPushed =
+      (await pushBillImages(db, accessToken, changedBillIds)) +
+      (await pushPreviousInvoiceFiles(db, accessToken, changedPrevInvIds))
 
     return {
       success: true,

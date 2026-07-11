@@ -86,14 +86,18 @@ export async function buildLocalIndex(prisma: any): Promise<LocalIndex> {
   const numbers: NonNullable<LocalIndex['numbers']> = {}
 
   const indexTable = async (table: string, numberColumn?: string) => {
-    // purchaseBill rows carry the scanned-bill BLOB — never load those just to
-    // build an id→timestamp index (a full archive would be hundreds of MB).
+    // purchaseBill / previousInvoice rows carry BLOBs — never load those just
+    // to build an id→timestamp index (a full archive would be hundreds of MB).
     const rows =
       table === 'purchaseBill'
         ? await prisma.purchaseBill.findMany({
             select: { id: true, billNumber: true, updatedAt: true, createdAt: true, deletedAt: true, cancelledAt: true, status: true },
           })
-        : await prisma[table].findMany()
+        : table === 'previousInvoice'
+          ? await prisma.previousInvoice.findMany({
+              select: { id: true, serialNumber: true, updatedAt: true, createdAt: true, deletedAt: true },
+            })
+          : await prisma[table].findMany()
     headers[table] = {}
     if (numberColumn) numbers[table] = {}
     for (const r of rows) {
@@ -135,7 +139,19 @@ export async function executePlan(prisma: any, plan: ApplyPlan): Promise<void> {
 
     for (const u of plan.upserts) {
       const data = reviveRowDates(u.row)
-      await tx[u.table].upsert({ where: { id: u.rowId }, create: data, update: data })
+      let createData = data
+      let updateData = data
+      // previousInvoice's NOT-NULL fileData is stripped from packets: inserts
+      // get the empty-blob sentinel ("on Drive, not fetched yet"); updates
+      // must NEVER touch fileData, or a packet would wipe a fetched file.
+      if (u.table === 'previousInvoice' && !('fileData' in data)) {
+        createData = { ...data, fileData: Buffer.alloc(0) }
+      }
+      if (u.table === 'previousInvoice' && 'fileData' in updateData) {
+        const { fileData: _dropped, ...rest } = updateData
+        updateData = rest
+      }
+      await tx[u.table].upsert({ where: { id: u.rowId }, create: createData, update: updateData })
       if (u.children) {
         await tx[u.children.table].deleteMany({ where: { [u.children.fk]: u.rowId } })
         if (u.children.rows.length) {

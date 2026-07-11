@@ -20,7 +20,7 @@ import { ipcMain } from 'electron'
 import { google } from 'googleapis'
 import Store from 'electron-store'
 import { Readable } from 'stream'
-import { billImageFileName, parseDiary, planApply, toEpochMs, TRIPWIRE_THRESHOLD, type SyncPacket } from '@neu/shared'
+import { billImageFileName, parseDiary, planApply, previousInvoiceFileName, toEpochMs, TRIPWIRE_THRESHOLD, type SyncPacket } from '@neu/shared'
 import { getOAuth2Client, isAuthError } from './auth'
 import { getPrisma } from './database'
 import { recomputeAll } from './recompute'
@@ -186,6 +186,70 @@ async function pushBillImages(drive: any, prisma: any, billIds: string[]): Promi
   return pushed
 }
 
+async function pushPreviousInvoiceFiles(drive: any, prisma: any, ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0
+  const rows = await prisma.previousInvoice.findMany({
+    where: { id: { in: ids } },
+    select: { id: true, fileData: true, fileMimeType: true },
+  })
+  let pushed = 0
+  for (const row of rows) {
+    // Empty blob = the sentinel (this device never had the file) — nothing to push.
+    if (!row.fileData || row.fileData.length === 0) continue
+    try {
+      const name = previousInvoiceFileName(row.id)
+      const existing = await findDriveImage(drive, name)
+      // Archive files are immutable — upload only when missing or 0-byte.
+      if (existing && existing.size > 0) continue
+      const media = {
+        mimeType: row.fileMimeType || 'application/octet-stream',
+        body: Readable.from(Buffer.from(row.fileData)),
+      }
+      if (existing) {
+        await drive.files.update({ fileId: existing.id, media })
+      } else {
+        await drive.files.create({ requestBody: { name, parents: ['appDataFolder'] }, media })
+      }
+      pushed++
+    } catch (e) {
+      console.warn('[rowSync] archive-file push failed for', row.id, e)
+    }
+  }
+  return pushed
+}
+
+// Lazy pull for a synced-in archive row holding the empty-blob sentinel.
+// Machine write: updatedAt preserved (F5 rule).
+export async function fetchPreviousInvoiceFile(id: string): Promise<{ success: boolean; error?: string }> {
+  if (!store.get('google_tokens')) return { success: false, error: 'Connect your Google account first.' }
+  try {
+    const prisma = getPrisma()
+    const row = await prisma.previousInvoice.findUnique({
+      where: { id },
+      select: { id: true, updatedAt: true, fileData: true },
+    })
+    if (!row) return { success: false, error: 'Not found' }
+    if (row.fileData && row.fileData.length > 0) return { success: true }
+
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const found = await findDriveImage(drive, previousInvoiceFileName(id))
+    if (!found || found.size === 0) {
+      return { success: false, error: 'The file has not been uploaded from the other device yet.' }
+    }
+    const res = await drive.files.get({ fileId: found.id, alt: 'media' }, { responseType: 'arraybuffer' })
+    const bytes = Buffer.from(res.data as ArrayBuffer)
+    if (bytes.length === 0) return { success: false, error: 'File download came back empty — try again.' }
+    await prisma.previousInvoice.update({
+      where: { id },
+      data: { fileData: bytes, updatedAt: row.updatedAt },
+    })
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'File download failed' }
+  }
+}
+
 // Lazy pull: a synced-in bill has attachmentMimeType but no blob — download it
 // once and keep it. Machine write: updatedAt preserved (F5 rule), so filling
 // in the photo can never win a sync conflict.
@@ -289,7 +353,12 @@ export const rowSyncNow = async (
     const changedBillIds = diary.packets
       .filter((p) => p.table === 'purchaseBill')
       .map((p) => p.rowId)
-    const photosPushed = await pushBillImages(drive, prisma, changedBillIds)
+    const changedPrevInvIds = diary.packets
+      .filter((p) => p.table === 'previousInvoice')
+      .map((p) => p.rowId)
+    const photosPushed =
+      (await pushBillImages(drive, prisma, changedBillIds)) +
+      (await pushPreviousInvoiceFiles(drive, prisma, changedPrevInvIds))
 
     store.set(LAST_ROW_SYNC_KEY, Date.now())
     store.delete(PENDING_REMOVALS_KEY)

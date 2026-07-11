@@ -1,4 +1,5 @@
 import { ipcMain } from 'electron'
+import { fetchPreviousInvoiceFile } from '../rowSync'
 import { getPrisma } from '../database'
 import { extractFromPdfText } from '../lib/parseInvoicePdf'
 
@@ -111,11 +112,23 @@ export const setupPreviousInvoiceHandlers = () => {
   // serializes efficiently (no JSON base64 overhead).
   ipcMain.handle('previousInvoice:getFile', async (_, id: string) => {
     try {
-      const row = await prisma.previousInvoice.findUnique({
+      let row = await prisma.previousInvoice.findUnique({
         where: { id },
         select: { fileData: true, fileMimeType: true, fileName: true },
       })
       if (!row) return { success: false, error: 'Not found' }
+
+      // Empty blob = synced-in sentinel: the file lives on Drive (S4 image
+      // split) — fetch it once, then it's local forever.
+      if (!row.fileData || (row.fileData as Buffer).length === 0) {
+        const fetched = await fetchPreviousInvoiceFile(id)
+        if (!fetched.success) return { success: false, error: fetched.error }
+        row = await prisma.previousInvoice.findUnique({
+          where: { id },
+          select: { fileData: true, fileMimeType: true, fileName: true },
+        })
+        if (!row) return { success: false, error: 'Not found' }
+      }
       return {
         success: true,
         data: {

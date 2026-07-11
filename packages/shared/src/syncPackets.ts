@@ -38,6 +38,18 @@ export const SYNC_FORMAT_VERSION = 1
  */
 export const billImageFileName = (billId: string) => `img-bill-${billId}`
 
+/** Same split for a previous-invoice's archived PDF/image (immutable). */
+export const previousInvoiceFileName = (id: string) => `img-previnv-${id}`
+
+/**
+ * previousInvoice.fileData is NOT NULL on both schemas, but packets strip
+ * blobs — so a synced-in archive row is inserted with an EMPTY blob as the
+ * "lives on Drive, not fetched yet" sentinel (a real PDF is never 0 bytes).
+ * Executors must NEVER include fileData in the UPDATE branch of an upsert,
+ * or a stripped packet would wipe a locally-fetched file back to empty.
+ */
+export const PREV_INVOICE_BLOB_COLUMN = 'fileData'
+
 // A row after normalization: Dates → epoch-ms numbers, binaries stripped.
 export type PacketRow = Record<string, unknown>
 
@@ -83,9 +95,9 @@ export interface DocTableSpec {
 }
 
 /** Documents: header + children (+ movements) as one packet.
- *  previousInvoice is DELIBERATELY absent until S4 (image split): its
- *  `fileData` blob is NOT NULL on both schemas, so a stripped packet could
- *  never insert — one archived invoice would wedge every pull for 30 days. */
+ *  previousInvoice syncs WITHOUT its NOT-NULL fileData blob: inserts get the
+ *  empty-blob sentinel (see PREV_INVOICE_BLOB_COLUMN) and the real file rides
+ *  as its own Drive object (previousInvoiceFileName), fetched lazily. */
 export const SYNC_DOCUMENT_TABLES: DocTableSpec[] = [
   { table: 'salesInvoice', childTable: 'salesInvoiceItem', childFk: 'salesInvoiceId', movementRef: 'INVOICE', numberColumn: 'invoiceNumber' },
   { table: 'purchaseBill', childTable: 'purchaseBillItem', childFk: 'purchaseBillId', movementRef: 'BILL', numberColumn: 'billNumber' },
@@ -94,6 +106,7 @@ export const SYNC_DOCUMENT_TABLES: DocTableSpec[] = [
   { table: 'quotation', childTable: 'quotationItem', childFk: 'quotationId', numberColumn: 'invoiceNumber' },
   { table: 'proformaInvoice', childTable: 'proformaInvoiceItem', childFk: 'proformaInvoiceId', numberColumn: 'invoiceNumber' },
   { table: 'purchaseOrder', childTable: 'purchaseOrderItem', childFk: 'purchaseOrderId', numberColumn: 'orderNumber' },
+  { table: 'previousInvoice', childTable: 'previousInvoiceItem', childFk: 'previousInvoiceId', numberColumn: 'serialNumber' },
 ]
 
 /** Single-row packets: master data + payments. company/settings never sync. */
@@ -129,6 +142,7 @@ export const SYNC_APPLY_ORDER: string[] = [
   'purchaseOrder',
   'purchaseBill',
   'creditDebitNote',
+  'previousInvoice',
   'paymentTransaction',
 ]
 
