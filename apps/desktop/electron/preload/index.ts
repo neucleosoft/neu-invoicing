@@ -29,6 +29,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getRowSyncStatus: () => ipcRenderer.invoke("sync:getRowSyncStatus"),
     fetchBillImage: (billId: string) =>
       ipcRenderer.invoke("sync:fetchBillImage", billId),
+    getLadderInfo: () => ipcRenderer.invoke("sync:getLadderInfo"),
+    restoreFromLadder: (slotName: string) =>
+      ipcRenderer.invoke("sync:restoreFromLadder", slotName),
     getBackupInfo: () => ipcRenderer.invoke("sync:getBackupInfo"),
     setBackupFrequency: (freq: "off" | "daily" | "weekly" | "monthly") =>
       ipcRenderer.invoke("sync:setBackupFrequency", freq),

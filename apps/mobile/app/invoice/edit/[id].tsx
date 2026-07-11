@@ -508,13 +508,14 @@ export default function EditInvoiceScreen() {
 
       <SectionHeader>Invoice Details</SectionHeader>
 
-      <Field
-        label="Invoice # *"
-        value={invoiceNumber}
-        onChangeText={setInvoiceNumber}
-        placeholder="Invoice number"
-        autoCapitalize="characters"
-      />
+      {/* Immutable once issued (D13): GST numbering must never fork after a
+          document exists — and sync renumbers collisions itself, so a
+          hand-edited number would fight it. Mirrors the purchase edit screen. */}
+      <ThemedText style={styles.label}>Invoice #</ThemedText>
+      <View style={styles.lockedField}>
+        <ThemedText style={styles.lockedText}>{invoiceNumber}</ThemedText>
+        <ThemedText style={styles.lockedHint}>locked</ThemedText>
+      </View>
 
       <ThemedText style={styles.label}>Customer *</ThemedText>
       <Pressable style={styles.picker} onPress={() => setShowCustomerPicker(true)}>
@@ -967,6 +968,19 @@ const styles = StyleSheet.create({
     minWidth: 90,
     textAlign: 'right',
   },
+  lockedField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    backgroundColor: '#f0f0f0',
+  },
+  lockedText: { fontSize: 16, color: '#111827' },
+  lockedHint: { fontSize: 12, opacity: 0.5 },
   lineAmountRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

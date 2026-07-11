@@ -635,6 +635,8 @@ declare global {
           pendingRemovals: number | null
         }>
         fetchBillImage: (billId: string) => Promise<{ success: boolean; error?: string }>
+        getLadderInfo: () => Promise<{ name: string; modifiedTime: string | null; size: number | null }[]>
+        restoreFromLadder: (slotName: string) => Promise<{ success: boolean; error?: string }>
         getBackupInfo: () => Promise<{
           cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
           thisDeviceLastUpload: string | null

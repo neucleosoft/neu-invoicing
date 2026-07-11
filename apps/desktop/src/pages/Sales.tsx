@@ -897,12 +897,17 @@ const Sales = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="label">Invoice Number *</label>
+                    {/* Immutable once issued (D13): GST Rule 46 numbering must
+                        never fork after a document exists — and sync renumbers
+                        collisions itself, so a hand-edited number would fight it. */}
                     <input
                       type="text"
-                      className="input"
+                      className="input disabled:opacity-60 disabled:cursor-not-allowed"
                       value={formData.invoiceNumber}
                       onChange={(e) => setFormData({...formData, invoiceNumber: e.target.value})}
                       placeholder="Auto-generated"
+                      disabled={!!editingInvoice}
+                      title={editingInvoice ? 'The invoice number is locked once the invoice exists' : undefined}
                       required
                     />
                   </div>

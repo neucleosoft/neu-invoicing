@@ -32,11 +32,45 @@ const Settings = () => {
     pendingRemovals: number | null
   }>({ lastSyncAt: null, pendingRemovals: null })
 
+  const [ladderInfo, setLadderInfo] = useState<
+    { name: string; modifiedTime: string | null; size: number | null }[]
+  >([])
+  const [ladderRestoring, setLadderRestoring] = useState(false)
+
   const refreshSyncActivity = async () => {
     try {
       setSyncActivity(await window.electronAPI.sync.getSyncActivityLog())
       setRowSyncStatus(await window.electronAPI.sync.getRowSyncStatus())
+      setLadderInfo(await window.electronAPI.sync.getLadderInfo())
     } catch { /* log display is best-effort */ }
+  }
+
+  const LADDER_LABELS: Record<string, string> = {
+    'backup-daily.db': 'Daily (freshest)',
+    'backup-weekly.db': 'Weekly (kept ~7 days old on purpose)',
+    'backup-monthly.db': 'Monthly (kept ~30 days old on purpose)',
+  }
+
+  const handleLadderRestore = async (slotName: string, when: string | null) => {
+    const ok = await confirm({
+      title: 'Restore from the time machine?',
+      message: `This REPLACES all local data with the ${LADDER_LABELS[slotName] || slotName} copy${when ? ` from ${new Date(when).toLocaleString()}` : ''}. Bill photos and archive files re-download automatically when opened. This cannot be undone.`,
+      confirmText: 'Replace local data',
+      cancelText: 'Cancel',
+    })
+    if (!ok) return
+    setLadderRestoring(true)
+    try {
+      const r = await window.electronAPI.sync.restoreFromLadder(slotName)
+      if (r.success) {
+        toast.success('Restored — reloading')
+        window.location.reload()
+      } else {
+        toast.error(r.error || 'Restore failed')
+      }
+    } finally {
+      setLadderRestoring(false)
+    }
   }
 
   const handleRowSync = async () => {
@@ -860,6 +894,35 @@ const Settings = () => {
                     >
                       {isRestoring ? 'Restoring…' : 'Restore from cloud…'}
                     </button>
+
+                    {ladderInfo.some((l) => l.modifiedTime) && (
+                      <div className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
+                        <h4 className="text-sm font-semibold mb-1">Time machine</h4>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                          The weekly and monthly copies stay old on purpose — they survive a
+                          disaster that quietly poisoned every fresh backup.
+                        </p>
+                        <div className="space-y-2">
+                          {ladderInfo.filter((l) => l.modifiedTime).map((l) => (
+                            <div key={l.name} className="flex items-center justify-between gap-3">
+                              <div className="text-xs text-gray-700 dark:text-gray-300">
+                                <span className="font-medium">{LADDER_LABELS[l.name] || l.name}</span>
+                                {' · '}
+                                {l.modifiedTime ? new Date(l.modifiedTime).toLocaleString() : '—'}
+                                {l.size ? ` · ${(l.size / (1024 * 1024)).toFixed(1)} MB` : ''}
+                              </div>
+                              <button
+                                className="px-3 py-1 text-xs font-medium rounded-lg border border-red-300 text-red-700 dark:text-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                                onClick={() => handleLadderRestore(l.name, l.modifiedTime)}
+                                disabled={isBackingUp || isRestoring || rowSyncing || ladderRestoring}
+                              >
+                                Restore this copy…
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <SyncConflictDialog {...conflictDialogProps} />

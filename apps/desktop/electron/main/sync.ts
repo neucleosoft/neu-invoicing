@@ -188,6 +188,13 @@ export const setupSyncHandlers = () => {
     void runIfScheduledSyncDue()
     return { success: true }
   })
+
+  // Backup ladder (S4): rung metadata + the destructive time-machine restore.
+  ipcMain.handle('sync:getLadderInfo', async () => getLadderInfo())
+  ipcMain.handle('sync:restoreFromLadder', async (_, slotName: string) => {
+    if (!isSignedIn()) return { success: false, error: 'OFFLINE' }
+    return await restoreFromLadder(slotName)
+  })
 }
 
 // Looks for the backup file in the user's Drive appDataFolder without
@@ -386,6 +393,66 @@ export const syncUpload = async (): Promise<{ success: boolean; error?: string }
   }
 }
 
+// The ONE safe way to replace the local DB with a Drive file: download to a
+// TEMP file (a dropped connection must leave the live DB untouched), resolve
+// on the WRITE stream's 'finish' (the source's 'end' fires before bytes hit
+// disk), verify the size, then swap — Prisma disconnected first (Windows file
+// locks), stale WAL/SHM/journal sidecars cleared, rename with a copy fallback.
+// From the moment the old DB is unlinked, the temp file is the ONLY local
+// copy and must never be deleted on failure. Used by both the whole-file
+// restore and the ladder time-machine restore.
+const replaceLocalDbFromDrive = async (
+  drive: any,
+  fileId: string,
+  expectedSize: number | null,
+): Promise<void> => {
+  const dbPath = getDatabasePath()
+  const tmpPath = `${dbPath}.download`
+
+  // PHASE 1 — download + verify; failure leaves the live DB untouched.
+  try {
+    const fileResponse = await drive.files.get(
+      { fileId, alt: 'media' },
+      { responseType: 'stream' }
+    )
+
+    await new Promise<void>((resolve, reject) => {
+      const dest = fs.createWriteStream(tmpPath)
+      fileResponse.data.on('error', reject)
+      dest.on('error', reject)
+      dest.on('finish', () => resolve())
+      fileResponse.data.pipe(dest)
+    })
+
+    const gotSize = fs.statSync(tmpPath).size
+    if (gotSize === 0 || (expectedSize != null && gotSize !== expectedSize)) {
+      throw new Error(`Download incomplete (${gotSize} of ${expectedSize ?? 'unknown'} bytes) — local data untouched.`)
+    }
+  } catch (e) {
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+    } catch { /* best-effort cleanup */ }
+    throw e
+  }
+
+  // PHASE 2 — swap; no tmp cleanup on failure past this point.
+  await getPrisma().$disconnect()
+  for (const suffix of ['-wal', '-shm', '-journal']) {
+    const sidecar = `${dbPath}${suffix}`
+    if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar)
+  }
+  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath)
+  try {
+    fs.renameSync(tmpPath, dbPath)
+  } catch {
+    fs.copyFileSync(tmpPath, dbPath)
+    try { fs.unlinkSync(tmpPath) } catch { /* keep the spare copy */ }
+  }
+
+  ensureTablesExist(`file:${dbPath}`)
+  await reconnectDatabase()
+}
+
 // Explicit download — replaces local DB with cloud. Caller MUST have user
 // confirmation; this is destructive to any unsynced local edits.
 export const syncDownload = async (): Promise<{ success: boolean; error?: string }> => {
@@ -423,61 +490,7 @@ export const syncDownload = async (): Promise<{ success: boolean; error?: string
       return { success: false, error: 'The cloud backup file is empty (a previous upload failed). Back up again from the device that has your data.' }
     }
 
-    // PHASE 1 — download to a TEMP file; a failure here must leave the live DB
-    // completely untouched (streaming straight over it used to leave a
-    // truncated, corrupt database on a dropped connection). Resolve on the
-    // WRITE stream's 'finish' — the source's 'end' fires before the bytes have
-    // been flushed to disk, and the size check would read a short file.
-    const tmpPath = `${dbPath}.download`
-    try {
-      const fileResponse = await drive.files.get(
-        { fileId: cloudFile.id!, alt: 'media' },
-        { responseType: 'stream' }
-      )
-
-      await new Promise<void>((resolve, reject) => {
-        const dest = fs.createWriteStream(tmpPath)
-        fileResponse.data.on('error', reject)
-        dest.on('error', reject)
-        dest.on('finish', () => resolve())
-        fileResponse.data.pipe(dest)
-      })
-
-      const gotSize = fs.statSync(tmpPath).size
-      if (gotSize === 0 || (expectedSize != null && gotSize !== expectedSize)) {
-        throw new Error(`Download incomplete (${gotSize} of ${expectedSize ?? 'unknown'} bytes) — local data untouched.`)
-      }
-    } catch (e) {
-      // Download failed — the temp file is worthless, the live DB is intact.
-      try {
-        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
-      } catch { /* best-effort cleanup */ }
-      throw e
-    }
-
-    // PHASE 2 — swap. Close Prisma's handle FIRST (Windows locks the open
-    // file), clear stale WAL/SHM/journal sidecars (they belong to the OLD file
-    // and would corrupt the new one), then move the download into place.
-    // From the moment the old DB is unlinked, the temp file is the ONLY local
-    // copy — it must never be deleted on failure, so this phase has no
-    // tmp-cleanup catch; rename gets a copy fallback instead.
-    await getPrisma().$disconnect()
-    for (const suffix of ['-wal', '-shm', '-journal']) {
-      const sidecar = `${dbPath}${suffix}`
-      if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar)
-    }
-    if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath)
-    try {
-      fs.renameSync(tmpPath, dbPath)
-    } catch {
-      // Rename can fail while AV/indexers briefly hold the fresh file — fall
-      // back to copying it into place; the temp copy stays on disk regardless.
-      fs.copyFileSync(tmpPath, dbPath)
-      try { fs.unlinkSync(tmpPath) } catch { /* keep the spare copy */ }
-    }
-
-    ensureTablesExist(`file:${dbPath}`)
-    await reconnectDatabase()
+    await replaceLocalDbFromDrive(drive, cloudFile.id!, expectedSize)
 
     if (cloudFile.modifiedTime) {
       setLastKnownCloudMtime(cloudFile.modifiedTime)
@@ -662,6 +675,70 @@ const runLadderIfDue = async () => {
     }
   } catch (e) {
     console.error('[ladder] failed, app continues:', e)
+  }
+}
+
+// Ladder metadata for the Settings "time machine" list.
+export const getLadderInfo = async (): Promise<
+  { name: string; modifiedTime: string | null; size: number | null }[]
+> => {
+  if (store.get('demo_mode') || !store.get('google_tokens')) return []
+  try {
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const out: { name: string; modifiedTime: string | null; size: number | null }[] = []
+    for (const slot of LADDER_SLOTS) {
+      const res = await drive.files.list({
+        spaces: 'appDataFolder',
+        q: `name='${slot.name}' and trashed=false`,
+        fields: 'files(id,modifiedTime,size)',
+        pageSize: 1,
+      })
+      const f = res.data.files?.[0]
+      out.push({
+        name: slot.name,
+        modifiedTime: f?.modifiedTime ?? null,
+        size: f?.size ? Number(f.size) : null,
+      })
+    }
+    return out
+  } catch (e) {
+    console.error('getLadderInfo error:', e)
+    return []
+  }
+}
+
+// Time-machine restore: replace the local DB with a ladder rung. Ladder copies
+// are BLOB-STRIPPED — bill photos and archive files refetch lazily from their
+// img-* Drive objects afterwards. Baselines reset so the device re-syncs
+// forward from the restored state (row-sync diaries replay the newer edits).
+export const restoreFromLadder = async (slotName: string): Promise<{ success: boolean; error?: string }> => {
+  if (!LADDER_SLOTS.some((s) => s.name === slotName)) {
+    return { success: false, error: 'Unknown backup slot.' }
+  }
+  if (!store.get('google_tokens')) return { success: false, error: 'Connect your Google account first.' }
+  try {
+    updateSyncStatus({ status: 'syncing', lastError: null })
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const res = await drive.files.list({
+      spaces: 'appDataFolder',
+      q: `name='${slotName}' and trashed=false`,
+      fields: 'files(id,modifiedTime,size)',
+      pageSize: 1,
+    })
+    const f = res.data.files?.[0]
+    if (!f) return { success: false, error: 'That backup slot does not exist yet.' }
+    const expected = f.size ? Number(f.size) : null
+    if (expected === 0) return { success: false, error: 'That backup slot is empty.' }
+
+    await replaceLocalDbFromDrive(drive, f.id!, expected)
+    resetSyncBaseline()
+
+    updateSyncStatus({ status: 'idle', lastSync: new Date() })
+    return { success: true }
+  } catch (error) {
+    return handleSyncError(error, 'Ladder restore')
   }
 }
 
