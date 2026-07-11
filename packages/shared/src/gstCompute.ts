@@ -182,3 +182,68 @@ export function computeGstValues(input: GstComputeInput): GstComputeResult {
     items: resultItems,
   }
 }
+
+// A scanned purchase bill often shows tax only as a single bottom-line figure with
+// no per-line tax column (the OCR prompt explicitly forbids distributing it across
+// lines). Both apps honor that figure through THIS one function so they can never
+// disagree: the override REPLACES the computed document-level tax; the doc-level
+// CGST/SGST/IGST split comes from the bill's own explicit amounts when present,
+// otherwise from the already-decided isInterState; per-line values stay as computed
+// (a bottom-line tax cannot be attributed to lines). No override → result unchanged.
+export interface PurchaseTaxOverride {
+  taxAmount?: number | null
+  cgstAmount?: number | null
+  sgstAmount?: number | null
+  igstAmount?: number | null
+}
+
+export function applyPurchaseTaxOverride(
+  gst: GstComputeResult,
+  override?: PurchaseTaxOverride | null,
+): GstComputeResult {
+  const tax = override?.taxAmount
+  if (typeof tax !== 'number' || !Number.isFinite(tax) || tax < 0) return gst
+
+  const explicitSplit =
+    (override?.cgstAmount || 0) + (override?.sgstAmount || 0) + (override?.igstAmount || 0)
+  let totalCgst = 0
+  let totalSgst = 0
+  let totalIgst = 0
+  if (explicitSplit > 0) {
+    totalCgst = override?.cgstAmount || 0
+    totalSgst = override?.sgstAmount || 0
+    totalIgst = override?.igstAmount || 0
+    // Normalize physically-impossible splits: an intra-state supply cannot carry
+    // IGST, and an inter-state one cannot carry CGST/SGST. Desktop's scan flow
+    // buckets a bare bottom-line tax under IGST for display, and OCR models
+    // sometimes mislabel the same way — re-split by the actual state decision so
+    // both apps store the same, legal split. Mixed splits pass through untouched.
+    if (!gst.isInterState && totalIgst > 0 && totalCgst === 0 && totalSgst === 0) {
+      totalCgst = tax / 2
+      totalSgst = tax / 2
+      totalIgst = 0
+    } else if (gst.isInterState && totalIgst === 0) {
+      totalIgst = tax
+      totalCgst = 0
+      totalSgst = 0
+    }
+  } else if (gst.isInterState) {
+    totalIgst = tax
+  } else {
+    totalCgst = tax / 2
+    totalSgst = tax / 2
+  }
+
+  // Recover the doc discount the caller passed to computeGstValues, so the
+  // override path nets it identically (totalAmount = subtotal + tax − discount).
+  const docDiscount = gst.subtotal + gst.taxAmount - gst.totalAmount
+
+  return {
+    ...gst,
+    taxAmount: tax,
+    totalAmount: gst.subtotal + tax - docDiscount,
+    totalCgst,
+    totalSgst,
+    totalIgst,
+  }
+}

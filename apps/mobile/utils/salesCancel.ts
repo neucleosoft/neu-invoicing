@@ -56,6 +56,13 @@ export async function cancelInvoice(db: Db, id: string): Promise<void> {
     if (!invoice || invoice.type !== 'INVOICE') throw new Error('Invoice not found')
     if (invoice.cancelledAt) return // idempotent — never reverse twice
 
+    // Paid/part-paid invoices must be reversed with a credit note — their live
+    // payment rows would disagree with the recompute engine if the invoice were
+    // simply cancelled. Same guard as desktop sales:cancel.
+    if ((invoice.amountPaid || 0) > 0) {
+      throw new Error('This invoice has a payment against it — reverse it with a credit note instead')
+    }
+
     await tx
       .update(schema.customer)
       .set({ currentBalance: sql`${schema.customer.currentBalance} - ${invoice.balanceDue}` })

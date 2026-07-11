@@ -18,6 +18,8 @@ import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { formatCurrency } from '@/utils/currency'
+import type { PurchaseTaxOverride } from '@neu/shared'
+
 import { updatePurchaseBill, type PurchaseLineInput } from '@/utils/purchaseSave'
 
 type Supplier = typeof schema.supplier.$inferSelect
@@ -54,6 +56,15 @@ export default function EditPurchaseScreen() {
   const [saving, setSaving] = useState(false)
   const [showSupplierPicker, setShowSupplierPicker] = useState(false)
   const [showCatalogPicker, setShowCatalogPicker] = useState(false)
+  // Bill-level tax recovered from a scanned bill (tax stored on the header while
+  // every line's taxRate is 0), including its stored CGST/SGST/IGST split so a
+  // re-save preserves it byte-for-byte. Deactivates if the user types a per-line
+  // tax rate.
+  const [taxOverride, setTaxOverride] = useState<PurchaseTaxOverride | null>(null)
+  // Document-level discount (totalAmount = subtotal + tax − discount). Loaded
+  // from the stored bill so an edit never silently drops a discount applied on
+  // the other device.
+  const [docDiscountStr, setDocDiscountStr] = useState('0')
 
   useEffect(() => {
     db.select()
@@ -127,6 +138,25 @@ export default function EditPurchaseScreen() {
           taxRate: bi.taxRate,
         })),
       )
+
+      // Recover a bill-level tax override: tax stored on the header that the
+      // lines can't explain (all line taxRates 0). Without this, re-saving an
+      // OCR-scanned bill would recompute its tax from the lines — i.e. to zero.
+      // The stored split rides along so a re-save preserves it exactly.
+      const linesCarryTax = billItems.some((bi) => bi.taxRate > 0)
+      setTaxOverride(
+        !linesCarryTax && bill.taxAmount > 0.01
+          ? {
+              taxAmount: bill.taxAmount,
+              cgstAmount: bill.cgstAmount,
+              sgstAmount: bill.sgstAmount,
+              igstAmount: bill.igstAmount,
+            }
+          : null,
+      )
+
+      setDocDiscountStr(String(bill.discount ?? 0))
+
       setLoading(false)
     }
     load()
@@ -135,8 +165,11 @@ export default function EditPurchaseScreen() {
   const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? ''
 
   const subtotal = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount), 0)
-  const taxAmount = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100), 0)
-  const total = subtotal + taxAmount
+  const computedTax = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100), 0)
+  const overrideActive = taxOverride != null && lines.every((l) => !l.taxRate)
+  const taxAmount = overrideActive ? (taxOverride?.taxAmount ?? 0) : computedTax
+  const docDiscount = parseFloat(docDiscountStr) || 0
+  const total = subtotal + taxAmount - docDiscount
 
   function pickSupplier(newId: string) {
     if (newId !== supplierId) setLines([])
@@ -199,6 +232,8 @@ export default function EditPurchaseScreen() {
         supplierInvoiceNumber: supplierInvoiceNumber.trim() || null,
         supplierInvoiceDate: null,
         notes: notes.trim() || null,
+        discount: docDiscount,
+        taxOverride: overrideActive ? taxOverride : null,
       }
       const lineInputs: PurchaseLineInput[] = lines.map((l) => ({
         supplierItemId: l.supplierItemId,
@@ -335,9 +370,18 @@ export default function EditPurchaseScreen() {
 
       <Field label="Notes" value={notes} onChangeText={setNotes} placeholder="Optional" multiline />
 
+      <Field
+        label="Bill Discount (optional)"
+        value={docDiscountStr}
+        onChangeText={setDocDiscountStr}
+        placeholder="0"
+        keyboardType="numeric"
+      />
+
       <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.totals}>
         <TotalRow label="Subtotal" value={subtotal} />
-        <TotalRow label="Tax" value={taxAmount} />
+        <TotalRow label={overrideActive ? 'Tax (from scanned bill)' : 'Tax'} value={taxAmount} />
+        {docDiscount > 0 && <TotalRow label="Discount" value={-docDiscount} />}
         <TotalRow label="Total" value={total} bold />
       </ThemedView>
 

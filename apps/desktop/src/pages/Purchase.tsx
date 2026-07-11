@@ -809,14 +809,17 @@ const Purchase = () => {
       return sum + ((qty * rate - discount) * taxRate / 100)
     }, 0)
 
-    // If the user (or AI extraction) populated any of CGST/SGST/IGST at the bill level,
-    // those override per-item tax. Otherwise fall back to per-item computation.
+    // If the user (or AI extraction) populated any of CGST/SGST/IGST at the bill
+    // level, those override per-item tax — but ONLY while every line's own tax
+    // rate is 0 (same deactivation rule as mobile: typing a per-line rate takes
+    // over, so the two sources can never both apply). Otherwise fall back to
+    // per-item computation.
     const breakdownTotal = taxBreakdown.cgst + taxBreakdown.sgst + taxBreakdown.igst
-    const useBreakdown = breakdownTotal > 0
+    const useBreakdown = breakdownTotal > 0 && billItems.every((it) => !(it.taxRate || 0))
     const taxAmount = useBreakdown ? breakdownTotal : computedTax
     const total = subtotal + taxAmount
 
-    return { subtotal, taxAmount, total }
+    return { subtotal, taxAmount, total, useBreakdown }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -840,7 +843,7 @@ const Purchase = () => {
       return
     }
 
-    const { subtotal, taxAmount, total } = calculateTotals()
+    const { subtotal, taxAmount, total, useBreakdown } = calculateTotals()
 
     // Keep _extractedName: backend's resolveSupplierItem reads it to auto-create SupplierItem rows
     // for lines the user didn't map to the catalog (typical AI-extraction path).
@@ -853,9 +856,12 @@ const Purchase = () => {
         items: itemsToSave,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
-        cgstAmount: taxBreakdown.cgst,
-        sgstAmount: taxBreakdown.sgst,
-        igstAmount: taxBreakdown.igst,
+        // Send the explicit split only while the bill-level breakdown is the
+        // active tax source — a stale breakdown from a scan must not override
+        // the state-based split once per-line rates take over.
+        cgstAmount: useBreakdown ? taxBreakdown.cgst : 0,
+        sgstAmount: useBreakdown ? taxBreakdown.sgst : 0,
+        igstAmount: useBreakdown ? taxBreakdown.igst : 0,
         totalAmount: total,
         // Only include attachment if a new one was uploaded this session
         ...(attachmentBytes && {
@@ -892,9 +898,10 @@ const Purchase = () => {
         items: itemsToSave,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
-        cgstAmount: taxBreakdown.cgst,
-        sgstAmount: taxBreakdown.sgst,
-        igstAmount: taxBreakdown.igst,
+        // Same rule as update above: the split rides only with an active breakdown.
+        cgstAmount: useBreakdown ? taxBreakdown.cgst : 0,
+        sgstAmount: useBreakdown ? taxBreakdown.sgst : 0,
+        igstAmount: useBreakdown ? taxBreakdown.igst : 0,
         totalAmount: total,
         balanceDue: total,
         status: 'DRAFT',

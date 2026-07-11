@@ -43,6 +43,9 @@ export type ExtractedBill = {
   subtotal: number
   taxAmount: number
   totalAmount: number
+  cgstAmount: number
+  sgstAmount: number
+  igstAmount: number
   items: ExtractedItem[]
 }
 
@@ -63,6 +66,9 @@ Extract the data from this bill image and return ONLY valid JSON in this exact f
   "subtotal": 0,
   "taxAmount": 0,
   "totalAmount": 0,
+  "cgstAmount": 0,
+  "sgstAmount": 0,
+  "igstAmount": 0,
   "items": [
     {
       "name": "string (item description as printed on the bill)",
@@ -81,6 +87,12 @@ Rules:
 - Numbers must be numbers (not strings), with no currency symbols or commas
 - Dates must be YYYY-MM-DD format
 - The "items" array can be empty if no line items are visible
+- TAX HANDLING: only set per-item "taxRate" when the bill shows a tax %
+  column (or per-line CGST/SGST/IGST values) for each line item. When the
+  bill shows tax only as a single total at the bottom (no per-item tax
+  column), leave every item's "taxRate" at 0 and put the total tax into
+  "taxAmount" (and split into cgst/sgst/igst when those line items exist).
+  Do not distribute a bottom-line tax across items.
 - Return ONLY the JSON object, nothing else.`
 
 // Strip markdown fences / preamble, then JSON.parse the first {...} block.
@@ -120,6 +132,9 @@ function parseExtractedJson(text: string): OcrResult {
         subtotal: Number(raw.subtotal) || 0,
         taxAmount: Number(raw.taxAmount) || 0,
         totalAmount: Number(raw.totalAmount) || 0,
+        cgstAmount: Number(raw.cgstAmount) || 0,
+        sgstAmount: Number(raw.sgstAmount) || 0,
+        igstAmount: Number(raw.igstAmount) || 0,
         items,
       },
     }

@@ -1,5 +1,11 @@
 import { ipcMain } from 'electron'
+import { applyPurchaseTaxOverride, computeGstValues } from '@neu/shared'
 import { getPrisma } from '../database'
+import { reversePayment } from './payment'
+
+// Tag on the PAYMENT_OUT row auto-created for a bill saved with an up-front
+// payment — the purchase twin of sales' 'Paid with invoice'.
+const INLINE_PAYMENT_NOTE = 'Paid with bill'
 
 // Normalize a SupplierItem name for fuzzy-but-bounded matching. Must stay in sync with
 // the inline normalizer in src/pages/Purchase.tsx — the frontend pre-selects on extraction
@@ -519,32 +525,42 @@ export const setupPurchaseHandlers = () => {
         const supplierId = data.supplierId || data.partyId
         const normalizedItems = await normalizePurchaseItems(tx, supplierId, data.items)
 
-        // Calculate totals
-        let subtotal = 0
-        let computedTax = 0
+        // GST split (place of supply, inter-state CGST/SGST vs IGST, per-line tax)
+        // via the shared helper — the same math mobile runs, so a bill entered on
+        // either device stores identical tax columns. The buyer is OUR company; the
+        // counter-party is the SUPPLIER. The bill-level tax override (a scanned bill
+        // showing tax only as a single total, item.taxRate all 0) goes through the
+        // shared applyPurchaseTaxOverride — one rule on both platforms.
+        const [company, supplier] = await Promise.all([
+          tx.company.findFirst(),
+          tx.supplier.findUnique({ where: { id: supplierId } })
+        ])
+        const gst = applyPurchaseTaxOverride(
+          computeGstValues({
+            company: company ? { stateCode: company.stateCode, stateName: company.stateName } : null,
+            party: { taxId: supplier?.taxId, stateCode: supplier?.stateCode, stateName: supplier?.stateName },
+            items: normalizedItems.map((item) => ({
+              quantity: item.quantity,
+              rate: item.rate,
+              discount: item.discount,
+              taxRate: item.taxRate,
+              catalogHsnCode: item.hsnCode || null
+            })),
+            docDiscount: data.discount || 0
+          }),
+          { taxAmount: data.taxAmount, cgstAmount: data.cgstAmount, sgstAmount: data.sgstAmount, igstAmount: data.igstAmount }
+        )
 
-        normalizedItems.forEach((item: any) => {
-          const itemTotal = item.quantity * item.rate - (item.discount || 0)
-          subtotal += itemTotal
-          computedTax += (itemTotal * (item.taxRate || 0)) / 100
-        })
+        const { subtotal, taxAmount, totalAmount } = gst
+        const amountPaid = data.amountPaid || 0
+        const balanceDue = totalAmount - amountPaid
 
-        // Bill-level tax override: when the original bill shows tax only as a
-        // single total (no per-item tax column), the renderer sends the explicit
-        // `taxAmount` and leaves item.taxRate at 0. Honor it here so totals
-        // match the source document.
-        const taxOverrideProvided =
-          typeof data.taxAmount === 'number' && Number.isFinite(data.taxAmount) && data.taxAmount >= 0
-        const taxAmount = taxOverrideProvided ? data.taxAmount : computedTax
-
-        const totalAmount = subtotal + taxAmount - (data.discount || 0)
-        const balanceDue = totalAmount - (data.amountPaid || 0)
-
-        // Determine status
+        // Status derives from the money, exactly like the recompute engine:
+        // nothing left to pay → PAID, some money moved → PARTIAL, else DRAFT.
         let status = 'DRAFT'
-        if (data.amountPaid >= totalAmount) {
+        if (balanceDue <= 0) {
           status = 'PAID'
-        } else if (data.amountPaid > 0) {
+        } else if (amountPaid > 0) {
           status = 'PARTIAL'
         }
 
@@ -564,25 +580,38 @@ export const setupPurchaseHandlers = () => {
             subtotal,
             discount: data.discount || 0,
             taxAmount,
-            cgstAmount: data.cgstAmount || 0,
-            sgstAmount: data.sgstAmount || 0,
-            igstAmount: data.igstAmount || 0,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
             totalAmount,
-            amountPaid: data.amountPaid || 0,
+            amountPaid,
             balanceDue,
             status: status as any,
             notes: data.notes,
             attachmentData: data.attachmentData ?? null,
             attachmentMimeType: data.attachmentMimeType ?? null,
             items: {
-              create: normalizedItems.map((item) => ({
+              create: normalizedItems.map((item, idx) => ({
                 supplierItemId: item.supplierItemId,
                 hsnCode: item.hsnCode,
                 quantity: item.quantity,
                 rate: item.rate,
                 discount: item.discount,
                 taxRate: item.taxRate,
-                total: item.total
+                total: gst.items[idx].total,
+                taxableAmount: gst.items[idx].taxableAmount,
+                cgstRate: gst.items[idx].cgstRate,
+                cgstAmount: gst.items[idx].cgstAmount,
+                sgstRate: gst.items[idx].sgstRate,
+                sgstAmount: gst.items[idx].sgstAmount,
+                igstRate: gst.items[idx].igstRate,
+                igstAmount: gst.items[idx].igstAmount,
+                cessRate: gst.items[idx].cessRate,
+                cessAmount: gst.items[idx].cessAmount
               }))
             }
           },
@@ -595,6 +624,25 @@ export const setupPurchaseHandlers = () => {
         })
 
         await applyStockUpdates(tx, normalizedItems, created.id, 'increment')
+
+        // Record any up-front payment as a real Payment Out row so it shows in the
+        // supplier's ledger AND so the recompute engine (which sums payment ROWS)
+        // can see the money. currentBalance was already bumped by the NET balanceDue
+        // above, so the row is NOT re-applied — it's the ledger record of that money.
+        if (amountPaid > 0) {
+          await tx.paymentTransaction.create({
+            data: {
+              type: 'PAYMENT_OUT',
+              supplierId,
+              amount: amountPaid,
+              paymentMode: data.paymentMode || 'CASH',
+              paymentDate: new Date(data.billDate),
+              referenceType: 'BILL',
+              purchaseBillId: created.id,
+              notes: INLINE_PAYMENT_NOTE
+            }
+          })
+        }
 
         // If this bill references a PO, mark that PO as CLOSED now that the
         // financial side is recorded. Future bills referencing the same PO are
@@ -643,31 +691,53 @@ export const setupPurchaseHandlers = () => {
         }
 
         const supplierId = data.supplierId || data.partyId
+
+        // A bill's payment rows carry the supplier they were paid to. Changing
+        // the supplier while active payments exist would strand those rows on
+        // the old supplier — live balances would diverge from the recompute
+        // engine's rebuild, and a later cancel would corrupt BOTH suppliers.
+        // Block it; the user cancels the payments first (or keeps the supplier).
+        if (supplierId !== existingBill.supplierId) {
+          const activeLinked = await tx.paymentTransaction.count({
+            where: { purchaseBillId: id, cancelledAt: null, deletedAt: null }
+          })
+          if (activeLinked > 0) {
+            throw new Error('This bill has payments recorded against it — cancel those payments before changing the supplier')
+          }
+        }
+
         const normalizedItems = await normalizePurchaseItems(tx, supplierId, data.items)
 
-        let subtotal = 0
-        let computedTax = 0
+        // Same shared GST computation + override rule as purchase:create above.
+        const [company, supplier] = await Promise.all([
+          tx.company.findFirst(),
+          tx.supplier.findUnique({ where: { id: supplierId } })
+        ])
+        const gst = applyPurchaseTaxOverride(
+          computeGstValues({
+            company: company ? { stateCode: company.stateCode, stateName: company.stateName } : null,
+            party: { taxId: supplier?.taxId, stateCode: supplier?.stateCode, stateName: supplier?.stateName },
+            items: normalizedItems.map((item) => ({
+              quantity: item.quantity,
+              rate: item.rate,
+              discount: item.discount,
+              taxRate: item.taxRate,
+              catalogHsnCode: item.hsnCode || null
+            })),
+            docDiscount: data.discount || 0
+          }),
+          { taxAmount: data.taxAmount, cgstAmount: data.cgstAmount, sgstAmount: data.sgstAmount, igstAmount: data.igstAmount }
+        )
 
-        normalizedItems.forEach((item: any) => {
-          const itemTotal = item.quantity * item.rate - (item.discount || 0)
-          subtotal += itemTotal
-          computedTax += (itemTotal * (item.taxRate || 0)) / 100
-        })
+        const { subtotal, taxAmount, totalAmount } = gst
+        const amountPaid = existingBill.amountPaid || 0
+        const balanceDue = totalAmount - amountPaid
 
-        const taxOverrideProvided =
-          typeof data.taxAmount === 'number' && Number.isFinite(data.taxAmount) && data.taxAmount >= 0
-        const taxAmount = taxOverrideProvided ? data.taxAmount : computedTax
-
-        const totalAmount = subtotal + taxAmount - (data.discount || 0)
-        const balanceDue = totalAmount - (existingBill.amountPaid || 0)
-
-        let status = existingBill.status
-        if (existingBill.amountPaid >= totalAmount) {
+        let status = 'DRAFT'
+        if (balanceDue <= 0) {
           status = 'PAID'
-        } else if ((existingBill.amountPaid || 0) > 0) {
+        } else if (amountPaid > 0) {
           status = 'PARTIAL'
-        } else {
-          status = 'DRAFT'
         }
 
         await tx.supplier.update({
@@ -709,9 +779,13 @@ export const setupPurchaseHandlers = () => {
             subtotal,
             discount: data.discount || 0,
             taxAmount,
-            cgstAmount: data.cgstAmount ?? 0,
-            sgstAmount: data.sgstAmount ?? 0,
-            igstAmount: data.igstAmount ?? 0,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
             totalAmount,
             balanceDue,
             status: status as any,
@@ -719,14 +793,23 @@ export const setupPurchaseHandlers = () => {
             attachmentData: data.attachmentData ?? undefined,
             attachmentMimeType: data.attachmentMimeType ?? undefined,
             items: {
-              create: normalizedItems.map((item) => ({
+              create: normalizedItems.map((item, idx) => ({
                 supplierItemId: item.supplierItemId,
                 hsnCode: item.hsnCode,
                 quantity: item.quantity,
                 rate: item.rate,
                 discount: item.discount,
                 taxRate: item.taxRate,
-                total: item.total
+                total: gst.items[idx].total,
+                taxableAmount: gst.items[idx].taxableAmount,
+                cgstRate: gst.items[idx].cgstRate,
+                cgstAmount: gst.items[idx].cgstAmount,
+                sgstRate: gst.items[idx].sgstRate,
+                sgstAmount: gst.items[idx].sgstAmount,
+                igstRate: gst.items[idx].igstRate,
+                igstAmount: gst.items[idx].igstAmount,
+                cessRate: gst.items[idx].cessRate,
+                cessAmount: gst.items[idx].cessAmount
               }))
             }
           },
@@ -783,11 +866,30 @@ export const setupPurchaseHandlers = () => {
           return
         }
 
+        // A paid/part-paid bill carries active payment rows. Cancel them FIRST via
+        // the exact reverse flow (which restores the bill's amountPaid/balanceDue and
+        // the supplier's balance), then reverse the bill's now-full balance. Leaving
+        // them active would disagree with the recompute engine, which counts every
+        // active payment row against the supplier.
+        const linkedPayments = await tx.paymentTransaction.findMany({
+          where: { purchaseBillId: id, cancelledAt: null, deletedAt: null }
+        })
+        for (const p of linkedPayments) {
+          await reversePayment(tx, p)
+          await tx.paymentTransaction.update({
+            where: { id: p.id },
+            data: { cancelledAt: new Date() }
+          })
+        }
+        const freshBill = linkedPayments.length > 0
+          ? await tx.purchaseBill.findUnique({ where: { id } })
+          : bill
+
         await tx.supplier.update({
           where: { id: bill.supplierId },
           data: {
             currentBalance: {
-              decrement: bill.balanceDue
+              decrement: freshBill.balanceDue
             }
           }
         })

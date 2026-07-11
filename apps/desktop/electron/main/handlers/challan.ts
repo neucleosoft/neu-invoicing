@@ -378,6 +378,9 @@ export const setupChallanHandlers = () => {
             balanceDue: challan.totalAmount,
             status: 'DRAFT',
             notes: challan.notes,
+            // Mirror mobile's convert: carry the challan's terms onto the
+            // invoice and stamp each line's taxable base.
+            termsConditions: challan.termsConditions ?? null,
             items: {
               create: challan.items.map((item: any) => ({
                 itemId: item.itemId,
@@ -385,7 +388,8 @@ export const setupChallanHandlers = () => {
                 rate: item.rate,
                 discount: item.discount || 0,
                 taxRate: item.taxRate || 0,
-                total: item.total
+                total: item.total,
+                taxableAmount: item.quantity * item.rate - (item.discount || 0)
               }))
             }
           },

@@ -247,10 +247,25 @@ export default function EditCreditNoteScreen() {
           .set({ currentBalance: sql`${schema.customer.currentBalance} + ${newSign * total}` })
           .where(eq(schema.customer.id, existing.customerId))
         if (referenceInvoiceId) {
-          await tx
-            .update(schema.salesInvoice)
-            .set({ balanceDue: sql`${schema.salesInvoice.balanceDue} + ${newSign * total}` })
+          // Adjust balanceDue AND derive the status from it, exactly like desktop
+          // creditNote.ts on update — reverse-old above touches only balanceDue
+          // (same as desktop); the apply-new step owns the status.
+          const [inv] = await tx
+            .select()
+            .from(schema.salesInvoice)
             .where(eq(schema.salesInvoice.id, referenceInvoiceId))
+            .limit(1)
+          if (inv) {
+            const newBalanceDue = inv.balanceDue + newSign * total
+            const newStatus =
+              existing.type === 'CREDIT_NOTE'
+                ? newBalanceDue <= 0 ? 'PAID' : inv.amountPaid > 0 ? 'PARTIAL' : inv.status
+                : newBalanceDue > 0 && inv.status === 'PAID' ? 'PARTIAL' : inv.status
+            await tx
+              .update(schema.salesInvoice)
+              .set({ balanceDue: newBalanceDue, status: newStatus })
+              .where(eq(schema.salesInvoice.id, referenceInvoiceId))
+          }
         }
       })
       router.back()

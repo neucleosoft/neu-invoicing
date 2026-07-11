@@ -378,6 +378,14 @@ export const setupSalesHandlers = () => {
           return
         }
 
+        // Paid/part-paid invoices must be reversed with a credit note — their live
+        // payment rows would disagree with the recompute engine if the invoice were
+        // simply cancelled. The UI already routes these to sales:cancelWithCreditNote;
+        // this guard makes the rule unconditional.
+        if ((invoice.amountPaid || 0) > 0) {
+          throw new Error('This invoice has a payment against it — reverse it with a credit note instead')
+        }
+
         await tx.customer.update({
           where: { id: invoice.customerId },
           data: {

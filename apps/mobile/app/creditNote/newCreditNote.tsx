@@ -246,10 +246,25 @@ export default function NewCreditNoteScreen() {
           .where(eq(schema.customer.id, customerId))
 
         if (referenceInvoiceId) {
-          await tx
-            .update(schema.salesInvoice)
-            .set({ balanceDue: sql`${schema.salesInvoice.balanceDue} + ${sign * total}` })
+          // Adjust balanceDue AND derive the status from it, exactly like desktop
+          // creditNote.ts — a credit note that nets an invoice to zero flips it
+          // to PAID; a debit note re-opening a PAID invoice makes it PARTIAL.
+          const [inv] = await tx
+            .select()
+            .from(schema.salesInvoice)
             .where(eq(schema.salesInvoice.id, referenceInvoiceId))
+            .limit(1)
+          if (inv) {
+            const newBalanceDue = inv.balanceDue + sign * total
+            const newStatus =
+              type === 'CREDIT_NOTE'
+                ? newBalanceDue <= 0 ? 'PAID' : inv.amountPaid > 0 ? 'PARTIAL' : inv.status
+                : newBalanceDue > 0 && inv.status === 'PAID' ? 'PARTIAL' : inv.status
+            await tx
+              .update(schema.salesInvoice)
+              .set({ balanceDue: newBalanceDue, status: newStatus })
+              .where(eq(schema.salesInvoice.id, referenceInvoiceId))
+          }
         }
       })
       router.back()

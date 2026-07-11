@@ -54,6 +54,73 @@ export async function backfillInlinePayments(): Promise<void> {
   }
 }
 
+// Same backfill, purchase side. Desktop's purchase:create used to stamp `amountPaid`
+// on the bill with NO PaymentTransaction row behind it (mobile bills always started
+// unpaid, so this is desktop-born data only). Without the row, the recompute engine
+// rebuilds those bills as unpaid and inflates the supplier's balance by the paid
+// amount — this records the missing PAYMENT_OUT rows so the rebuild sees the money.
+// Additive + idempotent, same rules as the sales backfill above.
+export async function backfillInlinePurchasePayments(): Promise<void> {
+  const prisma = getPrisma()
+  try {
+    const [bills, payments] = await Promise.all([
+      prisma.purchaseBill.findMany({
+        select: { id: true, supplierId: true, billDate: true, amountPaid: true, deletedAt: true, cancelledAt: true },
+      }),
+      prisma.paymentTransaction.findMany({
+        where: { type: 'PAYMENT_OUT' },
+        select: { purchaseBillId: true, amount: true, deletedAt: true, cancelledAt: true },
+      }),
+    ])
+    const paidRows = new Map<string, number>()
+    for (const p of payments)
+      if (p.purchaseBillId && p.deletedAt == null && p.cancelledAt == null)
+        paidRows.set(p.purchaseBillId, (paidRows.get(p.purchaseBillId) ?? 0) + p.amount)
+
+    const gaps = bills
+      .filter((b) => b.deletedAt == null && b.cancelledAt == null)
+      .map((b) => ({ b, gap: (b.amountPaid || 0) - (paidRows.get(b.id) ?? 0) }))
+      .filter(({ gap }) => gap > 0.01)
+    if (gaps.length === 0) return
+
+    await prisma.$transaction(
+      gaps.map(({ b, gap }) =>
+        prisma.paymentTransaction.create({
+          data: {
+            type: 'PAYMENT_OUT',
+            supplierId: b.supplierId,
+            amount: gap,
+            paymentMode: 'CASH',
+            paymentDate: b.billDate,
+            referenceType: 'BILL',
+            purchaseBillId: b.id,
+            notes: 'Paid with bill (backfilled)',
+          },
+        }),
+      ),
+    )
+    console.log(`[inlinePurchaseBackfill] recorded ${gaps.length} missing payment(s)`)
+  } catch (e) {
+    console.error('[inlinePurchaseBackfill] failed, app continues:', e)
+  }
+}
+
+// Stamp legacy payment rows' updatedAt. The migration SQL carries the same
+// UPDATE, but users whose DB reaches the column via the `db push` baseline path
+// (database.ts fallback) never execute migration SQL — so without this, their
+// old rows keep updatedAt NULL and newest-wins sync has nothing to compare.
+// Idempotent single statement; new rows are stamped by the client.
+export async function backfillPaymentUpdatedAt(): Promise<void> {
+  const prisma = getPrisma()
+  try {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "PaymentTransaction" SET "updatedAt" = "createdAt" WHERE "updatedAt" IS NULL`,
+    )
+  } catch (e) {
+    console.error('[paymentUpdatedAtBackfill] failed, app continues:', e)
+  }
+}
+
 // Recompute an invoice/bill payment status from its total and amount paid.
 const computeStatus = (total: number, paid: number): 'PAID' | 'PARTIAL' | 'DRAFT' => {
   if (total - paid <= 0) return 'PAID'
@@ -96,8 +163,9 @@ const applyPayment = async (tx: any, p: any) => {
 }
 
 // Reverse a payment's effect — the exact inverse of applyPayment. Used when a
-// payment is deleted or before an update re-applies the new values.
-const reversePayment = async (tx: any, p: any) => {
+// payment is deleted or before an update re-applies the new values. Exported so
+// purchase:cancel can reverse a bill's linked payments before cancelling it.
+export const reversePayment = async (tx: any, p: any) => {
   if (p.type === 'PAYMENT_IN') {
     if (p.customerId) {
       await tx.customer.update({ where: { id: p.customerId }, data: { currentBalance: { increment: p.amount } } })

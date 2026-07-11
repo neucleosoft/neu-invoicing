@@ -25,6 +25,8 @@ import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { extractBillFromImage } from '@/utils/billOcr'
 import { formatCurrency } from '@/utils/currency'
+import type { PurchaseTaxOverride } from '@neu/shared'
+
 import {
   createPurchaseBill,
   generateBillNumber,
@@ -61,6 +63,17 @@ export default function NewPurchaseScreen() {
   const [billDate, setBillDate] = useState(todayStr())
   const [notes, setNotes] = useState('')
   const [lines, setLines] = useState<BillLine[]>([])
+  // Up-front payment typed on the form — becomes a real tagged PAYMENT_OUT row
+  // on save (mirrors desktop's create form). Kept as text for free typing.
+  const [amountPaidStr, setAmountPaidStr] = useState('')
+  // Document-level discount, subtracted from the grand total AFTER tax
+  // (totalAmount = subtotal + tax − discount, mirrors desktop).
+  const [docDiscountStr, setDocDiscountStr] = useState('')
+  // Bill-level tax from a scanned bill that shows tax only at the bottom
+  // (every line taxRate 0): the total plus, when the bill printed one, its
+  // explicit CGST/SGST/IGST breakdown. Deactivates automatically if the user
+  // types any per-line tax rate, so the two can never both apply.
+  const [taxOverride, setTaxOverride] = useState<PurchaseTaxOverride | null>(null)
 
   const [saving, setSaving] = useState(false)
   const [showSupplierPicker, setShowSupplierPicker] = useState(false)
@@ -102,8 +115,11 @@ export default function NewPurchaseScreen() {
   const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? ''
 
   const subtotal = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount), 0)
-  const taxAmount = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100), 0)
-  const total = subtotal + taxAmount
+  const computedTax = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100), 0)
+  const overrideActive = taxOverride != null && lines.every((l) => !l.taxRate)
+  const taxAmount = overrideActive ? (taxOverride?.taxAmount ?? 0) : computedTax
+  const docDiscount = parseFloat(docDiscountStr) || 0
+  const total = subtotal + taxAmount - docDiscount
 
   function pickSupplier(id: string) {
     if (id !== supplierId) setLines([])
@@ -255,6 +271,23 @@ export default function NewPurchaseScreen() {
         })),
       )
 
+      // Bills that show tax only as a bottom line arrive with every line's
+      // taxRate 0 and a doc-level taxAmount — honor that figure (and the bill's
+      // printed CGST/SGST/IGST breakdown, when the model extracted one) as the
+      // bill-level override. Same rule as desktop; the shared helper normalises
+      // an impossible split against the supplier's state.
+      const linesCarryTax = data.items.some((it) => (it.taxRate || 0) > 0)
+      setTaxOverride(
+        !linesCarryTax && data.taxAmount > 0
+          ? {
+              taxAmount: data.taxAmount,
+              cgstAmount: data.cgstAmount,
+              sgstAmount: data.sgstAmount,
+              igstAmount: data.igstAmount,
+            }
+          : null,
+      )
+
       const supplierMsg = matched
         ? `Supplier matched: ${matched.name}.`
         : data.supplierName
@@ -306,6 +339,10 @@ export default function NewPurchaseScreen() {
         supplierInvoiceNumber: supplierInvoiceNumber.trim() || null,
         supplierInvoiceDate: null,
         notes: notes.trim() || null,
+        discount: docDiscount,
+        taxOverride: overrideActive ? taxOverride : null,
+        amountPaid: parseFloat(amountPaidStr) || 0,
+        paymentMode: 'CASH',
         attachmentData,
         attachmentMimeType,
       }
@@ -457,11 +494,28 @@ export default function NewPurchaseScreen() {
 
       <Field label="Notes" value={notes} onChangeText={setNotes} placeholder="Optional" multiline />
 
+      <Field
+        label="Bill Discount (optional)"
+        value={docDiscountStr}
+        onChangeText={setDocDiscountStr}
+        placeholder="0"
+        keyboardType="numeric"
+      />
+
       <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.totals}>
         <TotalRow label="Subtotal" value={subtotal} />
-        <TotalRow label="Tax" value={taxAmount} />
+        <TotalRow label={overrideActive ? 'Tax (from scanned bill)' : 'Tax'} value={taxAmount} />
+        {docDiscount > 0 && <TotalRow label="Discount" value={-docDiscount} />}
         <TotalRow label="Total" value={total} bold />
       </ThemedView>
+
+      <Field
+        label="Amount Paid now (optional)"
+        value={amountPaidStr}
+        onChangeText={setAmountPaidStr}
+        placeholder="0"
+        keyboardType="numeric"
+      />
 
       <Pressable
         style={[styles.saveButton, saving && styles.saveButtonDisabled]}

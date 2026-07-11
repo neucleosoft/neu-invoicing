@@ -1,3 +1,5 @@
+import { computeGstValues } from '@neu/shared'
+
 // Paid-status is DERIVED from the money, never hand-set: amountPaid vs total.
 // Mirrors the shared computePaymentStatus / desktop computeStatus rule so the
 // invoice's label can never contradict what was actually paid. OVERDUE is NOT
@@ -117,85 +119,71 @@ export const buildSalesDocumentValues = async (tx: any, data: any) => {
 
   if (!customer) throw new Error('Customer not found')
 
-  const placeOfSupply = data.placeOfSupply || customer.stateCode || company?.stateCode || ''
-  const placeOfSupplyName = data.placeOfSupplyName || customer.stateName || company?.stateName || ''
-  const companyStateCode = company?.stateCode || ''
-  const isInterState = companyStateCode !== placeOfSupply && placeOfSupply !== ''
-
-  let subtotal = 0
-  let taxAmount = 0
-  let totalCgst = 0
-  let totalSgst = 0
-  let totalIgst = 0
-  let totalCess = 0
-
-  const processedItems: any[] = []
+  // Fetch each line's catalog item for the HSN fallback chain (typed HSN →
+  // item.hsnCode → item.skuHsn) the shared helper applies.
+  const catalogItems: any[] = []
   for (const item of data.items) {
-    const itemTaxableAmount = item.quantity * item.rate - (item.discount || 0)
-    subtotal += itemTaxableAmount
+    catalogItems.push(await tx.item.findUnique({ where: { id: item.itemId } }))
+  }
 
-    const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
-    const halfRate = (item.taxRate || 0) / 2
+  // ONE GST implementation for the whole product: the shared computeGstValues
+  // (packages/shared/src/gstCompute.ts) that mobile already uses. This function
+  // used to hand-roll the identical math; delegating removes the second copy so
+  // the two apps can never drift.
+  const gst = computeGstValues({
+    company: company ? { stateCode: company.stateCode, stateName: company.stateName } : null,
+    party: { taxId: customer.taxId, stateCode: customer.stateCode, stateName: customer.stateName },
+    items: data.items.map((item: any, idx: number) => ({
+      quantity: item.quantity,
+      rate: item.rate,
+      discount: item.discount,
+      taxRate: item.taxRate,
+      cessRate: item.cessRate,
+      cessAmount: item.cessAmount,
+      hsnCode: item.hsnCode,
+      catalogHsnCode: catalogItems[idx]?.hsnCode,
+      catalogSkuHsn: catalogItems[idx]?.skuHsn
+    })),
+    docDiscount: data.discount || 0,
+    placeOfSupply: data.placeOfSupply,
+    placeOfSupplyName: data.placeOfSupplyName
+  })
 
-    let gstComponents
-    if (isInterState) {
-      gstComponents = {
-        cgstRate: 0, cgstAmount: 0, sgstRate: 0, sgstAmount: 0,
-        igstRate: item.taxRate || 0, igstAmount: (itemTaxableAmount * (item.taxRate || 0)) / 100
-      }
-    } else {
-      gstComponents = {
-        cgstRate: halfRate, cgstAmount: (itemTaxableAmount * halfRate) / 100,
-        sgstRate: halfRate, sgstAmount: (itemTaxableAmount * halfRate) / 100,
-        igstRate: 0, igstAmount: 0
-      }
-    }
-
-    const itemCessAmount = item.cessAmount || 0
-    const itemTax = gstComponents.cgstAmount + gstComponents.sgstAmount + gstComponents.igstAmount + itemCessAmount
-
-    taxAmount += itemTax
-    totalCgst += gstComponents.cgstAmount
-    totalSgst += gstComponents.sgstAmount
-    totalIgst += gstComponents.igstAmount
-    totalCess += itemCessAmount
-
-    processedItems.push({
+  const processedItems = data.items.map((item: any, idx: number) => {
+    const g = gst.items[idx]
+    return {
       itemId: item.itemId,
       quantity: item.quantity,
       rate: item.rate,
       discount: item.discount || 0,
       taxRate: item.taxRate || 0,
-      total: itemTaxableAmount + itemTax,
-      hsnCode: item.hsnCode || dbItem?.hsnCode || dbItem?.skuHsn || '',
-      taxableAmount: itemTaxableAmount,
-      cgstRate: gstComponents.cgstRate,
-      cgstAmount: gstComponents.cgstAmount,
-      sgstRate: gstComponents.sgstRate,
-      sgstAmount: gstComponents.sgstAmount,
-      igstRate: gstComponents.igstRate,
-      igstAmount: gstComponents.igstAmount,
-      cessRate: item.cessRate || 0,
-      cessAmount: itemCessAmount
-    })
-  }
-
-  const totalAmount = subtotal + taxAmount - (data.discount || 0)
-  const supplyType = determineSupplyType(customer, totalAmount, isInterState)
+      total: g.total,
+      hsnCode: g.hsnCode,
+      taxableAmount: g.taxableAmount,
+      cgstRate: g.cgstRate,
+      cgstAmount: g.cgstAmount,
+      sgstRate: g.sgstRate,
+      sgstAmount: g.sgstAmount,
+      igstRate: g.igstRate,
+      igstAmount: g.igstAmount,
+      cessRate: g.cessRate,
+      cessAmount: g.cessAmount
+    }
+  })
 
   return {
     customer,
-    placeOfSupply,
-    placeOfSupplyName,
-    isInterState,
-    subtotal,
-    taxAmount,
-    totalAmount,
-    totalCgst,
-    totalSgst,
-    totalIgst,
-    totalCess,
-    supplyType,
+    placeOfSupply: gst.placeOfSupply,
+    placeOfSupplyName: gst.placeOfSupplyName,
+    isInterState: gst.isInterState,
+    subtotal: gst.subtotal,
+    taxAmount: gst.taxAmount,
+    totalAmount: gst.totalAmount,
+    totalCgst: gst.totalCgst,
+    totalSgst: gst.totalSgst,
+    totalIgst: gst.totalIgst,
+    totalCess: gst.totalCess,
+    supplyType: gst.supplyType,
     processedItems
   }
 }

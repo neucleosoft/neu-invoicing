@@ -1,5 +1,58 @@
 import { ipcMain } from 'electron'
+import { computeGstValues } from '@neu/shared'
 import { getPrisma } from '../database'
+
+// GST split for a note's lines via the shared computeGstValues — the same
+// implementation mobile's credit-note screens use; this file used to hand-roll
+// the identical math twice (create + update). Cess is deliberately NOT passed:
+// the CreditDebitNote tables have no cess columns on either platform, and the
+// old loops excluded it too.
+const buildNoteGstValues = async (tx: any, customerId: string, items: any[]) => {
+  const customer = await tx.customer.findUnique({ where: { id: customerId } })
+  const company = await tx.company.findFirst()
+  if (!customer) throw new Error('Customer not found')
+
+  const catalogItems: any[] = []
+  for (const item of items) {
+    catalogItems.push(await tx.item.findUnique({ where: { id: item.itemId } }))
+  }
+
+  const gst = computeGstValues({
+    company: company ? { stateCode: company.stateCode, stateName: company.stateName } : null,
+    party: { taxId: customer.taxId, stateCode: customer.stateCode, stateName: customer.stateName },
+    items: items.map((item: any, idx: number) => ({
+      quantity: item.quantity,
+      rate: item.rate,
+      discount: item.discount,
+      taxRate: item.taxRate,
+      hsnCode: item.hsnCode,
+      catalogHsnCode: catalogItems[idx]?.hsnCode,
+      catalogSkuHsn: catalogItems[idx]?.skuHsn
+    }))
+  })
+
+  const processedItems = items.map((item: any, idx: number) => {
+    const g = gst.items[idx]
+    return {
+      itemId: item.itemId,
+      quantity: item.quantity,
+      rate: item.rate,
+      discount: item.discount || 0,
+      taxRate: item.taxRate || 0,
+      total: g.total,
+      hsnCode: g.hsnCode,
+      taxableAmount: g.taxableAmount,
+      cgstRate: g.cgstRate,
+      cgstAmount: g.cgstAmount,
+      sgstRate: g.sgstRate,
+      sgstAmount: g.sgstAmount,
+      igstRate: g.igstRate,
+      igstAmount: g.igstAmount
+    }
+  })
+
+  return { gst, processedItems }
+}
 
 export const setupCreditNoteHandlers = () => {
   const prisma = getPrisma()
@@ -57,70 +110,11 @@ export const setupCreditNoteHandlers = () => {
   ipcMain.handle('creditNote:create', async (_, data) => {
     try {
       const note = await prisma.$transaction(async (tx: any) => {
-        // Get customer and company details for GST calculation
-        const customer = await tx.customer.findUnique({ where: { id: data.customerId} })
-        const company = await tx.company.findFirst()
-
-        if (!customer) throw new Error('Customer not found')
-
-        const companyStateCode = company?.stateCode || ''
-        const customerStateCode = customer.stateCode || ''
-        const isInterState = companyStateCode !== customerStateCode && customerStateCode !== ''
-
-        // Calculate totals with GST components
-        let subtotal = 0
-        let taxAmount = 0
-        let totalCgst = 0
-        let totalSgst = 0
-        let totalIgst = 0
-
-        const processedItems: any[] = []
-        for (const item of data.items) {
-          const itemTaxableAmount = item.quantity * item.rate - (item.discount || 0)
-          subtotal += itemTaxableAmount
-
-          const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
-
-          const halfRate = (item.taxRate || 0) / 2
-          let gstComponents
-          if (isInterState) {
-            gstComponents = {
-              cgstRate: 0, cgstAmount: 0, sgstRate: 0, sgstAmount: 0,
-              igstRate: item.taxRate || 0, igstAmount: (itemTaxableAmount * (item.taxRate || 0)) / 100
-            }
-          } else {
-            gstComponents = {
-              cgstRate: halfRate, cgstAmount: (itemTaxableAmount * halfRate) / 100,
-              sgstRate: halfRate, sgstAmount: (itemTaxableAmount * halfRate) / 100,
-              igstRate: 0, igstAmount: 0
-            }
-          }
-
-          const itemTax = gstComponents.cgstAmount + gstComponents.sgstAmount + gstComponents.igstAmount
-          taxAmount += itemTax
-          totalCgst += gstComponents.cgstAmount
-          totalSgst += gstComponents.sgstAmount
-          totalIgst += gstComponents.igstAmount
-
-          processedItems.push({
-            itemId: item.itemId,
-            quantity: item.quantity,
-            rate: item.rate,
-            discount: item.discount || 0,
-            taxRate: item.taxRate || 0,
-            total: itemTaxableAmount + itemTax,
-            hsnCode: item.hsnCode || dbItem?.hsnCode || dbItem?.skuHsn || '',
-            taxableAmount: itemTaxableAmount,
-            cgstRate: gstComponents.cgstRate,
-            cgstAmount: gstComponents.cgstAmount,
-            sgstRate: gstComponents.sgstRate,
-            sgstAmount: gstComponents.sgstAmount,
-            igstRate: gstComponents.igstRate,
-            igstAmount: gstComponents.igstAmount
-          })
-        }
-
-        const totalAmount = subtotal + taxAmount
+        const { gst, processedItems } = await buildNoteGstValues(tx, data.customerId, data.items)
+        const { subtotal, taxAmount, totalAmount, isInterState } = gst
+        const totalCgst = gst.totalCgst
+        const totalSgst = gst.totalSgst
+        const totalIgst = gst.totalIgst
 
         const created = await tx.creditDebitNote.create({
           data: {
@@ -252,67 +246,11 @@ export const setupCreditNoteHandlers = () => {
           }
         }
 
-        // Get customer and company for GST recalculation
-        const customer = await tx.customer.findUnique({ where: { id: data.customerId} })
-        const company = await tx.company.findFirst()
-        const companyStateCode = company?.stateCode || ''
-        const customerStateCode = customer?.stateCode || ''
-        const isInterState = companyStateCode !== customerStateCode && customerStateCode !== ''
-
-        // Calculate new totals with GST components
-        let subtotal = 0
-        let taxAmount = 0
-        let totalCgst = 0
-        let totalSgst = 0
-        let totalIgst = 0
-
-        const processedItems: any[] = []
-        for (const item of data.items) {
-          const itemTaxableAmount = item.quantity * item.rate - (item.discount || 0)
-          subtotal += itemTaxableAmount
-
-          const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
-
-          const halfRate = (item.taxRate || 0) / 2
-          let gstComponents
-          if (isInterState) {
-            gstComponents = {
-              cgstRate: 0, cgstAmount: 0, sgstRate: 0, sgstAmount: 0,
-              igstRate: item.taxRate || 0, igstAmount: (itemTaxableAmount * (item.taxRate || 0)) / 100
-            }
-          } else {
-            gstComponents = {
-              cgstRate: halfRate, cgstAmount: (itemTaxableAmount * halfRate) / 100,
-              sgstRate: halfRate, sgstAmount: (itemTaxableAmount * halfRate) / 100,
-              igstRate: 0, igstAmount: 0
-            }
-          }
-
-          const itemTax = gstComponents.cgstAmount + gstComponents.sgstAmount + gstComponents.igstAmount
-          taxAmount += itemTax
-          totalCgst += gstComponents.cgstAmount
-          totalSgst += gstComponents.sgstAmount
-          totalIgst += gstComponents.igstAmount
-
-          processedItems.push({
-            itemId: item.itemId,
-            quantity: item.quantity,
-            rate: item.rate,
-            discount: item.discount || 0,
-            taxRate: item.taxRate || 0,
-            total: itemTaxableAmount + itemTax,
-            hsnCode: item.hsnCode || dbItem?.hsnCode || dbItem?.skuHsn || '',
-            taxableAmount: itemTaxableAmount,
-            cgstRate: gstComponents.cgstRate,
-            cgstAmount: gstComponents.cgstAmount,
-            sgstRate: gstComponents.sgstRate,
-            sgstAmount: gstComponents.sgstAmount,
-            igstRate: gstComponents.igstRate,
-            igstAmount: gstComponents.igstAmount
-          })
-        }
-
-        const totalAmount = subtotal + taxAmount
+        const { gst, processedItems } = await buildNoteGstValues(tx, data.customerId, data.items)
+        const { subtotal, taxAmount, totalAmount, isInterState } = gst
+        const totalCgst = gst.totalCgst
+        const totalSgst = gst.totalSgst
+        const totalIgst = gst.totalIgst
 
         // Delete existing items
         await tx.creditDebitNoteItem.deleteMany({
