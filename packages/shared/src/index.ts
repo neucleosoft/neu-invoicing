@@ -4,6 +4,8 @@ export * from './gstCompute'
 export * from './paymentLogic'
 export * from './recompute'
 export * from './recomputeReport'
+export * from './syncPackets'
+export * from './syncApply'
 export * from './convertToInvoice'
 export * from './pdf'
 
