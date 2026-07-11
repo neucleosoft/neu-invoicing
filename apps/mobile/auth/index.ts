@@ -177,23 +177,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (response?.type === 'success') {
       const auth = response.authentication
       if (!auth?.accessToken) return
-      fetchUserInfo(auth.accessToken)
+      // Persist the grant IMMEDIATELY — consent is expensive, and a flaky
+      // userinfo call right after it must never cost the user their
+      // freshly-issued refresh token.
+      persistTokens({
+        accessToken: auth.accessToken,
+        refreshToken: auth.refreshToken ?? undefined,
+        expiresIn: auth.expiresIn ?? undefined,
+      })
+        .then(() => fetchUserInfo(auth.accessToken))
         .then((userInfo) => {
           setUser(userInfo)
           setAccessToken(auth.accessToken)
           // A real sign-in supersedes offline mode.
           setOfflineMode(false)
           return Promise.all([
-            persistTokens({
-              accessToken: auth.accessToken,
-              refreshToken: auth.refreshToken ?? undefined,
-              expiresIn: auth.expiresIn ?? undefined,
-            }),
             SecureStore.setItemAsync(USER_KEY, JSON.stringify(userInfo)),
             SecureStore.deleteItemAsync(OFFLINE_KEY),
           ])
         })
         .catch((e) => {
+          // Tokens are already stored — the boot-time legacy path will finish
+          // the job on the next launch instead of forcing a fresh consent.
           console.error('Failed to fetch user info after sign-in', e)
         })
     }
@@ -224,8 +229,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAccessToken(fresh)
       return fresh
     } catch (e) {
-      console.error('Token refresh failed', e)
-      return null
+      // Only a REVOKED/expired grant means "signed out". A network failure
+      // during refresh hands back the stale token instead — the Drive call
+      // then fails with a network error, which is the truth (offline ≠
+      // signed out).
+      const detail =
+        String((e as { code?: string }).code ?? '') + ' ' + String((e as Error).message ?? '')
+      if (detail.includes('invalid_grant')) return null
+      console.error('Token refresh failed (transient)', e)
+      return token
     }
   }, [])
 

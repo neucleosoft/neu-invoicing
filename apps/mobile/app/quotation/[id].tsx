@@ -78,6 +78,7 @@ export default function QuotationDetailScreen() {
                 await createInvoiceFromSource(
                   tx,
                   {
+                    id: quote!.id,
                     customerId: quote!.customerId,
                     subtotal: quote!.subtotal,
                     discount: quote!.discount,

@@ -101,6 +101,10 @@ export default function ChallanDetailScreen() {
                 const [inv] = await tx
                   .insert(schema.salesInvoice)
                   .values({
+                    // Deterministic id: both devices converting this challan
+                    // offline mint the SAME invoice row — sync converges to
+                    // one invoice, not two. Mirrors desktop challan.ts.
+                    id: `conv-${challan!.id}`,
                     invoiceNumber: number,
                     type: 'INVOICE',
                     customerId: challan!.customerId,

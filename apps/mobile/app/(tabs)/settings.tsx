@@ -389,7 +389,7 @@ export default function SettingsScreen() {
           variant="primary"
           onPress={handleBackup}
           loading={backingUp}
-          disabled={!accessToken || restoring}
+          disabled={!accessToken || restoring || rowSyncing}
         />
 
         <View style={styles.warningBox}>
@@ -401,10 +401,10 @@ export default function SettingsScreen() {
 
         <Pressable
           onPress={handleRestore}
-          disabled={restoring || backupLoading || !backupInfo?.exists}
+          disabled={restoring || backupLoading || rowSyncing || !backupInfo?.exists}
           style={[
             styles.dangerButton,
-            (restoring || backupLoading || !backupInfo?.exists) && styles.disabledButton,
+            (restoring || backupLoading || rowSyncing || !backupInfo?.exists) && styles.disabledButton,
           ]}
         >
           <ThemedText style={styles.dangerButtonText}>

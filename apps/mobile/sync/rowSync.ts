@@ -98,7 +98,22 @@ async function buildLocalIndex(db: Db): Promise<LocalIndex> {
   const numbers: NonNullable<LocalIndex['numbers']> = {}
 
   const indexTable = async (name: string, numberColumn?: string) => {
-    const rows: any[] = await db.select().from(tableOf(name))
+    // purchaseBill rows carry the scanned-bill BLOB — never load those just to
+    // build an id→timestamp index (a real archive would OOM the phone).
+    const rows: any[] =
+      name === 'purchaseBill'
+        ? await db
+            .select({
+              id: schema.purchaseBill.id,
+              billNumber: schema.purchaseBill.billNumber,
+              updatedAt: schema.purchaseBill.updatedAt,
+              createdAt: schema.purchaseBill.createdAt,
+              deletedAt: schema.purchaseBill.deletedAt,
+              cancelledAt: schema.purchaseBill.cancelledAt,
+              status: schema.purchaseBill.status,
+            })
+            .from(schema.purchaseBill)
+        : await db.select().from(tableOf(name))
     headers[name] = {}
     if (numberColumn) numbers[name] = {}
     for (const r of rows) {
@@ -127,6 +142,15 @@ async function buildLocalIndex(db: Db): Promise<LocalIndex> {
 async function executePlan(db: Db, plan: ApplyPlan): Promise<void> {
   if (plan.upserts.length === 0 && plan.localRenumbers.length === 0) return
   await db.transaction(async (tx) => {
+    // Local renumbers FIRST: the incoming doc that keeps the number cannot be
+    // inserted while the local later-created doc still holds it (UNIQUE fires
+    // at statement time). $onUpdate(now) auto-bumps updatedAt here, so the
+    // renumber propagates on the next push.
+    for (const r of plan.localRenumbers) {
+      const table = tableOf(r.table)
+      await tx.update(table).set({ [r.column]: r.to }).where(eq(table.id, r.rowId))
+    }
+
     for (const u of plan.upserts) {
       const table = tableOf(u.table)
       const data = reviveRowDates(u.row)
@@ -152,12 +176,6 @@ async function executePlan(db: Db, plan: ApplyPlan): Promise<void> {
         }
       }
     }
-    // $onUpdate(now) auto-bumps updatedAt here, so a renumber propagates on
-    // the next push — the other device learns the new number.
-    for (const r of plan.localRenumbers) {
-      const table = tableOf(r.table)
-      await tx.update(table).set({ [r.column]: r.to }).where(eq(table.id, r.rowId))
-    }
   })
 }
 
@@ -167,7 +185,7 @@ async function uploadOwnDiary(accessToken: string, deviceId: string, json: strin
   const name = diaryFileName(deviceId)
   const params = new URLSearchParams({
     spaces: 'appDataFolder',
-    q: `name='${name}'`,
+    q: `name='${name}' and trashed=false`,
     fields: 'files(id)',
     pageSize: '1',
   })
@@ -203,7 +221,7 @@ async function downloadPeerDiaries(
 ): Promise<{ packets: SyncPacket[]; newerVersion: boolean }> {
   const params = new URLSearchParams({
     spaces: 'appDataFolder',
-    q: `name contains 'changes-'`,
+    q: `name contains 'changes-' and trashed=false`,
     fields: 'files(id,name)',
     pageSize: '100',
   })
@@ -252,7 +270,7 @@ export async function rowSyncNow(db: Db, accessToken: string): Promise<RowSyncRe
     let log: RowSyncResult['log'] = []
     if (packets.length > 0) {
       const local = await buildLocalIndex(db)
-      const plan = planApply(packets, local)
+      const plan = planApply(packets, local, now)
       await executePlan(db, plan)
       applied = plan.upserts.length
       skipped = plan.skipped.length

@@ -16,7 +16,10 @@ const store = new Store()
 // mobile getDeviceId() in apps/mobile/sync/deviceId.ts.
 const DEVICE_ID_KEY = 'device_id'
 
-const getDeviceId = (): string => {
+// Exported: rowSync.ts must use THIS minting version — reading the store key
+// directly returns undefined on a device that never ran a whole-file backup,
+// which produced an unreadable `changes-undefined.json` diary (review 2026-07-11).
+export const getDeviceId = (): string => {
   const existing = store.get(DEVICE_ID_KEY) as string | undefined
   if (existing) return existing
   const minted = `desktop-${randomUUID()}`

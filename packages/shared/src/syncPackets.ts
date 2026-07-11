@@ -71,11 +71,12 @@ export interface DocTableSpec {
   /** UNIQUE document-number column — two offline devices can mint the same
    *  value, so the apply planner renumbers the later-created doc (D4). */
   numberColumn?: string
-  /** previousInvoice.serialNumber is an integer, not a formatted string. */
-  numberIsInteger?: boolean
 }
 
-/** Documents: header + children (+ movements) as one packet. */
+/** Documents: header + children (+ movements) as one packet.
+ *  previousInvoice is DELIBERATELY absent until S4 (image split): its
+ *  `fileData` blob is NOT NULL on both schemas, so a stripped packet could
+ *  never insert — one archived invoice would wedge every pull for 30 days. */
 export const SYNC_DOCUMENT_TABLES: DocTableSpec[] = [
   { table: 'salesInvoice', childTable: 'salesInvoiceItem', childFk: 'salesInvoiceId', movementRef: 'INVOICE', numberColumn: 'invoiceNumber' },
   { table: 'purchaseBill', childTable: 'purchaseBillItem', childFk: 'purchaseBillId', movementRef: 'BILL', numberColumn: 'billNumber' },
@@ -84,7 +85,6 @@ export const SYNC_DOCUMENT_TABLES: DocTableSpec[] = [
   { table: 'quotation', childTable: 'quotationItem', childFk: 'quotationId', numberColumn: 'invoiceNumber' },
   { table: 'proformaInvoice', childTable: 'proformaInvoiceItem', childFk: 'proformaInvoiceId', numberColumn: 'invoiceNumber' },
   { table: 'purchaseOrder', childTable: 'purchaseOrderItem', childFk: 'purchaseOrderId', numberColumn: 'orderNumber' },
-  { table: 'previousInvoice', childTable: 'previousInvoiceItem', childFk: 'previousInvoiceId', numberColumn: 'serialNumber', numberIsInteger: true },
 ]
 
 /** Single-row packets: master data + payments. company/settings never sync. */
@@ -96,6 +96,32 @@ export const SYNC_SINGLE_TABLES = [
   'bankAccount',
   'paymentTransaction',
 ] as const
+
+/**
+ * FK-safe apply order: parents strictly before anything that references them.
+ * Desktop runs with PRAGMA foreign_keys=ON and SQLite checks at statement
+ * time, so an alphabetically-ordered plan (bill before its new supplier)
+ * would roll back the whole sync. planApply sorts its upserts by this list.
+ *   supplierItem → supplier, item · salesInvoice → customer, quotation,
+ *   proformaInvoice · deliveryChallan → customer, salesInvoice (convert link)
+ *   · purchaseOrder → supplier · purchaseBill → supplier, purchaseOrder ·
+ *   creditDebitNote → customer, salesInvoice · paymentTransaction → all four.
+ */
+export const SYNC_APPLY_ORDER: string[] = [
+  'customer',
+  'supplier',
+  'item',
+  'supplierItem',
+  'bankAccount',
+  'quotation',
+  'proformaInvoice',
+  'salesInvoice',
+  'deliveryChallan',
+  'purchaseOrder',
+  'purchaseBill',
+  'creditDebitNote',
+  'paymentTransaction',
+]
 
 // ── Normalization ────────────────────────────────────────────────────────────
 
@@ -120,8 +146,13 @@ export const toEpochMs = (v: unknown): number | null => {
 // updatedAt, deletedAt, cancelledAt, invoiceDate, billDate, paymentDate,
 // dueDate, orderDate, expectedDate, noteDate, supplierInvoiceDate,
 // deliveryTime, lastSyncTimestamp… — everything ending At / Date / Time /
-// Timestamp is a date column, and nothing else is.
+// Timestamp is a date column. The one schema column that breaks the
+// convention gets an explicit entry (verified against BOTH full schemas —
+// review 2026-07-11 found lastGstFetch was crashing the apply on every
+// GST-fetched party).
 const DATE_KEY = /(At|Date|Time|Timestamp)$/
+const EXTRA_DATE_KEYS = new Set(['lastGstFetch'])
+const isDateKey = (key: string) => DATE_KEY.test(key) || EXTRA_DATE_KEYS.has(key)
 
 /**
  * Inverse of normalizeRow for the APPLY side: turn a packet row back into what
@@ -132,7 +163,7 @@ const DATE_KEY = /(At|Date|Time|Timestamp)$/
 export function reviveRowDates(row: PacketRow): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(row)) {
-    if (value != null && DATE_KEY.test(key)) {
+    if (value != null && isDateKey(key)) {
       const ms = toEpochMs(value)
       out[key] = ms == null ? value : new Date(ms)
     } else {
@@ -262,7 +293,8 @@ export function parseDiary(json: string): ParseDiaryResult {
       typeof (p as SyncPacket).table !== 'string' ||
       typeof (p as SyncPacket).rowId !== 'string' ||
       typeof (p as SyncPacket).updatedAt !== 'number' ||
-      typeof (p as SyncPacket).row !== 'object'
+      typeof (p as SyncPacket).row !== 'object' ||
+      (p as SyncPacket).row === null
     ) {
       return { ok: false, error: 'MALFORMED' }
     }

@@ -32,22 +32,26 @@ export async function recomputeAll(
 ): Promise<RecomputeReport> {
   const apply = opts.apply === true
 
+  // updatedAt is fetched so every write below can PRESERVE it explicitly:
+  // recompute is a machine correction of derived columns, not a content edit.
+  // Letting @updatedAt auto-bump here would hijack sync's newest-edit-wins —
+  // a rebuilt balance would outrank a real human edit from the other device.
   const [customers, suppliers, invoices, bills, payments, notes] = await Promise.all([
-    prisma.customer.findMany({ select: { id: true, name: true, currentBalance: true, openingBalance: true } }),
-    prisma.supplier.findMany({ select: { id: true, name: true, currentBalance: true, openingBalance: true } }),
-    prisma.salesInvoice.findMany({ where: { type: 'INVOICE' }, select: { id: true, invoiceNumber: true, customerId: true, totalAmount: true, amountPaid: true, balanceDue: true, status: true, deletedAt: true, cancelledAt: true } }),
-    prisma.purchaseBill.findMany({ select: { id: true, billNumber: true, supplierId: true, totalAmount: true, amountPaid: true, balanceDue: true, status: true, deletedAt: true, cancelledAt: true } }),
+    prisma.customer.findMany({ select: { id: true, name: true, currentBalance: true, openingBalance: true, updatedAt: true } }),
+    prisma.supplier.findMany({ select: { id: true, name: true, currentBalance: true, openingBalance: true, updatedAt: true } }),
+    prisma.salesInvoice.findMany({ where: { type: 'INVOICE' }, select: { id: true, invoiceNumber: true, customerId: true, totalAmount: true, amountPaid: true, balanceDue: true, status: true, deletedAt: true, cancelledAt: true, updatedAt: true } }),
+    prisma.purchaseBill.findMany({ select: { id: true, billNumber: true, supplierId: true, totalAmount: true, amountPaid: true, balanceDue: true, status: true, deletedAt: true, cancelledAt: true, updatedAt: true } }),
     prisma.paymentTransaction.findMany({ select: { type: true, customerId: true, supplierId: true, salesInvoiceId: true, purchaseBillId: true, amount: true, deletedAt: true, cancelledAt: true } }),
     prisma.creditDebitNote.findMany({ select: { type: true, customerId: true, referenceInvoiceId: true, totalAmount: true, status: true, deletedAt: true, cancelledAt: true } }),
   ])
 
   // Stock needs the openingStock column, which an old DB may not have migrated yet. Guard it.
-  let items: { id: string; name: string; currentStock: number; openingStock: number }[] = []
+  let items: { id: string; name: string; currentStock: number; openingStock: number; updatedAt: Date }[] = []
   let movements: { itemId: string; quantity: number }[] = []
   let stockAvailable = true
   try {
     ;[items, movements] = await Promise.all([
-      prisma.item.findMany({ select: { id: true, name: true, currentStock: true, openingStock: true } }),
+      prisma.item.findMany({ select: { id: true, name: true, currentStock: true, openingStock: true, updatedAt: true } }),
       prisma.stockMovement.findMany({ select: { itemId: true, quantity: true } }),
     ])
   } catch {
@@ -64,29 +68,29 @@ export async function recomputeAll(
     const ops = []
     for (const c of customers) {
       const v = custBal.get(c.id) ?? 0
-      if (Math.abs(v - c.currentBalance) > EPS) ops.push(prisma.customer.update({ where: { id: c.id }, data: { currentBalance: round2(v) } }))
+      if (Math.abs(v - c.currentBalance) > EPS) ops.push(prisma.customer.update({ where: { id: c.id }, data: { currentBalance: round2(v), updatedAt: c.updatedAt } }))
     }
     for (const s of suppliers) {
       const v = supBal.get(s.id) ?? 0
-      if (Math.abs(v - s.currentBalance) > EPS) ops.push(prisma.supplier.update({ where: { id: s.id }, data: { currentBalance: round2(v) } }))
+      if (Math.abs(v - s.currentBalance) > EPS) ops.push(prisma.supplier.update({ where: { id: s.id }, data: { currentBalance: round2(v), updatedAt: s.updatedAt } }))
     }
     for (const i of invoices) {
       const st = invState.get(i.id)
       if (!st) continue
       const moneyMoved = Math.abs(st.amountPaid - i.amountPaid) > EPS || Math.abs(st.balanceDue - i.balanceDue) > EPS
       const statusMoved = st.status !== i.status && !benignStatus(i.status, st.status)
-      if (moneyMoved || statusMoved) ops.push(prisma.salesInvoice.update({ where: { id: i.id }, data: { amountPaid: round2(st.amountPaid), balanceDue: round2(st.balanceDue), status: st.status } }))
+      if (moneyMoved || statusMoved) ops.push(prisma.salesInvoice.update({ where: { id: i.id }, data: { amountPaid: round2(st.amountPaid), balanceDue: round2(st.balanceDue), status: st.status, updatedAt: i.updatedAt } }))
     }
     for (const b of bills) {
       const st = billState.get(b.id)
       if (!st) continue
       const moneyMoved = Math.abs(st.amountPaid - b.amountPaid) > EPS || Math.abs(st.balanceDue - b.balanceDue) > EPS
-      if (moneyMoved || st.status !== b.status) ops.push(prisma.purchaseBill.update({ where: { id: b.id }, data: { amountPaid: round2(st.amountPaid), balanceDue: round2(st.balanceDue), status: st.status } }))
+      if (moneyMoved || st.status !== b.status) ops.push(prisma.purchaseBill.update({ where: { id: b.id }, data: { amountPaid: round2(st.amountPaid), balanceDue: round2(st.balanceDue), status: st.status, updatedAt: b.updatedAt } }))
     }
     if (stockAvailable) {
       for (const it of items) {
         const v = stock.get(it.id) ?? 0
-        if (Math.abs(v - it.currentStock) > EPS) ops.push(prisma.item.update({ where: { id: it.id }, data: { currentStock: round2(v) } }))
+        if (Math.abs(v - it.currentStock) > EPS) ops.push(prisma.item.update({ where: { id: it.id }, data: { currentStock: round2(v), updatedAt: it.updatedAt } }))
       }
     }
     await prisma.$transaction(ops)

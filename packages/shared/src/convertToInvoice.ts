@@ -38,6 +38,8 @@ export interface SourceLine {
 }
 
 export interface SourceDoc {
+  /** Source doc's primary key — seeds the new invoice's deterministic id. */
+  id: string
   customerId: string
   subtotal: number
   discount: number
@@ -106,6 +108,9 @@ export async function createInvoiceFromSource(
   const [created] = await tx
     .insert(salesInvoice)
     .values({
+      // Deterministic id: both devices converting this source doc offline
+      // mint the SAME invoice row — sync converges to one invoice, not two.
+      id: `conv-${source.id}`,
       invoiceNumber,
       invoiceDate: now,
       type: 'INVOICE',

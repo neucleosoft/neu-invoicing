@@ -139,9 +139,12 @@ const applyPayment = async (tx: any, p: any) => {
       const inv = await tx.salesInvoice.findUnique({ where: { id: p.salesInvoiceId } })
       if (inv) {
         const paid = inv.amountPaid + p.amount
+        // updatedAt preserved: posting money against a doc is a derived-column
+        // write, not a content edit — auto-bumping it would let this machine
+        // write beat a real human edit in sync's newest-edit-wins.
         await tx.salesInvoice.update({
           where: { id: p.salesInvoiceId },
-          data: { amountPaid: paid, balanceDue: inv.totalAmount - paid, status: computeStatus(inv.totalAmount, paid) },
+          data: { amountPaid: paid, balanceDue: inv.totalAmount - paid, status: computeStatus(inv.totalAmount, paid), updatedAt: inv.updatedAt },
         })
       }
     }
@@ -155,7 +158,7 @@ const applyPayment = async (tx: any, p: any) => {
         const paid = bill.amountPaid + p.amount
         await tx.purchaseBill.update({
           where: { id: p.purchaseBillId },
-          data: { amountPaid: paid, balanceDue: bill.totalAmount - paid, status: computeStatus(bill.totalAmount, paid) },
+          data: { amountPaid: paid, balanceDue: bill.totalAmount - paid, status: computeStatus(bill.totalAmount, paid), updatedAt: bill.updatedAt },
         })
       }
     }
@@ -176,7 +179,7 @@ export const reversePayment = async (tx: any, p: any) => {
         const paid = inv.amountPaid - p.amount
         await tx.salesInvoice.update({
           where: { id: p.salesInvoiceId },
-          data: { amountPaid: paid, balanceDue: inv.totalAmount - paid, status: computeStatus(inv.totalAmount, paid) },
+          data: { amountPaid: paid, balanceDue: inv.totalAmount - paid, status: computeStatus(inv.totalAmount, paid), updatedAt: inv.updatedAt },
         })
       }
     }
@@ -190,7 +193,7 @@ export const reversePayment = async (tx: any, p: any) => {
         const paid = bill.amountPaid - p.amount
         await tx.purchaseBill.update({
           where: { id: p.purchaseBillId },
-          data: { amountPaid: paid, balanceDue: bill.totalAmount - paid, status: computeStatus(bill.totalAmount, paid) },
+          data: { amountPaid: paid, balanceDue: bill.totalAmount - paid, status: computeStatus(bill.totalAmount, paid), updatedAt: bill.updatedAt },
         })
       }
     }

@@ -774,7 +774,7 @@ const Settings = () => {
                   <button
                     className="btn btn-primary"
                     onClick={triggerBackup}
-                    disabled={isBackingUp || isRestoring}
+                    disabled={isBackingUp || isRestoring || rowSyncing}
                   >
                     {isBackingUp ? 'Syncing…' : 'Sync Now'}
                   </button>
@@ -789,7 +789,7 @@ const Settings = () => {
                     <button
                       className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 disabled:cursor-wait"
                       onClick={handleRestoreFromCloud}
-                      disabled={isBackingUp || isRestoring}
+                      disabled={isBackingUp || isRestoring || rowSyncing}
                     >
                       {isRestoring ? 'Restoring…' : 'Restore from cloud…'}
                     </button>

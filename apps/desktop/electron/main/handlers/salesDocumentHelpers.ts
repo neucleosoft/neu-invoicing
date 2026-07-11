@@ -197,6 +197,9 @@ const createInvoiceFromSourceDocument = async (
 
   const invoice = await tx.salesInvoice.create({
     data: {
+      // Deterministic id: both devices converting this quotation/proforma
+      // offline mint the SAME invoice row — sync converges to one invoice.
+      id: `conv-${source.id}`,
       invoiceNumber: newInvoiceNumber,
       invoiceDate: new Date(),
       type: 'INVOICE',

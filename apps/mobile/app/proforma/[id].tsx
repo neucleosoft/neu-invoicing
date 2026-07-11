@@ -58,6 +58,7 @@ export default function ProformaDetailScreen() {
             const sourceLines: SourceLine[] = its.map((l) => ({ itemId: l.itemId, quantity: l.quantity, rate: l.rate, discount: l.discount, taxRate: l.taxRate, total: l.total, hsnCode: l.hsnCode, taxableAmount: l.taxableAmount }))
             await db.transaction(async (tx) => {
               await createInvoiceFromSource(tx, {
+                id: doc!.id,
                 customerId: doc!.customerId,
                 subtotal: doc!.subtotal,
                 discount: doc!.discount,

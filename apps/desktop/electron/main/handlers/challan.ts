@@ -366,6 +366,10 @@ export const setupChallanHandlers = () => {
         // Create the sales invoice from challan data
         const invoice = await tx.salesInvoice.create({
           data: {
+            // Deterministic id: both devices converting this challan offline
+            // mint the SAME invoice row, so sync converges to one invoice
+            // instead of billing the customer twice.
+            id: `conv-${challan.id}`,
             invoiceNumber: newInvoiceNumber,
             invoiceDate: new Date(),
             type: 'INVOICE',

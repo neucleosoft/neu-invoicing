@@ -23,6 +23,7 @@ import { parseDiary, planApply, type SyncPacket } from '@neu/shared'
 import { getOAuth2Client, isAuthError } from './auth'
 import { getPrisma } from './database'
 import { recomputeAll } from './recompute'
+import { getDeviceId } from './sync'
 import {
   buildLocalIndex,
   collectDiary,
@@ -33,8 +34,6 @@ import {
 
 const store = new Store()
 
-const getDeviceId = (): string => store.get('device_id') as string
-
 export type { RowSyncResult }
 
 // ── Drive diary IO ───────────────────────────────────────────────────────────
@@ -43,7 +42,7 @@ async function uploadOwnDiary(drive: any, deviceId: string, json: string): Promi
   const name = diaryFileName(deviceId)
   const existing = await drive.files.list({
     spaces: 'appDataFolder',
-    q: `name='${name}'`,
+    q: `name='${name}' and trashed=false`,
     fields: 'files(id)',
     pageSize: 1,
   })
@@ -61,7 +60,7 @@ async function downloadPeerDiaries(
 ): Promise<{ packets: SyncPacket[]; newerVersion: boolean }> {
   const list = await drive.files.list({
     spaces: 'appDataFolder',
-    q: `name contains 'changes-'`,
+    q: `name contains 'changes-' and trashed=false`,
     fields: 'files(id,name)',
     pageSize: 100,
   })
@@ -85,7 +84,7 @@ async function downloadPeerDiaries(
 
 export const rowSyncNow = async (): Promise<RowSyncResult> => {
   if (store.get('demo_mode')) return { success: true, pushedPackets: 0, applied: 0 }
-  if (!store.get('google_tokens')) return { success: false, error: 'OFFLINE' }
+  if (!store.get('google_tokens')) return { success: false, error: 'Connect your Google account to sync.' }
 
   try {
     const prisma = getPrisma()
@@ -108,7 +107,7 @@ export const rowSyncNow = async (): Promise<RowSyncResult> => {
     let log: RowSyncResult['log'] = []
     if (packets.length > 0) {
       const local = await buildLocalIndex(prisma)
-      const plan = planApply(packets, local)
+      const plan = planApply(packets, local, now)
       await executePlan(prisma, plan)
       applied = plan.upserts.length
       skipped = plan.skipped.length

@@ -81,7 +81,14 @@ export async function buildLocalIndex(prisma: any): Promise<LocalIndex> {
   const numbers: NonNullable<LocalIndex['numbers']> = {}
 
   const indexTable = async (table: string, numberColumn?: string) => {
-    const rows = await prisma[table].findMany()
+    // purchaseBill rows carry the scanned-bill BLOB — never load those just to
+    // build an id→timestamp index (a full archive would be hundreds of MB).
+    const rows =
+      table === 'purchaseBill'
+        ? await prisma.purchaseBill.findMany({
+            select: { id: true, billNumber: true, updatedAt: true, createdAt: true, deletedAt: true, cancelledAt: true, status: true },
+          })
+        : await prisma[table].findMany()
     headers[table] = {}
     if (numberColumn) numbers[table] = {}
     for (const r of rows) {
@@ -110,6 +117,14 @@ export async function buildLocalIndex(prisma: any): Promise<LocalIndex> {
 export async function executePlan(prisma: any, plan: ApplyPlan): Promise<void> {
   if (plan.upserts.length === 0 && plan.localRenumbers.length === 0) return
   await prisma.$transaction(async (tx: any) => {
+    // Local renumbers FIRST: the incoming doc that keeps the number cannot be
+    // inserted while the local later-created doc still holds it (UNIQUE fires
+    // at statement time). @updatedAt auto-bumps here, so the renumber
+    // propagates on the next push.
+    for (const r of plan.localRenumbers) {
+      await tx[r.table].update({ where: { id: r.rowId }, data: { [r.column]: r.to } })
+    }
+
     for (const u of plan.upserts) {
       const data = reviveRowDates(u.row)
       await tx[u.table].upsert({ where: { id: u.rowId }, create: data, update: data })
@@ -128,10 +143,11 @@ export async function executePlan(prisma: any, plan: ApplyPlan): Promise<void> {
         }
       }
     }
-    // @updatedAt auto-bumps on these updates, so a renumber propagates on the
-    // next push — the other device learns the new number.
-    for (const r of plan.localRenumbers) {
-      await tx[r.table].update({ where: { id: r.rowId }, data: { [r.column]: r.to } })
-    }
+  }, {
+    // A first big pull can be hundreds of doc packets; Prisma's default 5s
+    // interactive-transaction timeout would wedge sync at exactly the data
+    // volume where it matters.
+    maxWait: 10_000,
+    timeout: 120_000,
   })
 }

@@ -489,6 +489,10 @@ export const setupSalesHandlers = () => {
 
           const created = await tx.creditDebitNote.create({
             data: {
+              // Deterministic id: both devices reversing this invoice offline
+              // mint the SAME credit-note row, so sync converges to ONE note
+              // instead of double-crediting the customer.
+              id: `rev-${invoice.id}`,
               noteNumber: payload.noteNumber,
               noteDate: payload.noteDate ? new Date(payload.noteDate) : new Date(),
               type: 'CREDIT_NOTE',

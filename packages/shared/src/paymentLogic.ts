@@ -71,6 +71,7 @@ async function adjustInvoicePaid(tx: DrizzleTx, invoiceId: string, delta: number
     .select({
       amountPaid: salesInvoice.amountPaid,
       totalAmount: salesInvoice.totalAmount,
+      updatedAt: salesInvoice.updatedAt,
     })
     .from(salesInvoice)
     .where(eq(salesInvoice.id, invoiceId))
@@ -78,12 +79,16 @@ async function adjustInvoicePaid(tx: DrizzleTx, invoiceId: string, delta: number
   const inv = rows[0]
   if (!inv) return
   const paid = inv.amountPaid + delta
+  // updatedAt preserved: posting money against a doc is a derived-column
+  // write, not a content edit — auto-bumping it would let this machine write
+  // beat a real human edit in sync's newest-edit-wins.
   await tx
     .update(salesInvoice)
     .set({
       amountPaid: paid,
       balanceDue: inv.totalAmount - paid,
       status: computePaymentStatus(inv.totalAmount, paid),
+      updatedAt: inv.updatedAt,
     })
     .where(eq(salesInvoice.id, invoiceId))
 }
@@ -94,6 +99,7 @@ async function adjustBillPaid(tx: DrizzleTx, billId: string, delta: number) {
     .select({
       amountPaid: purchaseBill.amountPaid,
       totalAmount: purchaseBill.totalAmount,
+      updatedAt: purchaseBill.updatedAt,
     })
     .from(purchaseBill)
     .where(eq(purchaseBill.id, billId))
@@ -101,12 +107,14 @@ async function adjustBillPaid(tx: DrizzleTx, billId: string, delta: number) {
   const bill = rows[0]
   if (!bill) return
   const paid = bill.amountPaid + delta
+  // Same rule as adjustInvoicePaid: machine write, updatedAt preserved.
   await tx
     .update(purchaseBill)
     .set({
       amountPaid: paid,
       balanceDue: bill.totalAmount - paid,
       status: computePaymentStatus(bill.totalAmount, paid),
+      updatedAt: bill.updatedAt,
     })
     .where(eq(purchaseBill.id, billId))
 }
