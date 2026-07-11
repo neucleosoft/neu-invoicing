@@ -27,6 +27,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("sync:rowSyncNow", confirmRemovals),
     getSyncActivityLog: () => ipcRenderer.invoke("sync:getActivityLog"),
     getRowSyncStatus: () => ipcRenderer.invoke("sync:getRowSyncStatus"),
+    fetchBillImage: (billId: string) =>
+      ipcRenderer.invoke("sync:fetchBillImage", billId),
     getBackupInfo: () => ipcRenderer.invoke("sync:getBackupInfo"),
     setBackupFrequency: (freq: "off" | "daily" | "weekly" | "monthly") =>
       ipcRenderer.invoke("sync:setBackupFrequency", freq),

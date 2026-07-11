@@ -1,5 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { google } from 'googleapis'
+import { PrismaClient } from '@prisma/client'
 import { getOAuth2Client, isAuthError, clearStoredCredentials } from './auth'
 import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
 import fs from 'fs'
@@ -584,6 +585,86 @@ const runIfScheduledSyncDue = async () => {
   }
 }
 
+// ── Backup ladder (S4, D7) ───────────────────────────────────────────────────
+// Three additional slots beside the main backup: daily (freshest), weekly and
+// monthly (STALE ON PURPOSE — the time machine for disasters noticed late).
+// Ladder copies are BLOB-STRIPPED + VACUUMed (~10 MB instead of ~300 MB):
+// bill photos live once as img-bill-* files (S4 image split), and
+// previousInvoice PDFs stay in the live DB + the full manual backup.
+// Staleness is judged by the DRIVE file's own age, so two devices sharing the
+// slots can't thrash each other's cadence.
+
+const LADDER_SLOTS = [
+  { name: 'backup-daily.db', minAgeMs: 24 * 60 * 60 * 1000 },
+  { name: 'backup-weekly.db', minAgeMs: 7 * 24 * 60 * 60 * 1000 },
+  { name: 'backup-monthly.db', minAgeMs: 30 * 24 * 60 * 60 * 1000 },
+]
+
+const buildStrippedLedgerCopy = async (): Promise<string> => {
+  const dbPath = getDatabasePath()
+  const tmpPath = `${dbPath}.ladder`
+  // Fold any WAL into the main file first so the copy is complete (harmless
+  // when the journal mode isn't WAL).
+  try {
+    await getPrisma().$executeRawUnsafe(`PRAGMA wal_checkpoint(TRUNCATE)`)
+  } catch { /* non-WAL journal mode */ }
+  fs.copyFileSync(dbPath, tmpPath)
+
+  const tmp = new PrismaClient({ datasources: { db: { url: `file:${tmpPath}` } } })
+  try {
+    await tmp.$executeRawUnsafe(`UPDATE "PurchaseBill" SET "attachmentData" = NULL`)
+    // fileData is NOT NULL — empty blob, not NULL.
+    await tmp.$executeRawUnsafe(`UPDATE "PreviousInvoice" SET "fileData" = X''`)
+    await tmp.$executeRawUnsafe(`VACUUM`)
+  } finally {
+    await tmp.$disconnect()
+  }
+  return tmpPath
+}
+
+const runLadderIfDue = async () => {
+  if (store.get('demo_mode') || !store.get('google_tokens')) return
+  try {
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const now = Date.now()
+
+    // Decide which slots are due from the Drive files' own age.
+    const due: { name: string; fileId?: string }[] = []
+    for (const slot of LADDER_SLOTS) {
+      const res = await drive.files.list({
+        spaces: 'appDataFolder',
+        q: `name='${slot.name}' and trashed=false`,
+        fields: 'files(id,modifiedTime)',
+        pageSize: 1,
+      })
+      const f = res.data.files?.[0]
+      const age = f?.modifiedTime ? now - new Date(f.modifiedTime).getTime() : Infinity
+      if (age >= slot.minAgeMs) due.push({ name: slot.name, fileId: f?.id ?? undefined })
+    }
+    if (due.length === 0) return
+
+    const tmpPath = await buildStrippedLedgerCopy()
+    try {
+      for (const slot of due) {
+        const media = { mimeType: 'application/x-sqlite3', body: fs.createReadStream(tmpPath) }
+        if (slot.fileId) {
+          await drive.files.update({ fileId: slot.fileId, media })
+        } else {
+          await drive.files.create({ requestBody: { name: slot.name, parents: ['appDataFolder'] }, media })
+        }
+      }
+      console.log(`[ladder] refreshed ${due.map((s) => s.name).join(', ')}`)
+    } finally {
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+      } catch { /* best-effort cleanup */ }
+    }
+  } catch (e) {
+    console.error('[ladder] failed, app continues:', e)
+  }
+}
+
 let schedulerInterval: NodeJS.Timeout | null = null
 
 export const startBackupScheduler = () => {
@@ -591,8 +672,10 @@ export const startBackupScheduler = () => {
   // Run once on startup — catches "I had it set to Daily but closed my laptop
   // for 3 days" cases.
   void runIfScheduledSyncDue()
+  void runLadderIfDue()
   schedulerInterval = setInterval(() => {
     void runIfScheduledSyncDue()
+    void runLadderIfDue()
   }, SCHEDULER_TICK_MS)
 }
 

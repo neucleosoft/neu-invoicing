@@ -620,6 +620,7 @@ declare global {
           localRenumbers?: number
           removalsApplied?: number
           recomputeChanges?: number
+          photosPushed?: number
           log?: { kind: string; table: string; rowId: string; detail: string }[]
         }>
         getSyncActivityLog: () => Promise<{
@@ -633,6 +634,7 @@ declare global {
           lastSyncAt: number | null
           pendingRemovals: number | null
         }>
+        fetchBillImage: (billId: string) => Promise<{ success: boolean; error?: string }>
         getBackupInfo: () => Promise<{
           cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
           thisDeviceLastUpload: string | null

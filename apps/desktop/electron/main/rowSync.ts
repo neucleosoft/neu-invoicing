@@ -19,7 +19,8 @@
 import { ipcMain } from 'electron'
 import { google } from 'googleapis'
 import Store from 'electron-store'
-import { parseDiary, planApply, TRIPWIRE_THRESHOLD, type SyncPacket } from '@neu/shared'
+import { Readable } from 'stream'
+import { billImageFileName, parseDiary, planApply, toEpochMs, TRIPWIRE_THRESHOLD, type SyncPacket } from '@neu/shared'
 import { getOAuth2Client, isAuthError } from './auth'
 import { getPrisma } from './database'
 import { recomputeAll } from './recompute'
@@ -129,6 +130,97 @@ async function downloadPeerDiaries(
   return { packets, newerVersion }
 }
 
+// ── Bill-photo store (S4 image split) ────────────────────────────────────────
+// A scanned bill photo gets exactly ONE Drive file (img-bill-<id>) instead of
+// riding inside every diary and backup. Push: best-effort after each sync for
+// the changed bills. Pull: lazy, on first view (sync:fetchBillImage).
+
+async function findDriveImage(
+  drive: any,
+  name: string,
+): Promise<{ id: string; modifiedTime?: string; size: number } | null> {
+  const res = await drive.files.list({
+    spaces: 'appDataFolder',
+    q: `name='${name}' and trashed=false`,
+    fields: 'files(id,modifiedTime,size)',
+    pageSize: 1,
+  })
+  const f = res.data.files?.[0]
+  return f ? { id: f.id, modifiedTime: f.modifiedTime ?? undefined, size: Number(f.size ?? 0) } : null
+}
+
+async function pushBillImages(drive: any, prisma: any, billIds: string[]): Promise<number> {
+  if (billIds.length === 0) return 0
+  const bills = await prisma.purchaseBill.findMany({
+    where: { id: { in: billIds }, attachmentData: { not: null } },
+    select: { id: true, updatedAt: true, attachmentData: true, attachmentMimeType: true },
+  })
+
+  let pushed = 0
+  for (const bill of bills) {
+    if (!bill.attachmentData || !bill.attachmentMimeType) continue
+    try {
+      const name = billImageFileName(bill.id)
+      const existing = await findDriveImage(drive, name)
+      // Upload when missing, 0-byte (residue of a failed two-step upload from
+      // the phone), or when the bill changed after the last upload (covers a
+      // replaced photo; a redundant upload is harmless).
+      const stale =
+        existing != null &&
+        (existing.size === 0 ||
+          (existing.modifiedTime != null &&
+            (toEpochMs(bill.updatedAt) ?? 0) > (toEpochMs(existing.modifiedTime) ?? 0)))
+      if (existing && !stale) continue
+      const media = { mimeType: bill.attachmentMimeType, body: Readable.from(Buffer.from(bill.attachmentData)) }
+      if (existing) {
+        await drive.files.update({ fileId: existing.id, media })
+      } else {
+        await drive.files.create({ requestBody: { name, parents: ['appDataFolder'] }, media })
+      }
+      pushed++
+    } catch (e) {
+      // best-effort — never fail the sync over a photo
+      console.warn('[rowSync] photo push failed for bill', bill.id, e)
+    }
+  }
+  return pushed
+}
+
+// Lazy pull: a synced-in bill has attachmentMimeType but no blob — download it
+// once and keep it. Machine write: updatedAt preserved (F5 rule), so filling
+// in the photo can never win a sync conflict.
+async function fetchBillImage(billId: string): Promise<{ success: boolean; error?: string }> {
+  if (!store.get('google_tokens')) return { success: false, error: 'Connect your Google account first.' }
+  try {
+    const prisma = getPrisma()
+    const bill = await prisma.purchaseBill.findUnique({
+      where: { id: billId },
+      select: { id: true, updatedAt: true, attachmentData: true, attachmentMimeType: true },
+    })
+    if (!bill?.attachmentMimeType) return { success: false, error: 'This bill has no photo.' }
+    if (bill.attachmentData) return { success: true }
+
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const found = await findDriveImage(drive, billImageFileName(billId))
+    if (!found || found.size === 0) {
+      return { success: false, error: 'The photo has not been uploaded from the other device yet.' }
+    }
+
+    const res = await drive.files.get({ fileId: found.id, alt: 'media' }, { responseType: 'arraybuffer' })
+    const bytes = Buffer.from(res.data as ArrayBuffer)
+    // Never cache an empty download — the bill would look "fetched" forever.
+    if (bytes.length === 0) return { success: false, error: 'Photo download came back empty — try again.' }
+    await prisma.purchaseBill.update({
+      where: { id: billId },
+      data: { attachmentData: bytes, updatedAt: bill.updatedAt },
+    })
+    return { success: true }
+  } catch (e) {
+    return { success: false, error: e instanceof Error ? e.message : 'Photo download failed' }
+  }
+}
+
 // ── The whole flow ───────────────────────────────────────────────────────────
 
 export const rowSyncNow = async (
@@ -192,11 +284,19 @@ export const rowSyncNow = async (
     const diary = await collectDiary(prisma, deviceId, now)
     await uploadOwnDiary(drive, deviceId, JSON.stringify(diary))
 
+    // S4 image split: photos of the changed bills ride as their own Drive
+    // files, once each — best-effort, never fails the sync.
+    const changedBillIds = diary.packets
+      .filter((p) => p.table === 'purchaseBill')
+      .map((p) => p.rowId)
+    const photosPushed = await pushBillImages(drive, prisma, changedBillIds)
+
     store.set(LAST_ROW_SYNC_KEY, Date.now())
     store.delete(PENDING_REMOVALS_KEY)
 
     return {
       success: true,
+      photosPushed,
       pushedPackets: diary.packets.length,
       applied,
       skipped,
@@ -247,4 +347,5 @@ export const setupRowSyncHandlers = () => {
   )
   ipcMain.handle('sync:getActivityLog', async () => getSyncActivity())
   ipcMain.handle('sync:getRowSyncStatus', async () => getRowSyncStatus())
+  ipcMain.handle('sync:fetchBillImage', async (_, billId: string) => fetchBillImage(billId))
 }

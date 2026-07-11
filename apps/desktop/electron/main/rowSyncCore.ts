@@ -33,6 +33,7 @@ export interface RowSyncResult {
   localRenumbers?: number
   removalsApplied?: number
   recomputeChanges?: number
+  photosPushed?: number
   log?: { kind: string; table: string; rowId: string; detail: string }[]
 }
 

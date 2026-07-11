@@ -434,12 +434,27 @@ const Purchase = () => {
   // Fetch the saved supplier attachment (BLOB) for a bill. Centralized so both
   // open-in-window and share-via-X paths use the same fetch + Buffer→Uint8Array conversion.
   const loadAttachment = async (id: string) => {
-    const result = await window.electronAPI.purchase.getById(id)
+    let result = await window.electronAPI.purchase.getById(id)
     if (!result.success || !result.data) {
       toast.error(result.error || 'Failed to fetch bill')
       return null
     }
-    const bill = result.data as any
+    let bill = result.data as any
+
+    // Synced-in bill: the photo lives on Drive as its own file (S4 image
+    // split) — fetch it once, then it's local forever.
+    if (!bill.attachmentData && bill.attachmentMimeType) {
+      toast.info('Fetching the photo from your Drive…')
+      const fetched = await window.electronAPI.sync.fetchBillImage(id)
+      if (!fetched.success) {
+        toast.error(fetched.error || 'Photo download failed')
+        return null
+      }
+      result = await window.electronAPI.purchase.getById(id)
+      if (!result.success || !result.data) return null
+      bill = result.data as any
+    }
+
     if (!bill.attachmentData || !bill.attachmentMimeType) {
       toast.info('No attachment saved on this bill')
       return null

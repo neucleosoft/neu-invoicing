@@ -28,6 +28,7 @@ import { recomputeAll } from '@/utils/recompute'
 
 import { appendSyncActivity } from './activityLog'
 import { getDeviceId } from './deviceId'
+import { pushBillImages } from './imageStore'
 
 type Db = ReturnType<typeof useDb>
 
@@ -52,6 +53,7 @@ export interface RowSyncResult {
   localRenumbers?: number
   removalsApplied?: number
   recomputeChanges?: number
+  photosPushed?: number
   log?: { kind: string; table: string; rowId: string; detail: string }[]
 }
 
@@ -322,8 +324,16 @@ export async function rowSyncNow(
     const diary = await collectDiary(db, deviceId, now)
     await uploadOwnDiary(accessToken, deviceId, JSON.stringify(diary))
 
+    // S4 image split: photos of the changed bills ride as their own Drive
+    // files, once each — best-effort, never fails the sync.
+    const changedBillIds = diary.packets
+      .filter((p) => p.table === 'purchaseBill')
+      .map((p) => p.rowId)
+    const photosPushed = await pushBillImages(db, accessToken, changedBillIds)
+
     return {
       success: true,
+      photosPushed,
       pushedPackets: diary.packets.length,
       applied,
       skipped,

@@ -228,6 +228,7 @@ export default function SettingsScreen() {
     const bits = [`pulled ${r.applied ?? 0}`, `pushed ${r.pushedPackets ?? 0}`];
     if (r.localRenumbers) bits.push(`${r.localRenumbers} renumbered`);
     if (r.recomputeChanges) bits.push(`${r.recomputeChanges} totals corrected`);
+    if (r.photosPushed) bits.push(`${r.photosPushed} photo${r.photosPushed === 1 ? '' : 's'} uploaded`);
     setRowSyncSummary(`Synced ✓ — ${bits.join(' · ')}`);
   }
 

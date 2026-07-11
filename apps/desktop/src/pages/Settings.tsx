@@ -71,6 +71,7 @@ const Settings = () => {
       ]
       if (r.localRenumbers) bits.push(`${r.localRenumbers} renumbered`)
       if (r.recomputeChanges) bits.push(`${r.recomputeChanges} totals corrected`)
+      if (r.photosPushed) bits.push(`${r.photosPushed} photo${r.photosPushed === 1 ? '' : 's'} uploaded`)
       setRowSyncSummary(`Synced ✓ — ${bits.join(', ')}`)
     } catch (e) {
       setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`)

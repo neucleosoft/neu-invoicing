@@ -8,7 +8,9 @@ import { PdfActions } from '@/components/PdfActions'
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { useAuth } from '@/auth'
 import { schema, useDb } from '@/db'
+import { ensureBillAttachment } from '@/sync/imageStore'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
 import { buildPurchaseBillPdfPayload } from '@/utils/purchaseBillPdf'
@@ -28,6 +30,7 @@ type LineWithName = PurchaseBillItem & { name: string }
 export default function PurchaseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const db = useDb()
+  const { getFreshAccessToken } = useAuth()
   const onEdit = () => router.push({ pathname: '/purchase/edit/[id]', params: { id } })
 
   const [bill, setBill] = useState<PurchaseBill | null>(null)
@@ -61,6 +64,27 @@ export default function PurchaseDetailScreen() {
         const buf = b.attachmentData as unknown as { toString: (enc: string) => string }
         const base64 = buf.toString('base64')
         setPhotoUri(`data:${b.attachmentMimeType};base64,${base64}`)
+      } else if (b.attachmentMimeType && !b.attachmentData) {
+        // Synced-in bill: the photo lives on Drive as its own file (S4 image
+        // split) — fetch it lazily on first view, then it's local forever.
+        void (async () => {
+          const token = await getFreshAccessToken()
+          if (!token) return
+          if (await ensureBillAttachment(db, token, id)) {
+            const [fresh] = await db
+              .select({
+                attachmentData: schema.purchaseBill.attachmentData,
+                attachmentMimeType: schema.purchaseBill.attachmentMimeType,
+              })
+              .from(schema.purchaseBill)
+              .where(eq(schema.purchaseBill.id, id))
+              .limit(1)
+            if (fresh?.attachmentData && fresh.attachmentMimeType) {
+              const buf = fresh.attachmentData as unknown as { toString: (enc: string) => string }
+              setPhotoUri(`data:${fresh.attachmentMimeType};base64,${buf.toString('base64')}`)
+            }
+          }
+        })()
       }
 
       const [sup] = await db
@@ -83,7 +107,7 @@ export default function PurchaseDetailScreen() {
       setLoading(false)
     }
     load()
-  }, [id, db])
+  }, [id, db, getFreshAccessToken])
 
   function handleCancel() {
     if (!id) return
@@ -140,7 +164,7 @@ export default function PurchaseDetailScreen() {
         {isCancelled ? (
           <ThemedView style={styles.cancelledBanner}>
             <ThemedText style={styles.cancelledBannerText}>
-              This bill is cancelled — its supplier balance and stock were reversed and it's left out of reports. It can't be restored.
+              This bill is cancelled — its supplier balance and stock were reversed and it&apos;s left out of reports. It can&apos;t be restored.
             </ThemedText>
           </ThemedView>
         ) : null}

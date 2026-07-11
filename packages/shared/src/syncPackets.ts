@@ -29,6 +29,15 @@
 
 export const SYNC_FORMAT_VERSION = 1
 
+/**
+ * S4 image split: a bill's scanned photo lives ONCE on Drive as its own file,
+ * named deterministically from the bill id — packets and backups never embed
+ * it. Both apps derive the name from THIS function so they can never disagree
+ * about where a photo lives. (A replaced photo overwrites the same file; the
+ * file dies when the bill is purged — S5.)
+ */
+export const billImageFileName = (billId: string) => `img-bill-${billId}`
+
 // A row after normalization: Dates → epoch-ms numbers, binaries stripped.
 export type PacketRow = Record<string, unknown>
 
