@@ -217,7 +217,7 @@ const Settings = () => {
   // is rebuilt against the fresh DB instead of staying stale.
   const handleRestoreFromCloud = async () => {
     if (!backupInfo?.cloudBackup) {
-      toast.info('No cloud backup found yet. Click Sync Now first to create one.')
+      toast.info('No cloud backup found yet. Click "Back up now" first to create one.')
       return
     }
     const ok = await confirm({
@@ -831,7 +831,7 @@ const Settings = () => {
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Google Drive Backup</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Your data is backed up to your private Google Drive. Use Sync Now to back up immediately, or set an automatic schedule.
+                    Your data is backed up to your private Google Drive as one full copy — photos included, so it can take a few minutes. For everyday device-to-device syncing use &quot;Sync changes now&quot; above; this button is your safety copy.
                   </p>
 
                   <div className="bg-white dark:bg-gray-800 rounded-lg p-3 mb-4 space-y-1.5">
@@ -851,7 +851,7 @@ const Settings = () => {
                         </div>
                       </>
                     ) : (
-                      <div className="text-xs text-gray-500 dark:text-gray-400">No backup yet — click Sync Now to create one.</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">No backup yet — click &quot;Back up now&quot; to create one.</div>
                     )}
                   </div>
 
@@ -877,7 +877,7 @@ const Settings = () => {
                     onClick={triggerBackup}
                     disabled={isBackingUp || isRestoring || rowSyncing}
                   >
-                    {isBackingUp ? 'Syncing…' : 'Sync Now'}
+                    {isBackingUp ? 'Backing up…' : 'Back up now (full copy)'}
                   </button>
 
                   <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">

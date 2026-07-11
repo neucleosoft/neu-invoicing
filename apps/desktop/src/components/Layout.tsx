@@ -406,9 +406,9 @@ const Layout = () => {
                   <SyncBadge />
                   <span>
                     {syncStatus?.status === 'syncing'
-                      ? 'Syncing…'
+                      ? 'Backing up…'
                       : syncStatus?.status === 'error'
-                      ? 'Sync error'
+                      ? 'Backup error'
                       : 'Up to date'}
                   </span>
                 </div>
@@ -476,7 +476,7 @@ const Layout = () => {
         </div>
       </main>
 
-      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onSyncNow={triggerBackup} />
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} onBackupNow={triggerBackup} />
       <SyncConflictDialog {...conflictDialogProps} />
       {connectDialog}
     </div>
