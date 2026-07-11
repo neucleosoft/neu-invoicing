@@ -1,9 +1,10 @@
-// Row-level sync ("Sync now") — desktop plumbing around the shared sync brain.
+// Row-level sync ("Sync now") — desktop shell around the shared sync brain.
 //
 // The intelligence lives in @neu/shared (syncPackets = diary format,
-// syncApply = merge rules, recompute = totals rebuild); this file is only the
-// Prisma fetches, the Drive diary IO, and the mechanical plan execution.
-// Mobile has the exact twin in apps/mobile/sync/rowSync.ts.
+// syncApply = merge rules, recompute = totals rebuild); the Prisma fetch/
+// execute half lives in rowSyncCore.ts (electron-free, so the sandbox runner
+// can drive the real code path); THIS file is only the Drive diary IO, auth,
+// and the IPC handler. Mobile has the exact twin in apps/mobile/sync/rowSync.ts.
 //
 // The diary model is STATELESS and idempotent: every push rewrites this
 // device's whole diary with everything that changed in the last 30 days
@@ -12,148 +13,29 @@
 // re-running Sync now is always harmless.
 //
 // Flow: PULL peers' diaries → planApply → execute plan in ONE transaction →
-// recomputeAll({apply}) → PUSH own diary (so renumbered/merged state
-// propagates immediately).
+// recomputeAll({apply}) — only when the merge changed rows → PUSH own diary
+// (so renumbered/merged state propagates immediately).
 
 import { ipcMain } from 'electron'
 import { google } from 'googleapis'
 import Store from 'electron-store'
-import {
-  buildDiary,
-  parseDiary,
-  planApply,
-  reviveRowDates,
-  toEpochMs,
-  SYNC_DOCUMENT_TABLES,
-  SYNC_SINGLE_TABLES,
-  type ApplyPlan,
-  type DocumentBundle,
-  type LocalIndex,
-  type SyncPacket,
-} from '@neu/shared'
+import { parseDiary, planApply, type SyncPacket } from '@neu/shared'
 import { getOAuth2Client, isAuthError } from './auth'
 import { getPrisma } from './database'
 import { recomputeAll } from './recompute'
+import {
+  buildLocalIndex,
+  collectDiary,
+  diaryFileName,
+  executePlan,
+  type RowSyncResult,
+} from './rowSyncCore'
 
 const store = new Store()
 
-// Push everything changed in this window; peers dedupe/skip what they have.
-const DIARY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
-
-const diaryFileName = (deviceId: string) => `changes-${deviceId}.json`
-
 const getDeviceId = (): string => store.get('device_id') as string
 
-export interface RowSyncResult {
-  success: boolean
-  error?: string
-  pushedPackets?: number
-  applied?: number
-  skipped?: number
-  localRenumbers?: number
-  removalsApplied?: number
-  recomputeChanges?: number
-  log?: { kind: string; table: string; rowId: string; detail: string }[]
-}
-
-// Rows changed inside the window. The `updatedAt: null` branch only matters
-// for legacy payment rows minted before the updatedAt column existed.
-const changedSince = (cutoff: Date) => ({
-  OR: [{ updatedAt: { gt: cutoff } }, { updatedAt: null, createdAt: { gt: cutoff } }],
-})
-
-// ── Collect (push side) ──────────────────────────────────────────────────────
-
-async function collectDiary(prisma: any, deviceId: string, now: number) {
-  const cutoff = new Date(now - DIARY_WINDOW_MS)
-
-  const singles: Record<string, Record<string, unknown>[]> = {}
-  for (const table of SYNC_SINGLE_TABLES) {
-    singles[table] = await prisma[table].findMany({ where: changedSince(cutoff) })
-  }
-
-  const documents: Record<string, DocumentBundle[]> = {}
-  for (const spec of SYNC_DOCUMENT_TABLES) {
-    const headers = await prisma[spec.table].findMany({ where: changedSince(cutoff) })
-    if (headers.length === 0) continue
-    const ids = headers.map((h: any) => h.id)
-    const children = await prisma[spec.childTable].findMany({ where: { [spec.childFk]: { in: ids } } })
-    const movements = spec.movementRef
-      ? await prisma.stockMovement.findMany({ where: { referenceType: spec.movementRef, referenceId: { in: ids } } })
-      : []
-    documents[spec.table] = headers.map((h: any) => ({
-      header: h,
-      children: children.filter((c: any) => c[spec.childFk] === h.id),
-      ...(spec.movementRef
-        ? { movements: movements.filter((m: any) => m.referenceId === h.id) }
-        : {}),
-    }))
-  }
-
-  return buildDiary({ device: deviceId, now, singles: singles as any, documents })
-}
-
-// ── Local index (pull side input) ────────────────────────────────────────────
-
-async function buildLocalIndex(prisma: any): Promise<LocalIndex> {
-  const headers: LocalIndex['headers'] = {}
-  const numbers: NonNullable<LocalIndex['numbers']> = {}
-
-  const indexTable = async (table: string, numberColumn?: string) => {
-    const rows = await prisma[table].findMany()
-    headers[table] = {}
-    if (numberColumn) numbers[table] = {}
-    for (const r of rows) {
-      headers[table][r.id] = {
-        updatedAt: toEpochMs(r.updatedAt),
-        createdAt: toEpochMs(r.createdAt),
-        deletedAt: toEpochMs(r.deletedAt),
-        cancelledAt: toEpochMs(r.cancelledAt),
-        status: r.status ?? null,
-      }
-      const num = numberColumn ? r[numberColumn] : null
-      if (numberColumn && num != null) {
-        numbers[table][String(num)] = { rowId: r.id, createdAt: toEpochMs(r.createdAt) }
-      }
-    }
-  }
-
-  for (const table of SYNC_SINGLE_TABLES) await indexTable(table)
-  for (const spec of SYNC_DOCUMENT_TABLES) await indexTable(spec.table, spec.numberColumn)
-
-  return { headers, numbers }
-}
-
-// ── Execute (pull side output) ───────────────────────────────────────────────
-
-async function executePlan(prisma: any, plan: ApplyPlan): Promise<void> {
-  if (plan.upserts.length === 0 && plan.localRenumbers.length === 0) return
-  await prisma.$transaction(async (tx: any) => {
-    for (const u of plan.upserts) {
-      const data = reviveRowDates(u.row)
-      await tx[u.table].upsert({ where: { id: u.rowId }, create: data, update: data })
-      if (u.children) {
-        await tx[u.children.table].deleteMany({ where: { [u.children.fk]: u.rowId } })
-        if (u.children.rows.length) {
-          await tx[u.children.table].createMany({ data: u.children.rows.map(reviveRowDates) })
-        }
-      }
-      if (u.movements) {
-        await tx.stockMovement.deleteMany({
-          where: { referenceType: u.movements.referenceType, referenceId: u.movements.referenceId },
-        })
-        if (u.movements.rows.length) {
-          await tx.stockMovement.createMany({ data: u.movements.rows.map(reviveRowDates) })
-        }
-      }
-    }
-    // @updatedAt auto-bumps on these updates, so a renumber propagates on the
-    // next push — the other device learns the new number.
-    for (const r of plan.localRenumbers) {
-      await tx[r.table].update({ where: { id: r.rowId }, data: { [r.column]: r.to } })
-    }
-  })
-}
+export type { RowSyncResult }
 
 // ── Drive diary IO ───────────────────────────────────────────────────────────
 
@@ -222,6 +104,7 @@ export const rowSyncNow = async (): Promise<RowSyncResult> => {
     let skipped = 0
     let localRenumbers = 0
     let removalsApplied = 0
+    let recomputeChanges = 0
     let log: RowSyncResult['log'] = []
     if (packets.length > 0) {
       const local = await buildLocalIndex(prisma)
@@ -232,11 +115,16 @@ export const rowSyncNow = async (): Promise<RowSyncResult> => {
       localRenumbers = plan.localRenumbers.length
       removalsApplied = plan.incomingRemovals
       log = plan.log
-    }
 
-    // Recompute AFTER apply — the whole reason stored totals can be trusted.
-    // (openingStock backfill already ran at startup, before any sync can.)
-    const recompute = await recomputeAll(prisma, { apply: true })
+      // Recompute ONLY when the merge changed rows. A no-op sync must not
+      // silently rewrite numbers that pre-date sync — legacy drift is surfaced
+      // by the explicit recompute dry-run/Data Health flows, reviewed by a
+      // human, not applied as a side effect of an empty pull.
+      if (plan.upserts.length > 0 || plan.localRenumbers.length > 0) {
+        const recompute = await recomputeAll(prisma, { apply: true })
+        recomputeChanges = recompute.totalChanges
+      }
+    }
 
     // PUSH: rewrite this device's whole 30-day diary (stateless, idempotent).
     const diary = await collectDiary(prisma, deviceId, now)
@@ -249,7 +137,7 @@ export const rowSyncNow = async (): Promise<RowSyncResult> => {
       skipped,
       localRenumbers,
       removalsApplied,
-      recomputeChanges: recompute.totalChanges,
+      recomputeChanges,
       log,
     }
   } catch (error) {

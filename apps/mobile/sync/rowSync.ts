@@ -248,6 +248,7 @@ export async function rowSyncNow(db: Db, accessToken: string): Promise<RowSyncRe
     let skipped = 0
     let localRenumbers = 0
     let removalsApplied = 0
+    let recomputeChanges = 0
     let log: RowSyncResult['log'] = []
     if (packets.length > 0) {
       const local = await buildLocalIndex(db)
@@ -258,11 +259,17 @@ export async function rowSyncNow(db: Db, accessToken: string): Promise<RowSyncRe
       localRenumbers = plan.localRenumbers.length
       removalsApplied = plan.incomingRemovals
       log = plan.log
-    }
 
-    // Recompute AFTER apply — the whole reason stored totals can be trusted.
-    // (openingStock backfill already ran at app start, before any sync can.)
-    const recompute = await recomputeAll(db, { apply: true })
+      // Recompute ONLY when the merge changed rows. A no-op sync must not
+      // silently rewrite numbers that pre-date sync — legacy drift is surfaced
+      // by the explicit Data Health flow, reviewed by a human, not applied as
+      // a side effect of an empty pull. (openingStock backfill already ran at
+      // app start, before any sync can.)
+      if (plan.upserts.length > 0 || plan.localRenumbers.length > 0) {
+        const recompute = await recomputeAll(db, { apply: true })
+        recomputeChanges = recompute.totalChanges
+      }
+    }
 
     // PUSH: rewrite this device's whole 30-day diary (stateless, idempotent).
     const diary = await collectDiary(db, deviceId, now)
@@ -275,7 +282,7 @@ export async function rowSyncNow(db: Db, accessToken: string): Promise<RowSyncRe
       skipped,
       localRenumbers,
       removalsApplied,
-      recomputeChanges: recompute.totalChanges,
+      recomputeChanges,
       log,
     }
   } catch (e) {
