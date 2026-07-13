@@ -124,9 +124,30 @@ export async function restoreFromCloud(
     const sidecar = new File(sqliteDir, `${MOBILE_DB_NAME}${suffix}`)
     if (sidecar.exists) sidecar.delete()
   }
+  // PARK the outgoing DB instead of deleting it — a wrong-direction restore is
+  // recovered by renaming this file back to the live DB name. Only the newest
+  // parked copy is kept, bounding disk cost to one extra DB. (Mirrors
+  // replaceLocalDbFromDrive on desktop.)
   const dbFile = new File(sqliteDir, MOBILE_DB_NAME)
-  if (dbFile.exists) dbFile.delete()
-  tmpFile.move(dbFile)
+  if (dbFile.exists) {
+    for (const entry of sqliteDir.list()) {
+      if (entry instanceof File && entry.name.startsWith(`${MOBILE_DB_NAME}.pre-restore-`)) {
+        try { entry.delete() } catch { /* best-effort */ }
+      }
+    }
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    try {
+      // move() retargets the File instance's uri, so the live-DB destination
+      // below must be a FRESH File object, not this one.
+      dbFile.move(new File(sqliteDir, `${MOBILE_DB_NAME}.pre-restore-${stamp}`))
+    } catch {
+      // Parking is a safety net, not a correctness requirement — the download
+      // is already verified, so fall back to the plain delete.
+      const stale = new File(sqliteDir, MOBILE_DB_NAME)
+      if (stale.exists) stale.delete()
+    }
+  }
+  tmpFile.move(new File(sqliteDir, MOBILE_DB_NAME))
 
   // The imported file came from Prisma — it has every table our schema
   // expects, but no __drizzle_migrations table. Without intervention the next

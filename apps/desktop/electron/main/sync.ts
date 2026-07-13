@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client'
 import { getOAuth2Client, isAuthError, clearStoredCredentials } from './auth'
 import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
 import fs from 'fs'
+import path from 'path'
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
 
@@ -397,10 +398,12 @@ export const syncUpload = async (): Promise<{ success: boolean; error?: string }
 // TEMP file (a dropped connection must leave the live DB untouched), resolve
 // on the WRITE stream's 'finish' (the source's 'end' fires before bytes hit
 // disk), verify the size, then swap — Prisma disconnected first (Windows file
-// locks), stale WAL/SHM/journal sidecars cleared, rename with a copy fallback.
-// From the moment the old DB is unlinked, the temp file is the ONLY local
-// copy and must never be deleted on failure. Used by both the whole-file
-// restore and the ladder time-machine restore.
+// locks), stale WAL/SHM/journal sidecars cleared, the outgoing DB parked as a
+// .pre-restore-<stamp> sibling (rename it back to undo a wrong restore), and
+// the temp file renamed into place with a copy fallback. Once the old DB is
+// parked, the temp file is the ONLY copy of the restored data and must never
+// be deleted on failure. Used by both the whole-file restore and the ladder
+// time-machine restore.
 const replaceLocalDbFromDrive = async (
   drive: any,
   fileId: string,
@@ -441,7 +444,28 @@ const replaceLocalDbFromDrive = async (
     const sidecar = `${dbPath}${suffix}`
     if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar)
   }
-  if (fs.existsSync(dbPath)) fs.unlinkSync(dbPath)
+  // PARK the outgoing DB instead of deleting it — restore must be the only
+  // undoable-by-rename "destructive" action in the app (a wrong-direction
+  // restore is recovered by renaming this file back to neuinvoicing.db).
+  // Only the newest parked copy is kept, bounding disk cost to one extra DB.
+  if (fs.existsSync(dbPath)) {
+    const dir = path.dirname(dbPath)
+    const parkedPrefix = `${path.basename(dbPath)}.pre-restore-`
+    for (const name of fs.readdirSync(dir)) {
+      if (name.startsWith(parkedPrefix)) {
+        try { fs.unlinkSync(path.join(dir, name)) } catch { /* best-effort */ }
+      }
+    }
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+    try {
+      fs.renameSync(dbPath, `${dbPath}.pre-restore-${stamp}`)
+    } catch {
+      // Parking is a safety net, not a correctness requirement — the download
+      // is already verified, so fall back to the plain delete rather than
+      // failing the whole restore.
+      fs.unlinkSync(dbPath)
+    }
+  }
   try {
     fs.renameSync(tmpPath, dbPath)
   } catch {
