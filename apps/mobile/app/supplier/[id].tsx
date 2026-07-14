@@ -124,7 +124,7 @@ export default function SupplierDetailScreen() {
         {isDeleted ? (
           <ThemedView style={styles.deletedBanner}>
             <ThemedText style={styles.deletedBannerText}>
-              This supplier is deleted — it's left out of totals and reports. Restore it to use it again.
+              This supplier is deleted — it&apos;s left out of totals and reports. Restore it to use it again.
             </ThemedText>
           </ThemedView>
         ) : null}
