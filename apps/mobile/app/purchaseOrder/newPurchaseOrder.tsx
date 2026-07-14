@@ -47,6 +47,10 @@ export default function NewPurchaseOrderScreen() {
   const [orderDate, setOrderDate] = useState(todayStr())
   const [expectedDate, setExpectedDate] = useState('')
   const [notes, setNotes] = useState('')
+  const [vendorQuotationRef, setVendorQuotationRef] = useState('')
+  const [billingAddress, setBillingAddress] = useState('')
+  const [shippingAddress, setShippingAddress] = useState('')
+  const [termsConditions, setTermsConditions] = useState('')
   const [lines, setLines] = useState<OrderLine[]>([])
 
   const [saving, setSaving] = useState(false)
@@ -91,7 +95,10 @@ export default function NewPurchaseOrderScreen() {
         orderDate: isNaN(parsed.getTime()) ? new Date() : parsed,
         expectedDate: expectedDate.trim() ? new Date(expectedDate) : null,
         notes: notes.trim() || null,
-        termsConditions: null,
+        termsConditions: termsConditions.trim() || null,
+        vendorQuotationRef: vendorQuotationRef.trim() || null,
+        billingAddress: billingAddress.trim() || null,
+        shippingAddress: shippingAddress.trim() || null,
       }
       const lineInputs: PoLineInput[] = lines.map((l) => ({ supplierItemId: l.supplierItemId, name: l.name.trim(), hsnCode: l.hsnCode.trim(), quantity: l.qty, rate: l.rate, discount: l.discount, taxRate: l.taxRate }))
       await createPurchaseOrder(db, header, lineInputs)
@@ -127,6 +134,10 @@ export default function NewPurchaseOrderScreen() {
 
       <Field label="Order Date (YYYY-MM-DD)" value={orderDate} onChangeText={setOrderDate} placeholder="2026-06-01" />
       <Field label="Expected Date" value={expectedDate} onChangeText={setExpectedDate} placeholder="YYYY-MM-DD (optional)" />
+      <Field label="Vendor Quotation Ref" value={vendorQuotationRef} onChangeText={setVendorQuotationRef} placeholder="Their quote number (optional)" />
+      <Field label="Billing Address" value={billingAddress} onChangeText={setBillingAddress} placeholder="Optional" multiline />
+      <Field label="Shipping Address" value={shippingAddress} onChangeText={setShippingAddress} placeholder="Optional" multiline />
+      <Field label="Terms & Conditions" value={termsConditions} onChangeText={setTermsConditions} placeholder="Optional" multiline />
 
       <View style={styles.linesHeader}><ThemedText type="defaultSemiBold">Items</ThemedText></View>
       {lines.length === 0 ? (

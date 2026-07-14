@@ -240,6 +240,10 @@ export default function ChallanDetailScreen() {
           <Row label="Date" value={formatDate(challan.challanDate)} />
           {challan.transportMode ? <Row label="Transport Mode" value={challan.transportMode} /> : null}
           {challan.vehicleNumber ? <Row label="Vehicle Number" value={challan.vehicleNumber} /> : null}
+          {challan.poNumber ? <Row label="Customer PO #" value={challan.poNumber} /> : null}
+          {challan.ewayBillNo ? <Row label="E-Way Bill" value={challan.ewayBillNo} /> : null}
+          {challan.warrantyPeriod ? <Row label="Warranty" value={challan.warrantyPeriod} /> : null}
+          {challan.dispatchedThrough ? <Row label="Dispatched Through" value={challan.dispatchedThrough} /> : null}
         </Section>
 
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.itemsCard}>

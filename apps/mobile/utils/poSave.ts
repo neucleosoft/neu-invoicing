@@ -29,6 +29,9 @@ export type PoHeaderInput = {
   expectedDate: Date | null
   notes: string | null
   termsConditions: string | null
+  vendorQuotationRef?: string | null
+  billingAddress?: string | null
+  shippingAddress?: string | null
 }
 
 function normalizeItemName(name: string): string {
@@ -138,6 +141,9 @@ export async function createPurchaseOrder(db: Db, header: PoHeaderInput, lines: 
         status: 'DRAFT',
         notes: header.notes,
         termsConditions: header.termsConditions,
+        vendorQuotationRef: header.vendorQuotationRef ?? null,
+        billingAddress: header.billingAddress ?? null,
+        shippingAddress: header.shippingAddress ?? null,
         placeOfSupply: gst.placeOfSupply || null,
         placeOfSupplyName: gst.placeOfSupplyName || null,
         isInterState: gst.isInterState,
@@ -205,6 +211,9 @@ export async function updatePurchaseOrder(db: Db, id: string, header: PoHeaderIn
         totalAmount: gst.totalAmount,
         notes: header.notes,
         termsConditions: header.termsConditions,
+        vendorQuotationRef: header.vendorQuotationRef ?? null,
+        billingAddress: header.billingAddress ?? null,
+        shippingAddress: header.shippingAddress ?? null,
         placeOfSupply: gst.placeOfSupply || null,
         placeOfSupplyName: gst.placeOfSupplyName || null,
         isInterState: gst.isInterState,

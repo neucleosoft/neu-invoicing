@@ -70,6 +70,10 @@ export default function NewChallanScreen() {
   const [challanDate, setChallanDate] = useState(todayIso())
   const [transportMode, setTransportMode] = useState<string>('Road')
   const [vehicleNumber, setVehicleNumber] = useState('')
+  const [poNumber, setPoNumber] = useState('')
+  const [ewayBillNo, setEwayBillNo] = useState('')
+  const [warrantyPeriod, setWarrantyPeriod] = useState('')
+  const [dispatchedThrough, setDispatchedThrough] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
   const [notes, setNotes] = useState('')
   const [termsConditions, setTermsConditions] = useState('')
@@ -165,6 +169,10 @@ export default function NewChallanScreen() {
             totalAmount: gst.totalAmount,
             transportMode: transportMode || null,
             vehicleNumber: vehicleNumber.trim() || null,
+            poNumber: poNumber.trim() || null,
+            ewayBillNo: ewayBillNo.trim() || null,
+            warrantyPeriod: warrantyPeriod.trim() || null,
+            dispatchedThrough: dispatchedThrough.trim() || null,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
           })
@@ -237,6 +245,10 @@ export default function NewChallanScreen() {
       </Pressable>
 
       <Field label="Vehicle Number" value={vehicleNumber} onChangeText={setVehicleNumber} placeholder="e.g. MH12AB1234 (optional)" />
+      <Field label="Customer PO Number" value={poNumber} onChangeText={setPoNumber} placeholder="Their PO reference (optional)" />
+      <Field label="E-Way Bill No" value={ewayBillNo} onChangeText={setEwayBillNo} placeholder="Optional" />
+      <Field label="Warranty Period" value={warrantyPeriod} onChangeText={setWarrantyPeriod} placeholder="e.g. 12 months (optional)" />
+      <Field label="Dispatched Through" value={dispatchedThrough} onChangeText={setDispatchedThrough} placeholder="Courier/transporter (optional)" />
 
       <SectionHeader>Line Items</SectionHeader>
       {lines.map((l, i) => (

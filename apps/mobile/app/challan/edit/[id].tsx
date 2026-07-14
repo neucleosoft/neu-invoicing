@@ -63,6 +63,10 @@ export default function EditChallanScreen() {
   const [challanDate, setChallanDate] = useState('')
   const [transportMode, setTransportMode] = useState<string>('Road')
   const [vehicleNumber, setVehicleNumber] = useState('')
+  const [poNumber, setPoNumber] = useState('')
+  const [ewayBillNo, setEwayBillNo] = useState('')
+  const [warrantyPeriod, setWarrantyPeriod] = useState('')
+  const [dispatchedThrough, setDispatchedThrough] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
   const [notes, setNotes] = useState('')
   const [termsConditions, setTermsConditions] = useState('')
@@ -91,6 +95,10 @@ export default function EditChallanScreen() {
       setChallanDate(toIso(dc.challanDate))
       setTransportMode(dc.transportMode ?? 'Road')
       setVehicleNumber(dc.vehicleNumber ?? '')
+      setPoNumber(dc.poNumber ?? '')
+      setEwayBillNo(dc.ewayBillNo ?? '')
+      setWarrantyPeriod(dc.warrantyPeriod ?? '')
+      setDispatchedThrough(dc.dispatchedThrough ?? '')
       setNotes(dc.notes ?? '')
       setTermsConditions(dc.termsConditions ?? '')
       const [c] = await db.select().from(schema.customer).where(eq(schema.customer.id, dc.customerId)).limit(1)
@@ -186,6 +194,10 @@ export default function EditChallanScreen() {
             challanDate: cDate,
             transportMode: transportMode || null,
             vehicleNumber: vehicleNumber.trim() || null,
+            poNumber: poNumber.trim() || null,
+            ewayBillNo: ewayBillNo.trim() || null,
+            warrantyPeriod: warrantyPeriod.trim() || null,
+            dispatchedThrough: dispatchedThrough.trim() || null,
             subtotal: gst.subtotal,
             taxAmount: gst.taxAmount,
             totalAmount: gst.totalAmount,
@@ -239,6 +251,10 @@ export default function EditChallanScreen() {
       <Pressable style={styles.picker} onPress={() => setShowTransportPicker(true)}><ThemedText>{transportMode}</ThemedText></Pressable>
 
       <Field label="Vehicle Number" value={vehicleNumber} onChangeText={setVehicleNumber} placeholder="e.g. MH12AB1234 (optional)" />
+      <Field label="Customer PO Number" value={poNumber} onChangeText={setPoNumber} placeholder="Their PO reference (optional)" />
+      <Field label="E-Way Bill No" value={ewayBillNo} onChangeText={setEwayBillNo} placeholder="Optional" />
+      <Field label="Warranty Period" value={warrantyPeriod} onChangeText={setWarrantyPeriod} placeholder="e.g. 12 months (optional)" />
+      <Field label="Dispatched Through" value={dispatchedThrough} onChangeText={setDispatchedThrough} placeholder="Courier/transporter (optional)" />
 
       <SectionHeader>Line Items</SectionHeader>
       {lines.map((l, i) => (
