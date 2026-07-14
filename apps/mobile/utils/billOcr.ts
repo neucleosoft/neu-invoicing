@@ -1,29 +1,17 @@
-import * as SecureStore from 'expo-secure-store'
-
 // Mobile port of the OpenRouter OCR path in desktop's handlers/purchase.ts.
 // Desktop can also use Gemini, but that needs the Files API (three round trips)
 // and a Google key; OpenRouter is one fetch with a base64 data URL and a free
 // OCR-specialized default model, which fits a phone far better. Same prompt and
 // same JSON-extraction rules as desktop so a bill scanned on either reads the
 // same way.
+//
+// The API key comes from apps/mobile/.env (EXPO_PUBLIC_OPENROUTER_API_KEY),
+// mirroring desktop's OPENROUTER_API_KEY in apps/desktop/.env — no in-app key
+// entry. .env is gitignored; EXPO_PUBLIC_* values are inlined at BUNDLE time,
+// so changing the key needs a dev-server restart (dev) or a new build (APK).
 
-const OPENROUTER_KEY_STORE = 'neu.openrouter.apiKey'
+const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY ?? ''
 const DEFAULT_MODEL = 'baidu/qianfan-ocr-fast:free'
-
-// SecureStore mirrors how the Google token is kept (auth/index.ts). The key is
-// a credential, so it never lands in the SQLite db or the Drive backup.
-export async function getOpenRouterKey(): Promise<string | null> {
-  return SecureStore.getItemAsync(OPENROUTER_KEY_STORE)
-}
-
-export async function setOpenRouterKey(key: string): Promise<void> {
-  const trimmed = key.trim()
-  if (trimmed) {
-    await SecureStore.setItemAsync(OPENROUTER_KEY_STORE, trimmed)
-  } else {
-    await SecureStore.deleteItemAsync(OPENROUTER_KEY_STORE)
-  }
-}
 
 // One extracted line from the bill. Matches the shape desktop's prompt asks for.
 export type ExtractedItem = {
@@ -152,12 +140,12 @@ export async function extractBillFromImage(
   base64: string,
   mimeType: string,
 ): Promise<OcrResult> {
-  const apiKey = await getOpenRouterKey()
+  const apiKey = OPENROUTER_API_KEY
   if (!apiKey) {
     return {
       success: false,
       error:
-        'No OpenRouter API key set. Add a free key in Settings → AI Bill Scan to use this.',
+        'No OpenRouter API key configured. Set EXPO_PUBLIC_OPENROUTER_API_KEY in apps/mobile/.env and restart (or rebuild).',
     }
   }
 
