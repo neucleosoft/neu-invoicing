@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, DevSettings, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, DevSettings, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { useSQLiteContext } from 'expo-sqlite';
 
@@ -22,6 +22,17 @@ import { getLadderInfo, restoreFromLadder, type LadderRungInfo } from '@/sync/la
 import { rowSyncNow } from '@/sync/rowSync';
 import { getBackupFrequency, setBackupFrequency, type BackupFrequency } from '@/sync/scheduledBackup';
 import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
+import { getSetting, setSetting } from '@/utils/appSettings';
+import {
+  PO_GENERAL_TERMS_DEFAULT,
+  PO_SETTINGS_KEYS,
+  PO_SPECIAL_INSTRUCTIONS_DEFAULT,
+} from '@/utils/poDefaults';
+import {
+  getThemePreference,
+  setThemePreference,
+  type ThemePreference,
+} from '@/hooks/theme-preference';
 
 export default function SettingsScreen() {
   const { user, accessToken, getFreshAccessToken, signOut, signIn } = useAuth();
@@ -35,6 +46,38 @@ export default function SettingsScreen() {
   const [backingUp, setBackingUp] = useState(false);
   const [ladderInfo, setLadderInfo] = useState<LadderRungInfo[]>([]);
   const [ladderRestoring, setLadderRestoring] = useState<string | null>(null);
+
+  // Theme override (Appearance): light / dark / system, applied app-wide by
+  // the use-color-scheme hook.
+  const [themePref, setThemePrefState] = useState<ThemePreference>(getThemePreference());
+  function handleThemeChange(p: ThemePreference) {
+    setThemePrefState(p);
+    void setThemePreference(p);
+  }
+
+  // PO boilerplate (mirrors desktop Settings → Purchase Order Defaults) —
+  // stored in the Settings table, printed on every PO PDF.
+  const [poSpecial, setPoSpecial] = useState('');
+  const [poTerms, setPoTerms] = useState('');
+  const [poSaving, setPoSaving] = useState(false);
+  useEffect(() => {
+    (async () => {
+      setPoSpecial((await getSetting(db, PO_SETTINGS_KEYS.specialInstructions)) ?? PO_SPECIAL_INSTRUCTIONS_DEFAULT);
+      setPoTerms((await getSetting(db, PO_SETTINGS_KEYS.generalTerms)) ?? PO_GENERAL_TERMS_DEFAULT);
+    })();
+  }, [db]);
+  async function handleSavePoDefaults() {
+    setPoSaving(true);
+    try {
+      await setSetting(db, PO_SETTINGS_KEYS.specialInstructions, poSpecial);
+      await setSetting(db, PO_SETTINGS_KEYS.generalTerms, poTerms);
+      Alert.alert('Saved', 'These notes now print on every Purchase Order PDF.');
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setPoSaving(false);
+    }
+  }
 
   // Automatic full-backup cadence (mirrors desktop's Automatic backup select).
   const [backupFreq, setBackupFreqState] = useState<BackupFrequency>('off');
@@ -641,6 +684,73 @@ export default function SettingsScreen() {
         )}
       </ThemedView>
 
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Appearance</ThemedText>
+        <View style={styles.freqChips}>
+          {(['light', 'dark', 'system'] as ThemePreference[]).map((p) => (
+            <Pressable
+              key={p}
+              onPress={() => handleThemeChange(p)}
+              style={[styles.freqChip, themePref === p && styles.freqChipActive]}
+            >
+              <ThemedText style={themePref === p ? styles.freqChipTextActive : styles.freqChipText}>
+                {p[0].toUpperCase() + p.slice(1)}
+              </ThemedText>
+            </Pressable>
+          ))}
+        </View>
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Tax Settings</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Tax rates are configured per item — open an item to set its GST rate.
+          Common GST rates in India: essential goods 0%/5%, standard goods
+          12%/18%, luxury goods 28%, services 18%.
+        </ThemedText>
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Purchase Order Defaults</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          These notes print on every Purchase Order PDF — special instructions
+          below the items table, general terms on the last page.
+        </ThemedText>
+        <ThemedText style={styles.statusLabel}>Special Instructions</ThemedText>
+        <TextInput
+          value={poSpecial}
+          onChangeText={setPoSpecial}
+          multiline
+          style={styles.poInput}
+          placeholderTextColor="#9ca3af"
+        />
+        <ThemedText style={styles.statusLabel}>General Terms &amp; Conditions</ThemedText>
+        <TextInput
+          value={poTerms}
+          onChangeText={setPoTerms}
+          multiline
+          style={[styles.poInput, styles.poInputTall]}
+          placeholderTextColor="#9ca3af"
+        />
+        <View style={styles.poActions}>
+          <Pressable
+            onPress={() => {
+              setPoSpecial(PO_SPECIAL_INSTRUCTIONS_DEFAULT);
+              setPoTerms(PO_GENERAL_TERMS_DEFAULT);
+            }}
+            style={styles.poReset}
+          >
+            <ThemedText>Reset to defaults</ThemedText>
+          </Pressable>
+          <Button
+            title={poSaving ? 'Saving…' : 'Save PO defaults'}
+            variant="primary"
+            onPress={handleSavePoDefaults}
+            disabled={poSaving}
+          />
+        </View>
+      </ThemedView>
+
       {user && (
         <ThemedView style={styles.section}>
           <Pressable onPress={handleSignOut} style={styles.signOutButton}>
@@ -743,6 +853,21 @@ const styles = StyleSheet.create({
   freqChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
   freqChipText: { fontSize: 13 },
   freqChipTextActive: { color: 'white', fontWeight: '600' },
+  poInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: '#111827',
+    backgroundColor: '#f9fafb',
+    minHeight: 120,
+    textAlignVertical: 'top',
+  },
+  poInputTall: { minHeight: 180 },
+  poActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+  poReset: { paddingVertical: 10 },
   keyButton: {
     backgroundColor: '#007AFF',
     paddingVertical: 12,
