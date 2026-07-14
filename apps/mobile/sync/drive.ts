@@ -117,6 +117,26 @@ export async function restoreFromCloud(
     throw new Error(`Download incomplete (${gotSize} of ${info.size} bytes) — your local data is untouched. Try again.`)
   }
 
+  await swapInVerifiedDb(liveDb, tmpFile)
+
+  // We just synced WITH the cloud — its current mtime is now this device's
+  // known-good baseline for the upload overwrite-guard.
+  if (info.modifiedTime) await setLastKnownCloudMtime(info.modifiedTime)
+
+  return info
+}
+
+// Swap a VERIFIED downloaded DB file into place and re-seed the drizzle
+// migration tracker. Shared by the full-backup restore above and the ladder
+// time-machine restore (sync/ladder.ts). The caller must have size-verified
+// tmpFile already, and must reload the app afterwards — the SQLiteProvider
+// still holds a handle to the old file.
+export async function swapInVerifiedDb(
+  liveDb: SQLite.SQLiteDatabase,
+  tmpFile: File,
+): Promise<void> {
+  const sqliteDir = new Directory(Paths.document, 'SQLite')
+
   // Swap: release Android's lock on the live DB, clear stale WAL/SHM sidecars
   // (they belong to the OLD file and would corrupt the new one on first open),
   // then move the verified download into place.
@@ -150,11 +170,13 @@ export async function restoreFromCloud(
   }
   tmpFile.move(new File(sqliteDir, MOBILE_DB_NAME))
 
-  // The imported file came from Prisma — it has every table our schema
-  // expects, but no __drizzle_migrations table. Without intervention the next
+  // A file imported from Prisma (desktop) has every table our schema expects
+  // but no __drizzle_migrations table. Without intervention the next
   // runMigrations() pass would try to CREATE TABLE Item etc. and fail with
   // "table already exists". So we pre-seed the migration tracker to record that
-  // every CURRENTLY-bundled migration is already applied.
+  // every CURRENTLY-bundled migration is already applied. A file that came
+  // from a MOBILE upload already carries the tracker — the count guard leaves
+  // it untouched instead of stacking duplicate rows.
   //
   // CRITICAL — stamp each migration with its REAL folderMillis (the journal
   // `when`), NOT Date.now(). Drizzle's migrator runs a migration only when its
@@ -175,23 +197,22 @@ export async function restoreFromCloud(
         created_at numeric
       );
     `)
-    const entries: { tag: string; when: number }[] = drizzleMigrations.journal.entries
-    for (const entry of entries) {
-      await importedDb.runAsync(
-        'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
-        entry.tag,
-        entry.when,
-      )
+    const already = await importedDb.getFirstAsync<{ c: number }>(
+      'SELECT COUNT(*) AS c FROM __drizzle_migrations',
+    )
+    if ((already?.c ?? 0) === 0) {
+      const entries: { tag: string; when: number }[] = drizzleMigrations.journal.entries
+      for (const entry of entries) {
+        await importedDb.runAsync(
+          'INSERT INTO __drizzle_migrations (hash, created_at) VALUES (?, ?)',
+          entry.tag,
+          entry.when,
+        )
+      }
     }
   } finally {
     await importedDb.closeAsync()
   }
-
-  // We just synced WITH the cloud — its current mtime is now this device's
-  // known-good baseline for the upload overwrite-guard.
-  if (info.modifiedTime) await setLastKnownCloudMtime(info.modifiedTime)
-
-  return info
 }
 
 // ─── Backup (upload) ─────────────────────────────────────────────────────────
@@ -208,6 +229,13 @@ export async function getLastKnownCloudMtime(): Promise<string | null> {
 
 async function setLastKnownCloudMtime(mtime: string): Promise<void> {
   await SecureStore.setItemAsync(LAST_KNOWN_CLOUD_MTIME_KEY, mtime)
+}
+
+// After a time-machine restore the local DB no longer matches the cloud full
+// backup — clearing the baseline makes the upload guard ask before this
+// device overwrites it (mirrors desktop's resetSyncBaseline).
+export async function clearLastKnownCloudMtime(): Promise<void> {
+  await SecureStore.deleteItemAsync(LAST_KNOWN_CLOUD_MTIME_KEY)
 }
 
 // True when the cloud holds a backup this device hasn't seen — i.e. uploading

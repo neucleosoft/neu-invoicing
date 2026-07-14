@@ -5,11 +5,13 @@
 // (photos/archive files live once as img-* Drive objects, refetchable), so a
 // rung is ~10 MB instead of ~300 MB.
 
+import { Directory, File, Paths } from 'expo-file-system'
 import * as LegacyFS from 'expo-file-system/legacy'
 import * as SecureStore from 'expo-secure-store'
 import * as SQLite from 'expo-sqlite'
 
 import { snapshotDbTo } from './dbFileLock'
+import { clearLastKnownCloudMtime, swapInVerifiedDb } from './drive'
 
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files'
@@ -94,6 +96,62 @@ async function uploadSlot(
   if (uploadRes.status < 200 || uploadRes.status >= 300) {
     throw new Error(`Ladder upload failed (${uploadRes.status})`)
   }
+}
+
+// Rung metadata for the Settings "time machine" list (mirrors desktop
+// getLadderInfo). Missing slots come back with null modifiedTime/size.
+export type LadderRungInfo = { name: string; modifiedTime: string | null; size: number | null }
+
+export async function getLadderInfo(accessToken: string): Promise<LadderRungInfo[]> {
+  const out: LadderRungInfo[] = []
+  for (const slot of LADDER_SLOTS) {
+    const f = await findSlot(accessToken, slot.name)
+    out.push({
+      name: slot.name,
+      modifiedTime: f?.modifiedTime ?? null,
+      size: f && f.size > 0 ? f.size : null,
+    })
+  }
+  return out
+}
+
+// Time-machine restore: replace the local DB with a ladder rung. Rungs are
+// BLOB-STRIPPED — bill photos and archive files refetch lazily from their
+// img-* Drive objects afterwards. Same contract as restoreFromCloud: the
+// caller must reload the app afterwards. Mirrors desktop restoreFromLadder.
+export async function restoreFromLadder(
+  accessToken: string,
+  liveDb: SQLite.SQLiteDatabase,
+  slotName: string,
+): Promise<void> {
+  if (!LADDER_SLOTS.some((s) => s.name === slotName)) {
+    throw new Error('Unknown backup slot.')
+  }
+  const f = await findSlot(accessToken, slotName)
+  if (!f) throw new Error('That backup slot does not exist yet.')
+  // A 0-byte slot is the residue of a failed upload — restoring it would wipe
+  // this device's data.
+  if (!f.size) throw new Error('That backup slot is empty.')
+
+  const sqliteDir = new Directory(Paths.document, 'SQLite')
+  if (!sqliteDir.exists) sqliteDir.create({ intermediates: true })
+
+  // Download to a TEMP file and size-verify before touching the live DB —
+  // a dropped connection must leave local data untouched.
+  const tmpFile = new File(sqliteDir, 'ladder-restore.download')
+  if (tmpFile.exists) tmpFile.delete()
+  await File.downloadFileAsync(`${DRIVE_FILES_URL}/${f.id}?alt=media`, tmpFile, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    idempotent: true,
+  })
+  const gotSize = tmpFile.size ?? 0
+  if (gotSize === 0 || gotSize !== f.size) {
+    tmpFile.delete()
+    throw new Error(`Download incomplete (${gotSize} of ${f.size} bytes) — your local data is untouched. Try again.`)
+  }
+
+  await swapInVerifiedDb(liveDb, tmpFile)
+  await clearLastKnownCloudMtime()
 }
 
 /**

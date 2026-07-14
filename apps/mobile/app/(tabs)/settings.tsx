@@ -18,6 +18,7 @@ import {
 } from '@/sync/drive';
 import { getSyncActivity, type SyncActivityEntry } from '@/sync/activityLog';
 import { LAST_ROW_SYNC_KEY } from '@/sync/AutoSync';
+import { getLadderInfo, restoreFromLadder, type LadderRungInfo } from '@/sync/ladder';
 import { rowSyncNow } from '@/sync/rowSync';
 import { getOpenRouterKey, setOpenRouterKey } from '@/utils/billOcr';
 import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
@@ -32,6 +33,8 @@ export default function SettingsScreen() {
   const [backupError, setBackupError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [backingUp, setBackingUp] = useState(false);
+  const [ladderInfo, setLadderInfo] = useState<LadderRungInfo[]>([]);
+  const [ladderRestoring, setLadderRestoring] = useState<string | null>(null);
 
   // Company name shown in the Business section. null = still loading, '' = no
   // company yet. Reloaded on focus so it updates after editing the profile.
@@ -89,6 +92,12 @@ export default function SettingsScreen() {
         if (!fresh) throw new Error('Session expired — sign in again.');
         const info = await checkCloudBackup(fresh);
         if (!cancelled) setBackupInfo(info);
+        // Time-machine rungs, best-effort — a ladder listing failure must not
+        // hide the main backup status.
+        try {
+          const rungs = await getLadderInfo(fresh);
+          if (!cancelled) setLadderInfo(rungs);
+        } catch { /* rung list stays empty */ }
       } catch (e) {
         if (!cancelled) setBackupError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -139,6 +148,42 @@ export default function SettingsScreen() {
               DevSettings.reload();
             } catch (e) {
               setRestoring(false);
+              Alert.alert('Restore failed', e instanceof Error ? e.message : String(e));
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  // Time-machine restore: same destructive flow as handleRestore, but from an
+  // older ladder rung. Rungs are photo-stripped — bill photos re-download
+  // lazily after the reload.
+  const LADDER_LABELS: Record<string, string> = {
+    'backup-daily.db': 'Daily (freshest)',
+    'backup-weekly.db': 'Weekly (kept ~7 days old on purpose)',
+    'backup-monthly.db': 'Monthly (kept ~30 days old on purpose)',
+  };
+
+  function handleLadderRestore(rung: LadderRungInfo) {
+    if (!rung.modifiedTime) return;
+    Alert.alert(
+      'Go back in time?',
+      `This will REPLACE all your local data with the ${LADDER_LABELS[rung.name] ?? rung.name} copy from ${formatBackupDate(rung.modifiedTime)}. Bill photos re-download when you open them. The next sync re-merges anything newer from your other device.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Replace local data',
+          style: 'destructive',
+          onPress: async () => {
+            setLadderRestoring(rung.name);
+            try {
+              const fresh = await getFreshAccessToken();
+              if (!fresh) throw new Error('Session expired — sign in again.');
+              await restoreFromLadder(fresh, liveDb, rung.name);
+              DevSettings.reload();
+            } catch (e) {
+              setLadderRestoring(null);
               Alert.alert('Restore failed', e instanceof Error ? e.message : String(e));
             }
           },
@@ -401,7 +446,7 @@ export default function SettingsScreen() {
           variant="primary"
           onPress={handleRowSync}
           loading={rowSyncing}
-          disabled={!accessToken || backingUp || restoring}
+          disabled={!accessToken || backingUp || restoring || ladderRestoring != null}
         />
         {lastRowSyncAt ? (
           <ThemedText style={styles.businessHint}>
@@ -463,7 +508,7 @@ export default function SettingsScreen() {
           variant="primary"
           onPress={handleBackup}
           loading={backingUp}
-          disabled={!accessToken || restoring || rowSyncing}
+          disabled={!accessToken || restoring || rowSyncing || ladderRestoring != null}
         />
 
         <View style={styles.warningBox}>
@@ -475,16 +520,54 @@ export default function SettingsScreen() {
 
         <Pressable
           onPress={handleRestore}
-          disabled={restoring || backupLoading || rowSyncing || !backupInfo?.exists}
+          disabled={restoring || backupLoading || rowSyncing || ladderRestoring != null || !backupInfo?.exists}
           style={[
             styles.dangerButton,
-            (restoring || backupLoading || rowSyncing || !backupInfo?.exists) && styles.disabledButton,
+            (restoring || backupLoading || rowSyncing || ladderRestoring != null || !backupInfo?.exists) && styles.disabledButton,
           ]}
         >
           <ThemedText style={styles.dangerButtonText}>
             {restoring ? 'Restoring & reloading…' : 'Restore from cloud'}
           </ThemedText>
         </Pressable>
+
+        {ladderInfo.some((l) => l.modifiedTime) && (
+          <>
+            <ThemedText style={styles.businessHint}>
+              Time machine — older automatic copies, kept at different ages on purpose so a
+              mistake noticed late can still be undone. Photos are not inside these copies;
+              they re-download when you open a bill.
+            </ThemedText>
+            {ladderInfo
+              .filter((l) => l.modifiedTime)
+              .map((rung) => (
+                <View key={rung.name} style={styles.statusBox}>
+                  <View style={styles.statusRow}>
+                    <ThemedText style={styles.statusLabel}>
+                      {LADDER_LABELS[rung.name] ?? rung.name}
+                    </ThemedText>
+                    <ThemedText style={styles.statusValue}>
+                      {rung.modifiedTime ? formatBackupDate(rung.modifiedTime) : '—'}
+                      {rung.size ? ` · ${(rung.size / 1048576).toFixed(1)} MB` : ''}
+                    </ThemedText>
+                  </View>
+                  <Pressable
+                    onPress={() => handleLadderRestore(rung)}
+                    disabled={restoring || backingUp || rowSyncing || ladderRestoring != null}
+                    style={[
+                      styles.dangerButton,
+                      (restoring || backingUp || rowSyncing || ladderRestoring != null) &&
+                        styles.disabledButton,
+                    ]}
+                  >
+                    <ThemedText style={styles.dangerButtonText}>
+                      {ladderRestoring === rung.name ? 'Restoring & reloading…' : 'Restore this copy…'}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              ))}
+          </>
+        )}
       </ThemedView>
 
       <ThemedView style={styles.section}>
