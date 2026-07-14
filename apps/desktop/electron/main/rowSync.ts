@@ -23,6 +23,7 @@ import { Readable } from 'stream'
 import { billImageFileName, parseDiary, planApply, previousInvoiceFileName, toEpochMs, TRIPWIRE_THRESHOLD, type SyncPacket } from '@neu/shared'
 import { getOAuth2Client, isAuthError } from './auth'
 import { getPrisma } from './database'
+import { withDbFileLock } from './dbLock'
 import { recomputeAll } from './recompute'
 import { getDeviceId } from './sync'
 import {
@@ -135,10 +136,12 @@ async function downloadPeerDiaries(
 // riding inside every diary and backup. Push: best-effort after each sync for
 // the changed bills. Pull: lazy, on first view (sync:fetchBillImage).
 
+type DriveImageMeta = { id: string; modifiedTime?: string; size: number }
+
 async function findDriveImage(
   drive: any,
   name: string,
-): Promise<{ id: string; modifiedTime?: string; size: number } | null> {
+): Promise<DriveImageMeta | null> {
   const res = await drive.files.list({
     spaces: 'appDataFolder',
     q: `name='${name}' and trashed=false`,
@@ -149,7 +152,36 @@ async function findDriveImage(
   return f ? { id: f.id, modifiedTime: f.modifiedTime ?? undefined, size: Number(f.size ?? 0) } : null
 }
 
-async function pushBillImages(drive: any, prisma: any, billIds: string[]): Promise<number> {
+// ONE paginated listing of every img-* Drive object, built once per sync and
+// consulted in memory. The per-file findDriveImage shape cost a Drive round
+// trip PER changed bill on EVERY sync for the 30 days a bill stays in the
+// diary. (findDriveImage remains for the single-file lazy-fetch paths.)
+async function listDriveImages(drive: any): Promise<Map<string, DriveImageMeta>> {
+  const out = new Map<string, DriveImageMeta>()
+  let pageToken: string | undefined
+  do {
+    const res = await drive.files.list({
+      spaces: 'appDataFolder',
+      q: `name contains 'img-' and trashed=false`,
+      fields: 'nextPageToken, files(id,name,modifiedTime,size)',
+      pageSize: 1000,
+      pageToken,
+    })
+    for (const f of res.data.files ?? []) {
+      if (!f.id || !f.name) continue
+      out.set(f.name, { id: f.id, modifiedTime: f.modifiedTime ?? undefined, size: Number(f.size ?? 0) })
+    }
+    pageToken = res.data.nextPageToken ?? undefined
+  } while (pageToken)
+  return out
+}
+
+async function pushBillImages(
+  drive: any,
+  prisma: any,
+  billIds: string[],
+  images: Map<string, DriveImageMeta>,
+): Promise<number> {
   if (billIds.length === 0) return 0
   const bills = await prisma.purchaseBill.findMany({
     where: { id: { in: billIds }, attachmentData: { not: null } },
@@ -161,7 +193,7 @@ async function pushBillImages(drive: any, prisma: any, billIds: string[]): Promi
     if (!bill.attachmentData || !bill.attachmentMimeType) continue
     try {
       const name = billImageFileName(bill.id)
-      const existing = await findDriveImage(drive, name)
+      const existing = images.get(name) ?? null
       // Upload when missing, 0-byte (residue of a failed two-step upload from
       // the phone), or when the bill changed after the last upload (covers a
       // replaced photo; a redundant upload is harmless).
@@ -186,7 +218,12 @@ async function pushBillImages(drive: any, prisma: any, billIds: string[]): Promi
   return pushed
 }
 
-async function pushPreviousInvoiceFiles(drive: any, prisma: any, ids: string[]): Promise<number> {
+async function pushPreviousInvoiceFiles(
+  drive: any,
+  prisma: any,
+  ids: string[],
+  images: Map<string, DriveImageMeta>,
+): Promise<number> {
   if (ids.length === 0) return 0
   const rows = await prisma.previousInvoice.findMany({
     where: { id: { in: ids } },
@@ -198,7 +235,7 @@ async function pushPreviousInvoiceFiles(drive: any, prisma: any, ids: string[]):
     if (!row.fileData || row.fileData.length === 0) continue
     try {
       const name = previousInvoiceFileName(row.id)
-      const existing = await findDriveImage(drive, name)
+      const existing = images.get(name) ?? null
       // Archive files are immutable — upload only when missing or 0-byte.
       if (existing && existing.size > 0) continue
       const media = {
@@ -422,22 +459,26 @@ export const rowSyncNow = async (
         return { success: false, needsConfirmation: true, removalsPending: plan.incomingRemovals }
       }
 
-      await executePlan(prisma, plan)
+      // Merge + recompute hold the DB-file lock as ONE unit — a concurrent
+      // backup/ladder snapshot must never capture a half-merged ledger.
+      await withDbFileLock(async () => {
+        await executePlan(prisma, plan)
+
+        // Recompute ONLY when the merge changed rows. A no-op sync must not
+        // silently rewrite numbers that pre-date sync — legacy drift is surfaced
+        // by the explicit recompute dry-run/Data Health flows, reviewed by a
+        // human, not applied as a side effect of an empty pull.
+        if (plan.upserts.length > 0 || plan.localRenumbers.length > 0) {
+          const recompute = await recomputeAll(prisma, { apply: true })
+          recomputeChanges = recompute.totalChanges
+        }
+      })
       applied = plan.upserts.length
       skipped = plan.skipped.length
       localRenumbers = plan.localRenumbers.length
       removalsApplied = plan.incomingRemovals
       log = plan.log
       appendActivity(plan.log)
-
-      // Recompute ONLY when the merge changed rows. A no-op sync must not
-      // silently rewrite numbers that pre-date sync — legacy drift is surfaced
-      // by the explicit recompute dry-run/Data Health flows, reviewed by a
-      // human, not applied as a side effect of an empty pull.
-      if (plan.upserts.length > 0 || plan.localRenumbers.length > 0) {
-        const recompute = await recomputeAll(prisma, { apply: true })
-        recomputeChanges = recompute.totalChanges
-      }
     }
 
     // PUSH: rewrite this device's whole 30-day diary (stateless, idempotent).
@@ -452,9 +493,13 @@ export const rowSyncNow = async (
     const changedPrevInvIds = diary.packets
       .filter((p) => p.table === 'previousInvoice')
       .map((p) => p.rowId)
-    const photosPushed =
-      (await pushBillImages(drive, prisma, changedBillIds)) +
-      (await pushPreviousInvoiceFiles(drive, prisma, changedPrevInvIds))
+    let photosPushed = 0
+    if (changedBillIds.length > 0 || changedPrevInvIds.length > 0) {
+      const images = await listDriveImages(drive)
+      photosPushed =
+        (await pushBillImages(drive, prisma, changedBillIds, images)) +
+        (await pushPreviousInvoiceFiles(drive, prisma, changedPrevInvIds, images))
+    }
 
     store.set(LAST_ROW_SYNC_KEY, Date.now())
     store.delete(PENDING_REMOVALS_KEY)

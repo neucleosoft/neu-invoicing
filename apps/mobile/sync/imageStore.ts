@@ -19,10 +19,12 @@ type Db = ReturnType<typeof useDb>
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files'
 
+export type DriveImageMeta = { id: string; modifiedTime?: string; size: number }
+
 async function findDriveImage(
   accessToken: string,
   name: string,
-): Promise<{ id: string; modifiedTime?: string; size: number } | null> {
+): Promise<DriveImageMeta | null> {
   const params = new URLSearchParams({
     spaces: 'appDataFolder',
     q: `name='${name}' and trashed=false`,
@@ -37,6 +39,38 @@ async function findDriveImage(
     ((await res.json()) as { files?: { id: string; modifiedTime?: string; size?: string }[] }).files ?? []
   const f = files[0]
   return f ? { id: f.id, modifiedTime: f.modifiedTime, size: Number(f.size ?? 0) } : null
+}
+
+// ONE paginated listing of every img-* Drive object, built once per sync and
+// consulted in memory. The per-file findDriveImage shape cost a Drive round
+// trip PER changed bill on EVERY sync for the 30 days a bill stays in the
+// diary. (findDriveImage remains for the single-file lazy-fetch paths.)
+export async function listDriveImages(accessToken: string): Promise<Map<string, DriveImageMeta>> {
+  const out = new Map<string, DriveImageMeta>()
+  let pageToken: string | undefined
+  do {
+    const params = new URLSearchParams({
+      spaces: 'appDataFolder',
+      q: `name contains 'img-' and trashed=false`,
+      fields: 'nextPageToken,files(id,name,modifiedTime,size)',
+      pageSize: '1000',
+    })
+    if (pageToken) params.set('pageToken', pageToken)
+    const res = await fetch(`${DRIVE_FILES_URL}?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+    if (!res.ok) throw new Error(`Drive list failed (${res.status})`)
+    const body = (await res.json()) as {
+      nextPageToken?: string
+      files?: { id: string; name?: string; modifiedTime?: string; size?: string }[]
+    }
+    for (const f of body.files ?? []) {
+      if (!f.id || !f.name) continue
+      out.set(f.name, { id: f.id, modifiedTime: f.modifiedTime, size: Number(f.size ?? 0) })
+    }
+    pageToken = body.nextPageToken
+  } while (pageToken)
+  return out
 }
 
 // Upload one photo. RN fetch can't stream a Buffer, and base64-in-JS-memory is
@@ -91,6 +125,7 @@ export async function pushBillImages(
   db: Db,
   accessToken: string,
   billIds: string[],
+  images: Map<string, DriveImageMeta>,
 ): Promise<number> {
   if (billIds.length === 0) return 0
   const bills = await db
@@ -108,7 +143,7 @@ export async function pushBillImages(
     if (!bill.attachmentData || !bill.attachmentMimeType) continue
     try {
       const name = billImageFileName(bill.id)
-      const existing = await findDriveImage(accessToken, name)
+      const existing = images.get(name) ?? null
       // Upload when missing, 0-byte (the residue of a failed create-then-PATCH
       // — never let it look uploaded), or when the bill changed after the last
       // upload (covers a replaced photo; a redundant upload is harmless).
@@ -142,6 +177,7 @@ export async function pushPreviousInvoiceFiles(
   db: Db,
   accessToken: string,
   ids: string[],
+  images: Map<string, DriveImageMeta>,
 ): Promise<number> {
   if (ids.length === 0) return 0
   const rows = await db
@@ -159,7 +195,7 @@ export async function pushPreviousInvoiceFiles(
     if (!data || data.length === 0) continue
     try {
       const name = previousInvoiceFileName(row.id)
-      const existing = await findDriveImage(accessToken, name)
+      const existing = images.get(name) ?? null
       if (existing && existing.size > 0) continue
       await uploadImage(
         accessToken,

@@ -10,6 +10,7 @@ import * as SecureStore from 'expo-secure-store'
 import * as SQLite from 'expo-sqlite'
 
 import drizzleMigrations from '../drizzle/migrations'
+import { snapshotDbTo } from './dbFileLock'
 import { getDeviceId } from './deviceId'
 
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
@@ -258,8 +259,12 @@ export async function backupToCloud(
     nowMs
   )
 
-  // (2) Fold the WAL into the main file so the upload is a complete snapshot.
-  await liveDb.getFirstAsync('PRAGMA wal_checkpoint(TRUNCATE)')
+  // (2) Take a consistent snapshot to upload — never stream the LIVE file.
+  // snapshotDbTo (VACUUM INTO under the shared DB-file lock) folds the WAL in
+  // by construction and can't capture a half-merged ledger from a concurrent
+  // auto-sync apply; the old checkpoint-then-stream shape could tear if an
+  // auto-checkpoint ran mid-upload.
+  const snapshotUri = await snapshotDbTo(liveDb, 'backup-upload-tmp.db')
 
   // (3) Find the existing cloud file or create an empty one to PATCH into.
   let fileId = (await checkCloudBackup(accessToken)).fileId
@@ -280,18 +285,17 @@ export async function backupToCloud(
     createdFresh = true
   }
 
-  // (4) Stream the DB file up. expo-sqlite stores it at documentDirectory/SQLite/.
-  // If the upload fails (or arrives incomplete) right after WE created the file,
-  // delete the empty slot — otherwise a 0-byte "backup" sits in Drive looking
-  // restorable, and restoring it would wipe a device's data.
-  const dbUri = `${LegacyFS.documentDirectory}SQLite/${MOBILE_DB_NAME}`
+  // (4) Stream the snapshot up. If the upload fails (or arrives incomplete)
+  // right after WE created the file, delete the empty slot — otherwise a
+  // 0-byte "backup" sits in Drive looking restorable, and restoring it would
+  // wipe a device's data.
   try {
-    const localInfo = await LegacyFS.getInfoAsync(dbUri)
+    const localInfo = await LegacyFS.getInfoAsync(snapshotUri)
     const localSize = localInfo.exists && !localInfo.isDirectory ? localInfo.size : undefined
 
     const uploadRes = await LegacyFS.uploadAsync(
       `${DRIVE_UPLOAD_URL}/${fileId}?uploadType=media&fields=modifiedTime,size`,
-      dbUri,
+      snapshotUri,
       {
         httpMethod: 'PATCH',
         uploadType: LegacyFS.FileSystemUploadType.BINARY_CONTENT,
@@ -331,5 +335,9 @@ export async function backupToCloud(
       }).catch(() => {})
     }
     throw e
+  } finally {
+    for (const suffix of ['', '-wal', '-shm']) {
+      await LegacyFS.deleteAsync(`${snapshotUri}${suffix}`, { idempotent: true }).catch(() => {})
+    }
   }
 }

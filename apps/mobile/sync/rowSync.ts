@@ -27,8 +27,9 @@ import { schema, useDb } from '@/db'
 import { recomputeAll } from '@/utils/recompute'
 
 import { appendSyncActivity } from './activityLog'
+import { withDbFileLock } from './dbFileLock'
 import { getDeviceId } from './deviceId'
-import { pushBillImages, pushPreviousInvoiceFiles } from './imageStore'
+import { listDriveImages, pushBillImages, pushPreviousInvoiceFiles } from './imageStore'
 
 type Db = ReturnType<typeof useDb>
 
@@ -323,23 +324,27 @@ export async function rowSyncNow(
         return { success: false, needsConfirmation: true, removalsPending: plan.incomingRemovals }
       }
 
-      await executePlan(db, plan)
+      // Merge + recompute hold the DB-file lock as ONE unit — a concurrent
+      // backup/ladder snapshot must never capture a half-merged ledger.
+      await withDbFileLock(async () => {
+        await executePlan(db, plan)
+
+        // Recompute ONLY when the merge changed rows. A no-op sync must not
+        // silently rewrite numbers that pre-date sync — legacy drift is surfaced
+        // by the explicit Data Health flow, reviewed by a human, not applied as
+        // a side effect of an empty pull. (openingStock backfill already ran at
+        // app start, before any sync can.)
+        if (plan.upserts.length > 0 || plan.localRenumbers.length > 0) {
+          const recompute = await recomputeAll(db, { apply: true })
+          recomputeChanges = recompute.totalChanges
+        }
+      })
       applied = plan.upserts.length
       skipped = plan.skipped.length
       localRenumbers = plan.localRenumbers.length
       removalsApplied = plan.incomingRemovals
       log = plan.log
       await appendSyncActivity(plan.log)
-
-      // Recompute ONLY when the merge changed rows. A no-op sync must not
-      // silently rewrite numbers that pre-date sync — legacy drift is surfaced
-      // by the explicit Data Health flow, reviewed by a human, not applied as
-      // a side effect of an empty pull. (openingStock backfill already ran at
-      // app start, before any sync can.)
-      if (plan.upserts.length > 0 || plan.localRenumbers.length > 0) {
-        const recompute = await recomputeAll(db, { apply: true })
-        recomputeChanges = recompute.totalChanges
-      }
     }
 
     // PUSH: rewrite this device's whole 30-day diary (stateless, idempotent).
@@ -354,9 +359,13 @@ export async function rowSyncNow(
     const changedPrevInvIds = diary.packets
       .filter((p) => p.table === 'previousInvoice')
       .map((p) => p.rowId)
-    const photosPushed =
-      (await pushBillImages(db, accessToken, changedBillIds)) +
-      (await pushPreviousInvoiceFiles(db, accessToken, changedPrevInvIds))
+    let photosPushed = 0
+    if (changedBillIds.length > 0 || changedPrevInvIds.length > 0) {
+      const images = await listDriveImages(accessToken)
+      photosPushed =
+        (await pushBillImages(db, accessToken, changedBillIds, images)) +
+        (await pushPreviousInvoiceFiles(db, accessToken, changedPrevInvIds, images))
+    }
 
     return {
       success: true,

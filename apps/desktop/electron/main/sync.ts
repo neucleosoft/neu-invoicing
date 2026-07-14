@@ -3,6 +3,7 @@ import { google } from 'googleapis'
 import { PrismaClient } from '@prisma/client'
 import { getOAuth2Client, isAuthError, clearStoredCredentials } from './auth'
 import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
+import { snapshotDatabaseTo } from './dbLock'
 import fs from 'fs'
 import path from 'path'
 import Store from 'electron-store'
@@ -344,27 +345,40 @@ export const syncUpload = async (): Promise<{ success: boolean; error?: string }
     const drive = google.drive({ version: 'v3', auth })
     const dbPath = getDatabasePath()
 
-    const response = await drive.files.list({
-      spaces: 'appDataFolder',
-      q: `name='${CLOUD_DB_FILENAME}'`,
-      fields: 'files(id)',
-      pageSize: 1,
-    })
-    const files = response.data.files || []
+    // Never stream the LIVE file — a write transaction mid-stream (row-sync
+    // merge, a user saving an invoice) would upload torn pages. The snapshot
+    // is consistent by construction and holds the DB lock only while it's
+    // being written, not for the whole (slow) upload.
+    const snapshotPath = `${dbPath}.upload`
+    await snapshotDatabaseTo(snapshotPath)
 
     let updated
-    if (files.length > 0) {
-      updated = await drive.files.update({
-        fileId: files[0].id!,
-        media: { mimeType: 'application/x-sqlite3', body: fs.createReadStream(dbPath) },
-        fields: 'modifiedTime',
+    try {
+      const response = await drive.files.list({
+        spaces: 'appDataFolder',
+        q: `name='${CLOUD_DB_FILENAME}'`,
+        fields: 'files(id)',
+        pageSize: 1,
       })
-    } else {
-      updated = await drive.files.create({
-        requestBody: { name: CLOUD_DB_FILENAME, parents: ['appDataFolder'] },
-        media: { mimeType: 'application/x-sqlite3', body: fs.createReadStream(dbPath) },
-        fields: 'id, modifiedTime',
-      })
+      const files = response.data.files || []
+
+      if (files.length > 0) {
+        updated = await drive.files.update({
+          fileId: files[0].id!,
+          media: { mimeType: 'application/x-sqlite3', body: fs.createReadStream(snapshotPath) },
+          fields: 'modifiedTime',
+        })
+      } else {
+        updated = await drive.files.create({
+          requestBody: { name: CLOUD_DB_FILENAME, parents: ['appDataFolder'] },
+          media: { mimeType: 'application/x-sqlite3', body: fs.createReadStream(snapshotPath) },
+          fields: 'id, modifiedTime',
+        })
+      }
+    } finally {
+      try {
+        if (fs.existsSync(snapshotPath)) fs.unlinkSync(snapshotPath)
+      } catch { /* best-effort cleanup */ }
     }
 
     if (updated.data.modifiedTime) {
@@ -640,12 +654,10 @@ const LADDER_SLOTS = [
 const buildStrippedLedgerCopy = async (): Promise<string> => {
   const dbPath = getDatabasePath()
   const tmpPath = `${dbPath}.ladder`
-  // Fold any WAL into the main file first so the copy is complete (harmless
-  // when the journal mode isn't WAL).
-  try {
-    await getPrisma().$executeRawUnsafe(`PRAGMA wal_checkpoint(TRUNCATE)`)
-  } catch { /* non-WAL journal mode */ }
-  fs.copyFileSync(dbPath, tmpPath)
+  // Consistent snapshot (VACUUM INTO under the DB-file lock) — a raw file
+  // copy could capture torn pages mid-transaction, and this also folds any
+  // WAL content in without a separate checkpoint.
+  await snapshotDatabaseTo(tmpPath)
 
   const tmp = new PrismaClient({ datasources: { db: { url: `file:${tmpPath}` } } })
   try {

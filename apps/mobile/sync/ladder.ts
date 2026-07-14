@@ -9,10 +9,11 @@ import * as LegacyFS from 'expo-file-system/legacy'
 import * as SecureStore from 'expo-secure-store'
 import * as SQLite from 'expo-sqlite'
 
+import { snapshotDbTo } from './dbFileLock'
+
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files'
 
-const MOBILE_DB_NAME = 'neu-invoicing.db'
 const TMP_DB_NAME = 'ladder-tmp.db'
 
 const LADDER_SLOTS = [
@@ -49,16 +50,9 @@ async function findSlot(
 // Build the stripped, vacuumed temp copy inside the SQLite directory (the only
 // place expo-sqlite can open a database by name). Returns the temp FILE path.
 async function buildStrippedCopy(liveDb: SQLite.SQLiteDatabase): Promise<string> {
-  // Fold the WAL so the copy is a complete snapshot.
-  await liveDb.getFirstAsync('PRAGMA wal_checkpoint(TRUNCATE)')
-
-  const sqliteDir = `${LegacyFS.documentDirectory}SQLite/`
-  const srcPath = `${sqliteDir}${MOBILE_DB_NAME}`
-  const tmpPath = `${sqliteDir}${TMP_DB_NAME}`
-  for (const suffix of ['', '-wal', '-shm']) {
-    await LegacyFS.deleteAsync(`${tmpPath}${suffix}`, { idempotent: true })
-  }
-  await LegacyFS.copyAsync({ from: srcPath, to: tmpPath })
+  // Consistent snapshot under the shared DB-file lock — a raw copy could
+  // capture a half-merged ledger from a concurrent auto-sync apply.
+  const tmpPath = await snapshotDbTo(liveDb, TMP_DB_NAME)
 
   const tmp = await SQLite.openDatabaseAsync(TMP_DB_NAME)
   try {
