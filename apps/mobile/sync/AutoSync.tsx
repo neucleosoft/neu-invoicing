@@ -22,6 +22,7 @@ import { useDb } from '@/db'
 import { runLadderIfDue } from './ladder'
 import { purgeArchivedDocs } from './purge'
 import { rowSyncNow } from './rowSync'
+import { runScheduledBackupIfDue } from './scheduledBackup'
 
 export const LAST_ROW_SYNC_KEY = 'neu.sync.lastRowSyncAt'
 
@@ -51,11 +52,13 @@ export function AutoSync() {
         if (r.success) {
           await SecureStore.setItemAsync(LAST_ROW_SYNC_KEY, String(Date.now()))
         }
-        // Housekeeping riding the same tick, both internally throttled and
-        // silent: the backup ladder (~6h checks) and the 21-day archive purge
-        // (~daily). Insurance and hygiene — never gates.
+        // Housekeeping riding the same tick, all internally throttled and
+        // silent: the backup ladder (~6h checks), the 35-day archive purge
+        // (~daily), and the scheduled full backup (user-picked cadence).
+        // Insurance and hygiene — never gates.
         await runLadderIfDue(liveDb, token)
         await purgeArchivedDocs(db, token)
+        await runScheduledBackupIfDue(liveDb, token)
       } catch {
         // transient/offline — auto-sync never surfaces errors
       } finally {

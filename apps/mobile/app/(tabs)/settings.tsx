@@ -20,6 +20,7 @@ import { getSyncActivity, type SyncActivityEntry } from '@/sync/activityLog';
 import { LAST_ROW_SYNC_KEY } from '@/sync/AutoSync';
 import { getLadderInfo, restoreFromLadder, type LadderRungInfo } from '@/sync/ladder';
 import { rowSyncNow } from '@/sync/rowSync';
+import { getBackupFrequency, setBackupFrequency, type BackupFrequency } from '@/sync/scheduledBackup';
 import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
 
 export default function SettingsScreen() {
@@ -34,6 +35,16 @@ export default function SettingsScreen() {
   const [backingUp, setBackingUp] = useState(false);
   const [ladderInfo, setLadderInfo] = useState<LadderRungInfo[]>([]);
   const [ladderRestoring, setLadderRestoring] = useState<string | null>(null);
+
+  // Automatic full-backup cadence (mirrors desktop's Automatic backup select).
+  const [backupFreq, setBackupFreqState] = useState<BackupFrequency>('off');
+  useEffect(() => {
+    getBackupFrequency().then(setBackupFreqState);
+  }, []);
+  async function handleFreqChange(freq: BackupFrequency) {
+    setBackupFreqState(freq);
+    await setBackupFrequency(freq);
+  }
 
   // Company name shown in the Business section. null = still loading, '' = no
   // company yet. Reloaded on focus so it updates after editing the profile.
@@ -475,6 +486,27 @@ export default function SettingsScreen() {
           )
         )}
 
+        {accessToken && (
+          <View style={styles.freqRow}>
+            <ThemedText style={styles.statusLabel}>Automatic backup</ThemedText>
+            <View style={styles.freqChips}>
+              {(['off', 'daily', 'weekly', 'monthly'] as BackupFrequency[]).map((f) => (
+                <Pressable
+                  key={f}
+                  onPress={() => handleFreqChange(f)}
+                  style={[styles.freqChip, backupFreq === f && styles.freqChipActive]}
+                >
+                  <ThemedText
+                    style={[styles.freqChipText, backupFreq === f && styles.freqChipTextActive]}
+                  >
+                    {f === 'off' ? 'Off' : f[0].toUpperCase() + f.slice(1)}
+                  </ThemedText>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+
         <Button
           title="Back up to Google Drive"
           variant="primary"
@@ -699,6 +731,18 @@ const styles = StyleSheet.create({
   healthSectionTitle: { color: '#78350f', fontSize: 13, fontWeight: '600' },
   healthChange: { color: '#92400e', fontSize: 13, lineHeight: 18 },
   healthSummary: { color: '#78350f', fontSize: 13, fontWeight: '600' },
+  freqRow: { gap: 6 },
+  freqChips: { flexDirection: 'row', gap: 8 },
+  freqChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
+  freqChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  freqChipText: { fontSize: 13 },
+  freqChipTextActive: { color: 'white', fontWeight: '600' },
   keyButton: {
     backgroundColor: '#007AFF',
     paddingVertical: 12,

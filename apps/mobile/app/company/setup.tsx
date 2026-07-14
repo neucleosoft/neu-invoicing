@@ -1,10 +1,13 @@
 import { router } from 'expo-router'
-import { useState } from 'react'
-import { Alert, Pressable, ScrollView, StyleSheet } from 'react-native'
+import { useEffect, useState } from 'react'
+import { Alert, DevSettings, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { useSQLiteContext } from 'expo-sqlite'
 
 import { ThemedText } from '@/components/themed-text'
+import { useAuth } from '@/auth'
 import { schema, useDb } from '@/db'
 import { INDIAN_STATE_CODES } from '@neu/shared'
+import { checkCloudBackup, restoreFromCloud, type CloudBackupInfo } from '@/sync/drive'
 import {
   CompanyForm,
   emptyCompanyForm,
@@ -17,8 +20,62 @@ import {
 // only when signed in with no company yet.
 export default function CompanySetupScreen() {
   const db = useDb()
+  const liveDb = useSQLiteContext()
+  const { user, offlineMode, getFreshAccessToken } = useAuth()
   const [form, setForm] = useState<CompanyFormState>(emptyCompanyForm)
   const [saving, setSaving] = useState(false)
+
+  // Fresh-device restore offer (mirrors desktop's boot screen): this screen
+  // only renders when the device has NO company, so restoring here destroys
+  // nothing — vacuously safe, like desktop's App.tsx offer.
+  const [cloudBackup, setCloudBackup] = useState<CloudBackupInfo | null>(null)
+  const [restoring, setRestoring] = useState(false)
+
+  useEffect(() => {
+    if (!user || offlineMode) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const fresh = await getFreshAccessToken()
+        if (!fresh) return
+        const info = await checkCloudBackup(fresh)
+        if (!cancelled && info.exists && info.size) setCloudBackup(info)
+      } catch {
+        // unreachable cloud = no offer; setup proceeds normally
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [user, offlineMode, getFreshAccessToken])
+
+  function handleRestore() {
+    const when = cloudBackup?.modifiedTime
+      ? new Date(cloudBackup.modifiedTime).toLocaleString()
+      : 'an unknown time'
+    Alert.alert(
+      'Restore your business?',
+      `A cloud backup from ${when} exists for this Google account. This device is empty, so nothing is lost — your business loads and the app reloads.`,
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: 'Restore from Drive',
+          onPress: async () => {
+            setRestoring(true)
+            try {
+              const fresh = await getFreshAccessToken()
+              if (!fresh) throw new Error('Session expired — sign in again.')
+              await restoreFromCloud(fresh, liveDb)
+              DevSettings.reload()
+            } catch (e) {
+              setRestoring(false)
+              Alert.alert('Restore failed', e instanceof Error ? e.message : String(e))
+            }
+          },
+        },
+      ],
+    )
+  }
 
   async function handleSave() {
     if (!form.name.trim()) {
@@ -67,12 +124,36 @@ export default function CompanySetupScreen() {
         Settings.
       </ThemedText>
 
+      {cloudBackup && (
+        <View style={styles.restoreCard}>
+          <ThemedText style={styles.restoreTitle}>
+            Found your business in Google Drive
+          </ThemedText>
+          <ThemedText style={styles.restoreHint}>
+            A backup from{' '}
+            {cloudBackup.modifiedTime
+              ? new Date(cloudBackup.modifiedTime).toLocaleString()
+              : 'an earlier date'}{' '}
+            exists for this account. Restore it instead of starting again.
+          </ThemedText>
+          <Pressable
+            style={[styles.restoreButton, (restoring || saving) && styles.saveButtonDisabled]}
+            onPress={handleRestore}
+            disabled={restoring || saving}
+          >
+            <ThemedText style={styles.restoreButtonText}>
+              {restoring ? 'Restoring & reloading…' : 'Restore from Drive'}
+            </ThemedText>
+          </Pressable>
+        </View>
+      )}
+
       <CompanyForm value={form} onChange={setForm} />
 
       <Pressable
-        style={[styles.saveButton, saving && styles.saveButtonDisabled]}
+        style={[styles.saveButton, (saving || restoring) && styles.saveButtonDisabled]}
         onPress={handleSave}
-        disabled={saving}
+        disabled={saving || restoring}
       >
         <ThemedText style={styles.saveButtonText}>
           {saving ? 'Saving…' : 'Complete Setup'}
@@ -95,4 +176,21 @@ const styles = StyleSheet.create({
   },
   saveButtonDisabled: { opacity: 0.5 },
   saveButtonText: { color: 'white', fontSize: 16, fontWeight: '600' },
+  restoreCard: {
+    backgroundColor: '#eff6ff',
+    borderColor: '#bfdbfe',
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 14,
+    gap: 8,
+  },
+  restoreTitle: { fontWeight: '700', color: '#1d4ed8' },
+  restoreHint: { fontSize: 13, lineHeight: 19, color: '#1e40af' },
+  restoreButton: {
+    backgroundColor: '#1d4ed8',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  restoreButtonText: { color: 'white', fontWeight: '600' },
 })
