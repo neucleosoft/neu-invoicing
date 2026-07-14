@@ -534,6 +534,8 @@ export interface Gstr2Data {
   sections: Record<Gstr2SectionKey, SectionTotals>
   // Drill-down: the bills behind each section total.
   sectionDocs: Record<Gstr2SectionKey, GstDocDetail[]>
+  // Inward (purchase-side) HSN summary.
+  hsnSummary: HsnRow[]
   eligibleITC: { igst: number; cgst: number; sgst: number; cess: number }
   ineligibleITC: { igst: number; cgst: number; sgst: number; cess: number }
   docSummary: {
@@ -545,7 +547,10 @@ export interface Gstr2Data {
 }
 
 export async function getGSTR2(db: Db, range: GstRange): Promise<Gstr2Data> {
-  const bills = await fetchBills(db, range)
+  const [bills, hsnSummary] = await Promise.all([
+    fetchBills(db, range),
+    getPurchaseHSNSummary(db, range),
+  ])
 
   const buckets: Record<Gstr2SectionKey, GstDoc[]> = { b2b: [], rcm: [], nilExempt: [] }
   const sectionDocs: Record<Gstr2SectionKey, GstDocDetail[]> = { b2b: [], rcm: [], nilExempt: [] }
@@ -577,6 +582,7 @@ export async function getGSTR2(db: Db, range: GstRange): Promise<Gstr2Data> {
   return {
     sections,
     sectionDocs,
+    hsnSummary,
     eligibleITC,
     ineligibleITC,
     docSummary: {
@@ -702,15 +708,44 @@ interface AnnualBucket {
 const emptyAnnual = (): AnnualBucket => ({ taxableValue: 0, cgst: 0, sgst: 0, igst: 0, cess: 0 })
 
 export interface Gstr9Data {
-  outward: { b2b: AnnualBucket; b2c: AnnualBucket; exports: AnnualBucket; total: AnnualBucket }
+  outward: {
+    b2b: AnnualBucket
+    b2c: AnnualBucket
+    exports: AnnualBucket
+    exemptNilRated: { value: number }
+    total: AnnualBucket
+  }
   inward: { fromRegistered: AnnualBucket; fromUnregistered: AnnualBucket; total: AnnualBucket }
   itcClaimed: { igst: number; cgst: number; sgst: number; cess: number }
+  // Part V (mirrors desktop): nothing recorded through cash yet; through-ITC
+  // equals the claimed ITC.
+  taxPaid: {
+    throughCash: { igst: number; cgst: number; sgst: number; cess: number }
+    throughITC: { igst: number; cgst: number; sgst: number; cess: number }
+  }
+  docSummary: {
+    totalSalesInvoices: number
+    totalPurchaseBills: number
+    totalSalesValue: number
+    totalPurchaseValue: number
+  }
+  hsnSummary: HsnRow[]
 }
 
 export async function getGSTR9(db: Db, range: GstRange): Promise<Gstr9Data> {
-  const [invoices, bills] = await Promise.all([fetchInvoices(db, range), fetchBills(db, range)])
+  const [invoices, bills, hsnSummary] = await Promise.all([
+    fetchInvoices(db, range),
+    fetchBills(db, range),
+    getHSNSummary(db, range),
+  ])
 
-  const out = { b2b: emptyAnnual(), b2c: emptyAnnual(), exports: emptyAnnual(), total: emptyAnnual() }
+  const out = {
+    b2b: emptyAnnual(),
+    b2c: emptyAnnual(),
+    exports: emptyAnnual(),
+    exemptNilRated: { value: 0 },
+    total: emptyAnnual(),
+  }
   for (const inv of invoices) {
     const taxable = inv.subtotal - (inv.discount || 0)
     const add = (b: AnnualBucket) => {
@@ -724,7 +759,8 @@ export async function getGSTR9(db: Db, range: GstRange): Promise<Gstr9Data> {
       out.exports.taxableValue += taxable
       out.exports.igst += inv.igstAmount || 0
     } else if (inv.supplyType === 'NIL_EXEMPT') {
-      // value-only; folds into total below
+      // Value-only bucket (mirrors desktop's exemptNilRated); folds into total.
+      out.exemptNilRated.value += inv.totalAmount
     } else if (isRegistered(inv.taxId)) {
       add(out.b2b)
     } else {
@@ -756,5 +792,89 @@ export async function getGSTR9(db: Db, range: GstRange): Promise<Gstr9Data> {
     cess: eligible.reduce((s, b) => s + (b.cessAmount || 0), 0),
   }
 
-  return { outward: out, inward: inw, itcClaimed }
+  return {
+    outward: out,
+    inward: inw,
+    itcClaimed,
+    taxPaid: {
+      throughCash: { igst: 0, cgst: 0, sgst: 0, cess: 0 },
+      throughITC: { ...itcClaimed },
+    },
+    docSummary: {
+      totalSalesInvoices: invoices.length,
+      totalPurchaseBills: bills.length,
+      totalSalesValue: invoices.reduce((s, i) => s + i.totalAmount, 0),
+      totalPurchaseValue: bills.reduce((s, b) => s + b.totalAmount, 0),
+    },
+    hsnSummary,
+  }
+}
+
+// Purchase-side (inward) HSN summary — same grouping as getHSNSummary but over
+// purchase bill lines, with names/units from the supplier catalog. Fills the
+// "inward HSN" gap vs desktop's GSTR-2 depth.
+export async function getPurchaseHSNSummary(db: Db, range: GstRange): Promise<HsnRow[]> {
+  const bills = await db
+    .select({ id: schema.purchaseBill.id })
+    .from(schema.purchaseBill)
+    .where(
+      and(
+        gte(schema.purchaseBill.billDate, range.start),
+        lte(schema.purchaseBill.billDate, range.end),
+        notDeleted(schema.purchaseBill.deletedAt),
+        notCancelled(schema.purchaseBill.cancelledAt),
+      ),
+    )
+  const billIds = bills.map((b) => b.id)
+  if (billIds.length === 0) return []
+
+  const lines = await db
+    .select({
+      hsnLine: schema.purchaseBillItem.hsnCode,
+      hsnItem: schema.supplierItem.hsnCode,
+      name: schema.supplierItem.name,
+      unit: schema.supplierItem.unit,
+      quantity: schema.purchaseBillItem.quantity,
+      rate: schema.purchaseBillItem.rate,
+      discount: schema.purchaseBillItem.discount,
+      total: schema.purchaseBillItem.total,
+      taxableAmount: schema.purchaseBillItem.taxableAmount,
+      igstAmount: schema.purchaseBillItem.igstAmount,
+      cgstAmount: schema.purchaseBillItem.cgstAmount,
+      sgstAmount: schema.purchaseBillItem.sgstAmount,
+      cessAmount: schema.purchaseBillItem.cessAmount,
+    })
+    .from(schema.purchaseBillItem)
+    .leftJoin(schema.supplierItem, eq(schema.purchaseBillItem.supplierItemId, schema.supplierItem.id))
+    .where(inArray(schema.purchaseBillItem.purchaseBillId, billIds))
+
+  const map = new Map<string, HsnRow>()
+  for (const l of lines) {
+    const key = l.hsnLine || l.hsnItem || 'NA'
+    let row = map.get(key)
+    if (!row) {
+      row = {
+        hsnCode: key,
+        description: l.name || '',
+        uqc: l.unit || 'NOS',
+        totalQuantity: 0,
+        totalValue: 0,
+        taxableValue: 0,
+        igstAmount: 0,
+        cgstAmount: 0,
+        sgstAmount: 0,
+        cessAmount: 0,
+      }
+      map.set(key, row)
+    }
+    const taxable = l.taxableAmount || l.quantity * l.rate - (l.discount || 0)
+    row.totalQuantity += l.quantity
+    row.totalValue += l.total
+    row.taxableValue += taxable
+    row.igstAmount += l.igstAmount || 0
+    row.cgstAmount += l.cgstAmount || 0
+    row.sgstAmount += l.sgstAmount || 0
+    row.cessAmount += l.cessAmount || 0
+  }
+  return Array.from(map.values())
 }

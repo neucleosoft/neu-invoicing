@@ -487,6 +487,8 @@ function Gstr2View({ data }: { data: Gstr2Data }) {
         <Row label="Ineligible CGST" value={formatCurrency(data.ineligibleITC.cgst)} />
         <Row label="Ineligible SGST" value={formatCurrency(data.ineligibleITC.sgst)} />
       </Section>
+
+      <HsnView rows={data.hsnSummary} heading="Purchase HSN Summary" />
     </View>
   )
 }
@@ -559,6 +561,24 @@ function Gstr9View({ data }: { data: Gstr9Data }) {
         <Row label="SGST" value={formatCurrency(data.itcClaimed.sgst)} />
         <Row label="Cess" value={formatCurrency(data.itcClaimed.cess)} />
       </Section>
+
+      <Section title="Part V — Tax Paid">
+        <Row
+          label="Through ITC"
+          value={`IGST ${formatCurrency(data.taxPaid.throughITC.igst)} · CGST ${formatCurrency(data.taxPaid.throughITC.cgst)} · SGST ${formatCurrency(data.taxPaid.throughITC.sgst)}`}
+        />
+        <Row label="Through Cash" value={formatCurrency(0)} />
+      </Section>
+
+      <Section title="Documents (Year)">
+        <Row label="Sales Invoices" value={String(data.docSummary.totalSalesInvoices)} />
+        <Row label="Sales Value" value={formatCurrency(data.docSummary.totalSalesValue)} />
+        <Row label="Purchase Bills" value={String(data.docSummary.totalPurchaseBills)} />
+        <Row label="Purchase Value" value={formatCurrency(data.docSummary.totalPurchaseValue)} />
+        <Row label="Nil/Exempt Outward" value={formatCurrency(data.outward.exemptNilRated.value)} />
+      </Section>
+
+      <HsnView rows={data.hsnSummary} heading="HSN Summary (Year)" />
     </View>
   )
 }
