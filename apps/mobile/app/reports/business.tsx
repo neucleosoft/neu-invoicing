@@ -15,6 +15,7 @@ import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
+import { shareTextFile, toCsv } from '@/utils/exportShare'
 import {
   getPayables,
   getReceivables,
@@ -27,6 +28,72 @@ import {
   type StockSummary,
   type TaxReport,
 } from '@/utils/reports'
+
+// Per-report CSV (mirrors desktop's export columns). Summary reports export as
+// metric/value pairs; row reports export their rows plus a Total line.
+function buildReportCsv(r: ResultData): { filename: string; csv: string } {
+  const metricCols = [
+    { key: 'metric', label: 'Metric' },
+    { key: 'value', label: 'Value' },
+  ]
+  switch (r.kind) {
+    case 'sales':
+      return {
+        filename: 'sales-report.csv',
+        csv: toCsv(metricCols, [
+          { metric: 'Total Sales', value: r.data.totalSales },
+          { metric: 'Subtotal', value: r.data.subtotal },
+          { metric: 'Discount', value: r.data.discount },
+          { metric: 'Total Tax', value: r.data.totalTax },
+          { metric: 'Amount Paid', value: r.data.amountPaid },
+          { metric: 'Balance Due', value: r.data.balanceDue },
+          { metric: 'Invoice Count', value: r.data.invoiceCount },
+        ]),
+      }
+    case 'stock':
+      return {
+        filename: 'stock-summary.csv',
+        csv: toCsv(
+          [
+            { key: 'name', label: 'Item' },
+            { key: 'currentStock', label: 'Stock' },
+            { key: 'unit', label: 'Unit' },
+            { key: 'lowStockWarning', label: 'Low-stock Threshold' },
+            { key: 'stockValue', label: 'Stock Value' },
+            { key: 'status', label: 'Status' },
+          ],
+          [
+            ...r.data.items.map((it) => ({ ...it })),
+            { name: 'TOTAL', currentStock: '', unit: '', lowStockWarning: '', stockValue: r.data.totalStockValue, status: '' },
+          ],
+        ),
+      }
+    case 'receivables':
+    case 'payables':
+      return {
+        filename: `${r.kind}.csv`,
+        csv: toCsv(
+          [
+            { key: 'name', label: r.kind === 'receivables' ? 'Customer' : 'Supplier' },
+            { key: 'currentBalance', label: 'Balance' },
+          ],
+          [
+            ...r.data.parties.map((p) => ({ ...p })),
+            { name: 'TOTAL', currentBalance: r.data.total },
+          ],
+        ),
+      }
+    case 'tax':
+      return {
+        filename: 'tax-report.csv',
+        csv: toCsv(metricCols, [
+          { metric: 'Tax Collected (Sales)', value: r.data.taxCollected },
+          { metric: 'Tax Paid (Purchases)', value: r.data.taxPaid },
+          { metric: 'Net Tax', value: r.data.netTax },
+        ]),
+      }
+  }
+}
 
 // Business Reports — Sales / Stock / Receivables / Payables / Tax. Mirrors desktop
 // Reports.tsx + report.ts. Filters (date range + status) apply to Sales; Tax uses
@@ -204,6 +271,19 @@ export default function BusinessReportsScreen() {
         {result ? (
           <View style={styles.resultBlock}>
             <ResultView result={result} />
+            <Pressable
+              style={styles.exportBtn}
+              onPress={async () => {
+                try {
+                  const { filename, csv } = buildReportCsv(result)
+                  await shareTextFile(filename, csv, 'text/csv')
+                } catch (e) {
+                  Alert.alert('Export failed', e instanceof Error ? e.message : String(e))
+                }
+              }}
+            >
+              <ThemedText style={styles.exportBtnText}>Export CSV (opens in Excel)</ThemedText>
+            </Pressable>
           </View>
         ) : (
           <ThemedText style={styles.emptyHint}>
@@ -386,6 +466,15 @@ const styles = StyleSheet.create({
   generateBtnDisabled: { opacity: 0.5 },
   generateBtnText: { color: 'white', fontSize: 16, fontWeight: '600' },
   resultBlock: { marginTop: 24 },
+  exportBtn: {
+    marginTop: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    alignItems: 'center',
+  },
+  exportBtnText: { color: '#007AFF', fontWeight: '600' },
   emptyHint: { textAlign: 'center', opacity: 0.6, marginTop: 32 },
   tableWrap: {
     borderRadius: 12,

@@ -7,6 +7,7 @@ import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
+import { shareTextFile } from '@/utils/exportShare'
 import {
   getGSTR1,
   getGSTR2,
@@ -240,6 +241,25 @@ export default function GstReportsScreen() {
           <View style={styles.reportBlock}>
             {loading ? <ThemedText style={styles.loadingText}>Generating…</ThemedText> : null}
             <ReportView report={report} />
+            <Pressable
+              style={styles.exportBtn}
+              onPress={async () => {
+                try {
+                  // Same as desktop's generic JSON export: the report data,
+                  // pretty-printed, for CA review/archiving (the GSTN portal
+                  // file is a separate GSTR-1-only export).
+                  await shareTextFile(
+                    `${report.type.toUpperCase()}_${startDate}_${endDate}.json`,
+                    JSON.stringify(report.data, null, 2),
+                    'application/json',
+                  )
+                } catch (e) {
+                  Alert.alert('Export failed', e instanceof Error ? e.message : String(e))
+                }
+              }}
+            >
+              <ThemedText style={styles.exportBtnText}>Share JSON</ThemedText>
+            </Pressable>
           </View>
         ) : (
           <View style={styles.cardsGrid}>
@@ -534,6 +554,15 @@ const styles = StyleSheet.create({
   cardHint: { fontSize: 12, opacity: 0.6 },
   loadingText: { textAlign: 'center', opacity: 0.6, marginTop: 12 },
   reportBlock: { marginTop: 16 },
+  exportBtn: {
+    marginTop: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    alignItems: 'center',
+  },
+  exportBtnText: { color: '#007AFF', fontWeight: '600' },
   viewWrap: { gap: 16 },
   sectionHeading: { paddingHorizontal: 4 },
   tableCard: { borderRadius: 12, paddingVertical: 2 },
