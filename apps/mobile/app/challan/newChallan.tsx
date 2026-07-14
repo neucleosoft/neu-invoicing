@@ -175,6 +175,13 @@ export default function NewChallanScreen() {
             dispatchedThrough: dispatchedThrough.trim() || null,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
           })
           .returning({ id: schema.deliveryChallan.id })
 
@@ -190,6 +197,15 @@ export default function NewChallanScreen() {
               taxRate: l.taxRate,
               total: g.total,
               hsnCode: g.hsnCode || null,
+              taxableAmount: g.taxableAmount,
+              cgstRate: g.cgstRate,
+              cgstAmount: g.cgstAmount,
+              sgstRate: g.sgstRate,
+              sgstAmount: g.sgstAmount,
+              igstRate: g.igstRate,
+              igstAmount: g.igstAmount,
+              cessRate: g.cessRate,
+              cessAmount: g.cessAmount,
             }
           }),
         )

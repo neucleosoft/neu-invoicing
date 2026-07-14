@@ -1,5 +1,34 @@
 import { ipcMain } from 'electron'
+import { computeGstValues } from '@neu/shared'
 import { getPrisma } from '../database'
+
+// GST split for a challan's lines via the shared computeGstValues — same
+// engine as invoices and the mobile challan form. Totals are identical to the
+// old flat computation; this additionally yields the CGST/SGST/IGST split the
+// challan columns store since 2026-07-14.
+const buildChallanGst = async (tx: any, data: any) => {
+  const customer = await tx.customer.findUnique({ where: { id: data.customerId } })
+  const company = await tx.company.findFirst()
+  const catalogItems: any[] = []
+  for (const item of data.items) {
+    catalogItems.push(await tx.item.findUnique({ where: { id: item.itemId } }))
+  }
+  return computeGstValues({
+    company: company ? { stateCode: company.stateCode, stateName: company.stateName } : null,
+    party: customer
+      ? { taxId: customer.taxId, stateCode: customer.stateCode, stateName: customer.stateName }
+      : {},
+    items: data.items.map((item: any, idx: number) => ({
+      quantity: item.quantity,
+      rate: item.rate,
+      discount: item.discount,
+      taxRate: item.taxRate,
+      hsnCode: item.hsnCode,
+      catalogHsnCode: catalogItems[idx]?.hsnCode,
+      catalogSkuHsn: catalogItems[idx]?.skuHsn,
+    })),
+  })
+}
 
 // Generate fiscal year string (e.g., "26-27" for April 2026 - March 2027)
 const getFiscalYear = (): string => {
@@ -85,26 +114,16 @@ export const setupChallanHandlers = () => {
         const existing = await tx.deliveryChallan.findUnique({ where: { challanNumber: data.challanNumber } })
         if (existing) throw new Error(`Challan number ${data.challanNumber} already exists`)
 
-        // Calculate totals
-        let subtotal = 0
-        let taxAmount = 0
-
-        data.items.forEach((item: any) => {
-          const itemTotal = item.quantity * item.rate - (item.discount || 0)
-          subtotal += itemTotal
-          taxAmount += (itemTotal * (item.taxRate || 0)) / 100
-        })
-
-        const totalAmount = subtotal + taxAmount
+        const gst = await buildChallanGst(tx, data)
 
         const created = await tx.deliveryChallan.create({
           data: {
             challanNumber: data.challanNumber,
             challanDate: new Date(data.challanDate),
             customerId: data.customerId,
-            subtotal,
-            taxAmount,
-            totalAmount,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
             transportMode: data.transportMode || null,
             vehicleNumber: data.vehicleNumber || null,
             notes: data.notes || null,
@@ -114,17 +133,33 @@ export const setupChallanHandlers = () => {
             ewayBillNo: data.ewayBillNo || null,
             warrantyPeriod: data.warrantyPeriod || null,
             dispatchedThrough: data.dispatchedThrough || null,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
             items: {
-              create: data.items.map((item: any) => {
-                const taxableAmount = item.quantity * item.rate - (item.discount || 0)
+              create: data.items.map((item: any, idx: number) => {
+                const g = gst.items[idx]
                 return {
                   itemId: item.itemId,
                   quantity: item.quantity,
                   rate: item.rate,
                   discount: item.discount || 0,
                   taxRate: item.taxRate || 0,
-                  hsnCode: item.hsnCode || null,
-                  total: taxableAmount + (taxableAmount * (item.taxRate || 0)) / 100
+                  hsnCode: g.hsnCode || null,
+                  total: g.total,
+                  taxableAmount: g.taxableAmount,
+                  cgstRate: g.cgstRate,
+                  cgstAmount: g.cgstAmount,
+                  sgstRate: g.sgstRate,
+                  sgstAmount: g.sgstAmount,
+                  igstRate: g.igstRate,
+                  igstAmount: g.igstAmount,
+                  cessRate: g.cessRate,
+                  cessAmount: g.cessAmount
                 }
               })
             }
@@ -193,17 +228,7 @@ export const setupChallanHandlers = () => {
         if (duplicate) throw new Error(`Challan number ${data.challanNumber} already exists`)
       }
 
-      // Calculate new totals
-      let subtotal = 0
-      let taxAmount = 0
-
-      data.items.forEach((item: any) => {
-        const itemTotal = item.quantity * item.rate - (item.discount || 0)
-        subtotal += itemTotal
-        taxAmount += (itemTotal * (item.taxRate || 0)) / 100
-      })
-
-      const totalAmount = subtotal + taxAmount
+      const gst = await buildChallanGst(prisma, data)
 
       // Delete existing items
       await prisma.deliveryChallanItem.deleteMany({
@@ -217,9 +242,9 @@ export const setupChallanHandlers = () => {
           challanNumber: data.challanNumber || existingChallan.challanNumber,
           challanDate: new Date(data.challanDate),
           customerId: data.customerId,
-          subtotal,
-          taxAmount,
-          totalAmount,
+          subtotal: gst.subtotal,
+          taxAmount: gst.taxAmount,
+          totalAmount: gst.totalAmount,
           transportMode: data.transportMode || null,
           vehicleNumber: data.vehicleNumber || null,
           notes: data.notes || null,
@@ -229,17 +254,33 @@ export const setupChallanHandlers = () => {
           ewayBillNo: data.ewayBillNo || null,
           warrantyPeriod: data.warrantyPeriod || null,
           dispatchedThrough: data.dispatchedThrough || null,
+          placeOfSupply: gst.placeOfSupply || null,
+          placeOfSupplyName: gst.placeOfSupplyName || null,
+          isInterState: gst.isInterState,
+          cgstAmount: gst.totalCgst,
+          sgstAmount: gst.totalSgst,
+          igstAmount: gst.totalIgst,
+          cessAmount: gst.totalCess,
           items: {
-            create: data.items.map((item: any) => {
-              const taxableAmount = item.quantity * item.rate - (item.discount || 0)
+            create: data.items.map((item: any, idx: number) => {
+              const g = gst.items[idx]
               return {
                 itemId: item.itemId,
                 quantity: item.quantity,
                 rate: item.rate,
                 discount: item.discount || 0,
                 taxRate: item.taxRate || 0,
-                hsnCode: item.hsnCode || null,
-                total: taxableAmount + (taxableAmount * (item.taxRate || 0)) / 100
+                hsnCode: g.hsnCode || null,
+                total: g.total,
+                taxableAmount: g.taxableAmount,
+                cgstRate: g.cgstRate,
+                cgstAmount: g.cgstAmount,
+                sgstRate: g.sgstRate,
+                sgstAmount: g.sgstAmount,
+                igstRate: g.igstRate,
+                igstAmount: g.igstAmount,
+                cessRate: g.cessRate,
+                cessAmount: g.cessAmount
               }
             })
           }

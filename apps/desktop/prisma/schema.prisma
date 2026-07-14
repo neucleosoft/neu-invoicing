@@ -585,6 +585,15 @@ model DeliveryChallan {
   ewayBillNo           String?
   warrantyPeriod       String?
   dispatchedThrough    String?
+  // GST split (2026-07-14): computeGstValues already produced these for
+  // challans — they were dropped for lack of columns. Same shape as SalesInvoice.
+  placeOfSupply        String?
+  placeOfSupplyName    String?
+  isInterState         Boolean               @default(false)
+  cgstAmount           Float                 @default(0)
+  sgstAmount           Float                 @default(0)
+  igstAmount           Float                 @default(0)
+  cessAmount           Float                 @default(0)
   items                DeliveryChallanItem[]
 }
 
@@ -600,6 +609,15 @@ model DeliveryChallanItem {
   discount          Float           @default(0)
   total             Float
   hsnCode           String?
+  taxableAmount     Float           @default(0)
+  cgstRate          Float           @default(0)
+  cgstAmount        Float           @default(0)
+  sgstRate          Float           @default(0)
+  sgstAmount        Float           @default(0)
+  igstRate          Float           @default(0)
+  igstAmount        Float           @default(0)
+  cessRate          Float           @default(0)
+  cessAmount        Float           @default(0)
   createdAt         DateTime        @default(now())
 }
 

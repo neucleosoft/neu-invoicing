@@ -681,6 +681,18 @@ export const deliveryChallan = sqliteTable("DeliveryChallan", {
   ewayBillNo: text("ewayBillNo"),
   warrantyPeriod: text("warrantyPeriod"),
   dispatchedThrough: text("dispatchedThrough"),
+  // GST split (2026-07-14): the shared computeGstValues already produced these
+  // for challans on both apps — they were dropped for lack of columns. Same
+  // shape as salesInvoice.
+  placeOfSupply: text("placeOfSupply"),
+  placeOfSupplyName: text("placeOfSupplyName"),
+  isInterState: integer("isInterState", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  cgstAmount: real("cgstAmount").notNull().default(0),
+  sgstAmount: real("sgstAmount").notNull().default(0),
+  igstAmount: real("igstAmount").notNull().default(0),
+  cessAmount: real("cessAmount").notNull().default(0),
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
@@ -704,6 +716,15 @@ export const deliveryChallanItem = sqliteTable("DeliveryChallanItem", {
   discount: real("discount").notNull().default(0),
   total: real("total").notNull(),
   hsnCode: text("hsnCode"),
+  taxableAmount: real("taxableAmount").notNull().default(0),
+  cgstRate: real("cgstRate").notNull().default(0),
+  cgstAmount: real("cgstAmount").notNull().default(0),
+  sgstRate: real("sgstRate").notNull().default(0),
+  sgstAmount: real("sgstAmount").notNull().default(0),
+  igstRate: real("igstRate").notNull().default(0),
+  igstAmount: real("igstAmount").notNull().default(0),
+  cessRate: real("cessRate").notNull().default(0),
+  cessAmount: real("cessAmount").notNull().default(0),
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
