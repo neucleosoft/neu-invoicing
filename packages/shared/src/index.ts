@@ -7,6 +7,7 @@ export * from './recomputeReport'
 export * from './syncPackets'
 export * from './syncApply'
 export * from './convertToInvoice'
+export * from './gstr1Gstn'
 export * from './pdf'
 
 // The codebase's id generator (already used for every table PK in ./schema).
