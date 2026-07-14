@@ -132,6 +132,86 @@ export async function getLowStockCount(db: Db): Promise<number> {
   return rows[0]?.count ?? 0
 }
 
+// Money owed TO suppliers — sum of unpaid bill balances, the mirror image of
+// getTotalReceivables (bill-derived, so cancelled bills don't distort it).
+export async function getTotalPayables(db: Db): Promise<number> {
+  const rows = await db
+    .select({
+      total: sql<number>`COALESCE(SUM(${schema.purchaseBill.balanceDue}), 0)`,
+    })
+    .from(schema.purchaseBill)
+    .where(
+      and(
+        ne(schema.purchaseBill.status, 'PAID'),
+        notDeleted(schema.purchaseBill.deletedAt),
+        notCancelled(schema.purchaseBill.cancelledAt),
+      ),
+    )
+  return rows[0]?.total ?? 0
+}
+
+// Cash + bank on hand — Σ active account balances, same math as the Cash &
+// Bank screen's summary cards (and desktop cashBank:getTotalBalance).
+export async function getCashBankTotals(
+  db: Db,
+): Promise<{ cash: number; bank: number; total: number }> {
+  const rows = await db
+    .select({
+      type: schema.bankAccount.type,
+      total: sql<number>`COALESCE(SUM(${schema.bankAccount.currentBalance}), 0)`,
+    })
+    .from(schema.bankAccount)
+    .where(notDeleted(schema.bankAccount.deletedAt))
+    .groupBy(schema.bankAccount.type)
+  let cash = 0
+  let bank = 0
+  for (const r of rows) {
+    if (r.type === 'CASH') cash += r.total
+    else bank += r.total
+  }
+  return { cash, bank, total: cash + bank }
+}
+
+export type MonthlySales = { label: string; total: number }
+
+// Invoiced totals per calendar month for the last N months (active invoices
+// only) — feeds the dashboard trend bars. Grouped in JS: month buckets from
+// epoch-ms dates are timezone-dependent, so SQL strftime would need the same
+// local-time care anyway.
+export async function getMonthlySales(db: Db, months: number): Promise<MonthlySales[]> {
+  const start = new Date()
+  start.setDate(1)
+  start.setHours(0, 0, 0, 0)
+  start.setMonth(start.getMonth() - (months - 1))
+
+  const rows = await db
+    .select({
+      invoiceDate: schema.salesInvoice.invoiceDate,
+      totalAmount: schema.salesInvoice.totalAmount,
+    })
+    .from(schema.salesInvoice)
+    .where(
+      and(
+        gte(schema.salesInvoice.invoiceDate, start),
+        notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
+      ),
+    )
+
+  const out: MonthlySales[] = []
+  const cursor = new Date(start)
+  for (let i = 0; i < months; i++) {
+    out.push({ label: cursor.toLocaleString(undefined, { month: 'short' }), total: 0 })
+    cursor.setMonth(cursor.getMonth() + 1)
+  }
+  for (const r of rows) {
+    const d = new Date(r.invoiceDate)
+    const idx = (d.getFullYear() - start.getFullYear()) * 12 + (d.getMonth() - start.getMonth())
+    if (idx >= 0 && idx < months) out[idx].total += r.totalAmount
+  }
+  return out
+}
+
 export type RecentInvoice = typeof schema.salesInvoice.$inferSelect & {
   customerName: string | null
 }
