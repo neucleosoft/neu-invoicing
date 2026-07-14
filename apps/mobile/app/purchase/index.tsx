@@ -4,6 +4,12 @@ import { memo, useCallback, useMemo, useState } from 'react'
 import { FlatList, type ListRenderItem, Pressable, StyleSheet, TextInput, View } from 'react-native'
 
 import EmptyState from '@/components/EmptyState'
+import {
+  applyListControls,
+  ListControls,
+  type DateRangeKey,
+  type SortKey,
+} from '@/components/ListControls'
 import Fab from '@/components/Fab'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
@@ -26,6 +32,8 @@ export default function PurchaseBillsScreen() {
   const [bills, setBills] = useState<PurchaseBill[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [search, setSearch] = useState('')
+  const [range, setRange] = useState<DateRangeKey>('all')
+  const [sort, setSort] = useState<SortKey>('date_desc')
 
   useFocusEffect(
     useCallback(() => {
@@ -46,13 +54,15 @@ export default function PurchaseBillsScreen() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return bills
-    return bills.filter(
-      (b) =>
-        b.billNumber.toLowerCase().includes(q) ||
-        supplierName(b.supplierId).toLowerCase().includes(q),
-    )
-  }, [bills, search, supplierName])
+    const matches = q
+      ? bills.filter(
+          (b) =>
+            b.billNumber.toLowerCase().includes(q) ||
+            supplierName(b.supplierId).toLowerCase().includes(q),
+        )
+      : bills
+    return applyListControls(matches, range, sort, (b) => b.billDate, (b) => b.totalAmount)
+  }, [bills, search, supplierName, range, sort])
 
   const activeCount = useMemo(() => bills.filter((b) => !b.cancelledAt).length, [bills])
 
@@ -83,6 +93,8 @@ export default function PurchaseBillsScreen() {
           style={styles.searchInput}
         />
       </ThemedView>
+
+      <ListControls range={range} onRange={setRange} sort={sort} onSort={setSort} />
 
       <FlatList
         data={filtered}

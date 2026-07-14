@@ -12,6 +12,12 @@ import {
 
 import EmptyState from '@/components/EmptyState'
 import Fab from '@/components/Fab'
+import {
+  applyListControls,
+  ListControls,
+  type DateRangeKey,
+  type SortKey,
+} from '@/components/ListControls'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
@@ -30,6 +36,8 @@ export default function InvoicesScreen() {
   const db = useDb()
   const [rows, setRows] = useState<Row[]>([])
   const [search, setSearch] = useState('')
+  const [range, setRange] = useState<DateRangeKey>('all')
+  const [sort, setSort] = useState<SortKey>('date_desc')
 
   useFocusEffect(
     useCallback(() => {
@@ -56,12 +64,14 @@ export default function InvoicesScreen() {
   // or vice versa).
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return rows
-    return rows.filter((r) => {
-      const hay = `${r.invoiceNumber} ${r.customerName ?? ''}`.toLowerCase()
-      return hay.includes(q)
-    })
-  }, [rows, search])
+    const matches = q
+      ? rows.filter((r) => {
+          const hay = `${r.invoiceNumber} ${r.customerName ?? ''}`.toLowerCase()
+          return hay.includes(q)
+        })
+      : rows
+    return applyListControls(matches, range, sort, (r) => r.invoiceDate, (r) => r.totalAmount)
+  }, [rows, search, range, sort])
 
   const renderItem = useCallback<ListRenderItem<Row>>(
     ({ item }) => <InvoiceRow row={item} />,
@@ -87,6 +97,8 @@ export default function InvoicesScreen() {
           style={styles.searchInput}
         />
       </ThemedView>
+
+      <ListControls range={range} onRange={setRange} sort={sort} onSort={setSort} />
 
       <FlatList
         data={filtered}

@@ -60,10 +60,13 @@ export default function SuppliersScreen() {
   // list (marked) but never count toward a number.
   const activeCount = useMemo(() => suppliers.filter((s) => !s.deletedAt).length, [suppliers])
 
+  // Multi-field search (mirrors desktop): name, phone, email, GSTIN.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return suppliers
-    return suppliers.filter((s) => s.name.toLowerCase().includes(q))
+    return suppliers.filter((s) =>
+      `${s.name} ${s.phone ?? ''} ${s.email ?? ''} ${s.taxId ?? ''}`.toLowerCase().includes(q),
+    )
   }, [suppliers, search])
 
   const renderItem = useCallback<ListRenderItem<Supplier>>(

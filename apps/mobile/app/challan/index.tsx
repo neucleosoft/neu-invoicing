@@ -4,6 +4,12 @@ import { memo, useCallback, useMemo, useState } from 'react'
 import { FlatList, type ListRenderItem, Pressable, StyleSheet, TextInput, View } from 'react-native'
 
 import EmptyState from '@/components/EmptyState'
+import {
+  applyListControls,
+  ListControls,
+  type DateRangeKey,
+  type SortKey,
+} from '@/components/ListControls'
 import Fab from '@/components/Fab'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
@@ -25,6 +31,8 @@ export default function ChallansScreen() {
   const [challans, setChallans] = useState<Challan[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
+  const [range, setRange] = useState<DateRangeKey>('all')
+  const [sort, setSort] = useState<SortKey>('date_desc')
 
   useFocusEffect(
     useCallback(() => {
@@ -45,11 +53,13 @@ export default function ChallansScreen() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return challans
-    return challans.filter(
-      (x) => x.challanNumber.toLowerCase().includes(q) || customerName(x.customerId).toLowerCase().includes(q),
-    )
-  }, [challans, search, customerName])
+    const matches = q
+      ? challans.filter(
+          (x) => x.challanNumber.toLowerCase().includes(q) || customerName(x.customerId).toLowerCase().includes(q),
+        )
+      : challans
+    return applyListControls(matches, range, sort, (x) => x.challanDate, (x) => x.totalAmount)
+  }, [challans, search, customerName, range, sort])
 
   const activeCount = useMemo(() => challans.filter((c) => !c.cancelledAt).length, [challans])
 
@@ -73,6 +83,8 @@ export default function ChallansScreen() {
       <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.searchWrap}>
         <TextInput value={search} onChangeText={setSearch} placeholder="Search challans…" placeholderTextColor="#9ca3af" style={styles.searchInput} />
       </ThemedView>
+
+      <ListControls range={range} onRange={setRange} sort={sort} onSort={setSort} />
 
       <FlatList
         data={filtered}
