@@ -40,6 +40,7 @@ export default function PurchaseDetailScreen() {
   // Data URI of the attached bill photo, built once from the stored blob.
   const [photoUri, setPhotoUri] = useState<string | null>(null)
   const [showPhoto, setShowPhoto] = useState(false)
+  const [linkedPoNumber, setLinkedPoNumber] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) {
@@ -93,6 +94,15 @@ export default function PurchaseDetailScreen() {
         .where(eq(schema.supplier.id, b.supplierId))
         .limit(1)
       setSupplierName(sup?.name ?? 'Unknown supplier')
+
+      if (b.purchaseOrderId) {
+        const [po] = await db
+          .select({ orderNumber: schema.purchaseOrder.orderNumber })
+          .from(schema.purchaseOrder)
+          .where(eq(schema.purchaseOrder.id, b.purchaseOrderId))
+          .limit(1)
+        setLinkedPoNumber(po?.orderNumber ?? null)
+      }
 
       const billItems = await db
         .select()
@@ -195,6 +205,7 @@ export default function PurchaseDetailScreen() {
         <Section title="Bill">
           <Row label="Bill Date" value={formatDate(bill.billDate)} />
           <Row label="Supplier Inv. #" value={bill.supplierInvoiceNumber || '—'} />
+          {linkedPoNumber ? <Row label="Linked PO" value={linkedPoNumber} /> : null}
           {bill.supplierInvoiceDate ? (
             <Row label="Supplier Inv. Date" value={formatDate(bill.supplierInvoiceDate)} />
           ) : null}

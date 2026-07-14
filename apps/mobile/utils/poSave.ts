@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, desc, eq, isNull, notInArray } from 'drizzle-orm'
 
 import { computeGstValues } from '@neu/shared'
 
@@ -237,6 +237,59 @@ export async function updatePurchaseOrder(db: Db, id: string, header: PoHeaderIn
       })
     }
   })
+}
+
+// Open POs (status not CLOSED/CANCELLED, not archived) for a supplier — feeds
+// the bill form's "Reference PO" picker. Mirrors desktop's
+// purchaseOrder:listOpenForSupplier.
+export type OpenPoSummary = {
+  id: string
+  orderNumber: string
+  orderDate: Date
+  totalAmount: number
+}
+
+export async function listOpenPurchaseOrders(
+  db: Db,
+  supplierId: string,
+): Promise<OpenPoSummary[]> {
+  return db
+    .select({
+      id: schema.purchaseOrder.id,
+      orderNumber: schema.purchaseOrder.orderNumber,
+      orderDate: schema.purchaseOrder.orderDate,
+      totalAmount: schema.purchaseOrder.totalAmount,
+    })
+    .from(schema.purchaseOrder)
+    .where(
+      and(
+        eq(schema.purchaseOrder.supplierId, supplierId),
+        notInArray(schema.purchaseOrder.status, ['CLOSED', 'CANCELLED']),
+        isNull(schema.purchaseOrder.deletedAt),
+      ),
+    )
+    .orderBy(desc(schema.purchaseOrder.orderDate))
+}
+
+// A PO's lines shaped for pre-filling the bill form, catalog name joined in
+// for display. Mirrors desktop Purchase.tsx handleSelectPO's mapping.
+export async function loadPoLinesForBill(db: Db, poId: string) {
+  return db
+    .select({
+      supplierItemId: schema.purchaseOrderItem.supplierItemId,
+      name: schema.supplierItem.name,
+      hsnCode: schema.purchaseOrderItem.hsnCode,
+      quantity: schema.purchaseOrderItem.quantity,
+      rate: schema.purchaseOrderItem.rate,
+      discount: schema.purchaseOrderItem.discount,
+      taxRate: schema.purchaseOrderItem.taxRate,
+    })
+    .from(schema.purchaseOrderItem)
+    .leftJoin(
+      schema.supplierItem,
+      eq(schema.purchaseOrderItem.supplierItemId, schema.supplierItem.id),
+    )
+    .where(eq(schema.purchaseOrderItem.purchaseOrderId, poId))
 }
 
 export async function deletePurchaseOrder(db: Db, id: string): Promise<void> {

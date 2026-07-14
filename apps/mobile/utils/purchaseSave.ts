@@ -45,6 +45,10 @@ export type PurchaseHeaderInput = {
   supplierInvoiceNumber: string | null
   supplierInvoiceDate: Date | null
   notes: string | null
+  // Optional link back to the originating Purchase Order (mirrors desktop):
+  // create closes the PO once a bill exists against it; edit can update or
+  // clear the link (null clears, undefined leaves it untouched).
+  purchaseOrderId?: string | null
   // Document-level discount subtracted from the grand total AFTER tax
   // (totalAmount = subtotal + tax − discount, mirrors desktop). Separate from
   // the per-line discounts, which reduce each line's taxable base.
@@ -317,6 +321,7 @@ export async function createPurchaseBill(
         supplierId: header.supplierId,
         supplierInvoiceNumber: header.supplierInvoiceNumber,
         supplierInvoiceDate: header.supplierInvoiceDate,
+        purchaseOrderId: header.purchaseOrderId ?? null,
         subtotal,
         discount: header.discount || 0,
         taxAmount,
@@ -384,6 +389,17 @@ export async function createPurchaseBill(
         purchaseBillId: bill.id,
         notes: INLINE_PAYMENT_NOTE,
       })
+    }
+
+    // If this bill references a PO, mark that PO CLOSED now that the financial
+    // side is recorded. Future bills referencing the same PO are still allowed
+    // (split deliveries) — closing just signals "no more expected." Mirrors
+    // desktop purchase:create.
+    if (header.purchaseOrderId) {
+      await tx
+        .update(schema.purchaseOrder)
+        .set({ status: 'CLOSED' })
+        .where(eq(schema.purchaseOrder.id, header.purchaseOrderId))
     }
 
     return bill.id
@@ -500,6 +516,10 @@ export async function updatePurchaseBill(
         supplierId: header.supplierId,
         supplierInvoiceNumber: header.supplierInvoiceNumber,
         supplierInvoiceDate: header.supplierInvoiceDate,
+        // Update or clear the PO link on edit (undefined = leave untouched).
+        ...(header.purchaseOrderId !== undefined
+          ? { purchaseOrderId: header.purchaseOrderId }
+          : {}),
         subtotal,
         discount: header.discount || 0,
         taxAmount,
