@@ -3,7 +3,7 @@ import { google } from 'googleapis'
 import { PrismaClient } from '@prisma/client'
 import { getOAuth2Client, isAuthError, clearStoredCredentials } from './auth'
 import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
-import { snapshotDatabaseTo } from './dbLock'
+import { snapshotDatabaseTo, withDbFileLock } from './dbLock'
 import fs from 'fs'
 import path from 'path'
 import Store from 'electron-store'
@@ -452,43 +452,47 @@ const replaceLocalDbFromDrive = async (
     throw e
   }
 
-  // PHASE 2 — swap; no tmp cleanup on failure past this point.
-  await getPrisma().$disconnect()
-  for (const suffix of ['-wal', '-shm', '-journal']) {
-    const sidecar = `${dbPath}${suffix}`
-    if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar)
-  }
-  // PARK the outgoing DB instead of deleting it — restore must be the only
-  // undoable-by-rename "destructive" action in the app (a wrong-direction
-  // restore is recovered by renaming this file back to neuinvoicing.db).
-  // Only the newest parked copy is kept, bounding disk cost to one extra DB.
-  if (fs.existsSync(dbPath)) {
-    const dir = path.dirname(dbPath)
-    const parkedPrefix = `${path.basename(dbPath)}.pre-restore-`
-    for (const name of fs.readdirSync(dir)) {
-      if (name.startsWith(parkedPrefix)) {
-        try { fs.unlinkSync(path.join(dir, name)) } catch { /* best-effort */ }
+  // PHASE 2 — swap; no tmp cleanup on failure past this point. Runs under the
+  // DB-file lock so it WAITS for an in-flight row-sync merge or snapshot to
+  // finish instead of killing it mid-transaction via $disconnect.
+  await withDbFileLock(async () => {
+    await getPrisma().$disconnect()
+    for (const suffix of ['-wal', '-shm', '-journal']) {
+      const sidecar = `${dbPath}${suffix}`
+      if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar)
+    }
+    // PARK the outgoing DB instead of deleting it — restore must be the only
+    // undoable-by-rename "destructive" action in the app (a wrong-direction
+    // restore is recovered by renaming this file back to neuinvoicing.db).
+    // Only the newest parked copy is kept, bounding disk cost to one extra DB.
+    if (fs.existsSync(dbPath)) {
+      const dir = path.dirname(dbPath)
+      const parkedPrefix = `${path.basename(dbPath)}.pre-restore-`
+      for (const name of fs.readdirSync(dir)) {
+        if (name.startsWith(parkedPrefix)) {
+          try { fs.unlinkSync(path.join(dir, name)) } catch { /* best-effort */ }
+        }
+      }
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+      try {
+        fs.renameSync(dbPath, `${dbPath}.pre-restore-${stamp}`)
+      } catch {
+        // Parking is a safety net, not a correctness requirement — the download
+        // is already verified, so fall back to the plain delete rather than
+        // failing the whole restore.
+        fs.unlinkSync(dbPath)
       }
     }
-    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
     try {
-      fs.renameSync(dbPath, `${dbPath}.pre-restore-${stamp}`)
+      fs.renameSync(tmpPath, dbPath)
     } catch {
-      // Parking is a safety net, not a correctness requirement — the download
-      // is already verified, so fall back to the plain delete rather than
-      // failing the whole restore.
-      fs.unlinkSync(dbPath)
+      fs.copyFileSync(tmpPath, dbPath)
+      try { fs.unlinkSync(tmpPath) } catch { /* keep the spare copy */ }
     }
-  }
-  try {
-    fs.renameSync(tmpPath, dbPath)
-  } catch {
-    fs.copyFileSync(tmpPath, dbPath)
-    try { fs.unlinkSync(tmpPath) } catch { /* keep the spare copy */ }
-  }
 
-  ensureTablesExist(`file:${dbPath}`)
-  await reconnectDatabase()
+    ensureTablesExist(`file:${dbPath}`)
+    await reconnectDatabase()
+  })
 }
 
 // Explicit download — replaces local DB with cloud. Caller MUST have user

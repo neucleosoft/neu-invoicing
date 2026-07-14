@@ -10,7 +10,7 @@ import * as SecureStore from 'expo-secure-store'
 import * as SQLite from 'expo-sqlite'
 
 import drizzleMigrations from '../drizzle/migrations'
-import { snapshotDbTo } from './dbFileLock'
+import { snapshotDbTo, withDbFileLock } from './dbFileLock'
 import { getDeviceId } from './deviceId'
 
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
@@ -132,6 +132,15 @@ export async function restoreFromCloud(
 // tmpFile already, and must reload the app afterwards — the SQLiteProvider
 // still holds a handle to the old file.
 export async function swapInVerifiedDb(
+  liveDb: SQLite.SQLiteDatabase,
+  tmpFile: File,
+): Promise<void> {
+  // Under the DB-file lock: WAIT for an in-flight auto-sync merge or backup
+  // snapshot to finish instead of killing it mid-transaction via closeAsync.
+  await withDbFileLock(() => swapInVerifiedDbLocked(liveDb, tmpFile))
+}
+
+async function swapInVerifiedDbLocked(
   liveDb: SQLite.SQLiteDatabase,
   tmpFile: File,
 ): Promise<void> {
