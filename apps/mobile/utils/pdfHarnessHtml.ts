@@ -9,5 +9,5 @@ import html from '../assets/pdf/pdfHarness.html'
 // Metro caches this module's transform keyed on THIS file's source, not on the
 // inlined .html — so changing only the .html won't invalidate the cache. Editing
 // this comment forces a re-transform that re-reads the fresh harness.
-// harness-rev: 4
+// harness-rev: 5
 export default html
