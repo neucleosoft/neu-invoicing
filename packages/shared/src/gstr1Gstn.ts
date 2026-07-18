@@ -95,28 +95,74 @@ export function toGSTNGstr1(data: any, companyGstin: string): any {
   const b2cl = Object.entries(b2clByPos).map(([pos, inv]) => ({ pos, inv }))
 
   // === B2CS: aggregated rows by (sply_ty × rt × pos × typ) ===
+  // `sign` is +1 for invoices and unregistered DEBIT notes, −1 for unregistered
+  // CREDIT notes — GSTN's rule is that small (non-B2CL) notes to unregistered
+  // customers never get their own section; they NET into B2CS.
   const b2csBuckets: Record<string, any> = {}
-  for (const inv of data.sections?.b2cs?.invoices || []) {
-    const pos = inv.placeOfSupply || stateCodeFromGstin(inv.customer?.taxId) || stateCodeFromGstin(companyGstin)
-    const isInter = !!inv.isInterState
+  const addToB2cs = (items: any[], isInter: boolean, pos: string, sign: number) => {
     const sply_ty = isInter ? 'INTER' : 'INTRA'
-    for (const it of inv.items || []) {
+    for (const it of items || []) {
       const rt = it.taxRate || 0
       const key = `${sply_ty}|${rt}|${pos}|OE`
       if (!b2csBuckets[key]) {
         b2csBuckets[key] = { sply_ty, rt, typ: 'OE', pos, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 }
       }
       const taxable = it.taxableAmount ?? (it.quantity * it.rate - (it.discount || 0))
-      b2csBuckets[key].txval += taxable
+      b2csBuckets[key].txval += sign * taxable
       if (isInter) {
-        b2csBuckets[key].iamt += it.igstAmount ?? (taxable * rt) / 100
+        b2csBuckets[key].iamt += sign * (it.igstAmount ?? (taxable * rt) / 100)
       } else {
-        b2csBuckets[key].camt += it.cgstAmount ?? (taxable * rt) / 200
-        b2csBuckets[key].samt += it.sgstAmount ?? (taxable * rt) / 200
+        b2csBuckets[key].camt += sign * (it.cgstAmount ?? (taxable * rt) / 200)
+        b2csBuckets[key].samt += sign * (it.sgstAmount ?? (taxable * rt) / 200)
       }
-      b2csBuckets[key].csamt += it.cessAmount || 0
+      b2csBuckets[key].csamt += sign * (it.cessAmount || 0)
     }
   }
+  for (const inv of data.sections?.b2cs?.invoices || []) {
+    const pos = inv.placeOfSupply || stateCodeFromGstin(inv.customer?.taxId) || stateCodeFromGstin(companyGstin)
+    addToB2cs(inv.items || [], !!inv.isInterState, pos, +1)
+  }
+
+  // === CDNR: notes to REGISTERED customers, grouped by GSTIN. GSTN v3
+  // "delinked" shape — a note stands alone, no original-invoice reference. ===
+  const cdnrByCtin: Record<string, any[]> = {}
+  for (const note of data.sections?.cdnr?.notes || []) {
+    const ctin = note.customer?.taxId
+    if (!ctin) continue
+    if (!cdnrByCtin[ctin]) cdnrByCtin[ctin] = []
+    cdnrByCtin[ctin].push({
+      ntty: note.noteType === 'DEBIT_NOTE' ? 'D' : 'C',
+      nt_num: note.noteNumber,
+      nt_dt: fmtGSTNDate(note.noteDate),
+      pos: stateCodeFromGstin(ctin),
+      rchrg: 'N',
+      inv_typ: 'R',
+      val: round2(note.totalAmount),
+      itms: groupItemsByRateForGSTN(note.items || [], !!note.isInterState),
+    })
+  }
+  const cdnr = Object.entries(cdnrByCtin).map(([ctin, nt]) => ({ ctin, nt }))
+
+  // === CDNUR: only inter-state notes to UNREGISTERED customers above ₹2.5L
+  // qualify (typ B2CL). Everything smaller was already netted into B2CS above. ===
+  const cdnur: any[] = []
+  for (const note of data.sections?.cdnur?.notes || []) {
+    const pos = note.placeOfSupply || stateCodeFromGstin(companyGstin)
+    if (note.isInterState && note.totalAmount > 250000) {
+      cdnur.push({
+        ntty: note.noteType === 'DEBIT_NOTE' ? 'D' : 'C',
+        nt_num: note.noteNumber,
+        nt_dt: fmtGSTNDate(note.noteDate),
+        val: round2(note.totalAmount),
+        pos,
+        typ: 'B2CL',
+        itms: groupItemsByRateForGSTN(note.items || [], true),
+      })
+    } else {
+      addToB2cs(note.items || [], !!note.isInterState, pos, note.noteType === 'DEBIT_NOTE' ? +1 : -1)
+    }
+  }
+
   const b2cs = Object.values(b2csBuckets).map((v: any) => ({
     sply_ty: v.sply_ty,
     rt: v.rt,
@@ -175,9 +221,11 @@ export function toGSTNGstr1(data: any, companyGstin: string): any {
   if (b2b.length > 0) out.b2b = b2b
   if (b2cl.length > 0) out.b2cl = b2cl
   if (b2cs.length > 0) out.b2cs = b2cs
+  if (cdnr.length > 0) out.cdnr = cdnr
+  if (cdnur.length > 0) out.cdnur = cdnur
   if (hsnData.length > 0) out.hsn = { data: hsnData }
   out.doc_issue = docIssue
-  // cdnr / cdnur / exp / nil omitted for v1 — add when those sections actually
-  // have data in your books (most small businesses won't have any in a given month).
+  // exp / nil still omitted — add when those sections actually carry data
+  // (supplyType EXPORT / NIL_EXEMPT are rare for this app's audience).
   return out
 }

@@ -975,7 +975,43 @@ export const setupGSTReportHandlers = () => {
           error: 'Company GSTIN is not set. Open Settings → Company Profile and add it before exporting.',
         }
       }
-      const payload = toGSTNGstr1(data, gstin)
+
+      // CDNR/CDNUR routing: real credit/debit notes live in the CreditDebitNote
+      // table (Mode B), which the legacy on-screen GSTR-1 (negative-total
+      // invoices) never sees. Fetch them for the report period and attach as
+      // sections.cdnr/.cdnur `notes` — the shape the shared builder reads.
+      const notes = await prisma.creditDebitNote.findMany({
+        where: {
+          status: 'ACTIVE',
+          ...notDeleted,
+          ...notCancelled,
+          noteDate: {
+            gte: new Date(data.period?.startDate),
+            lte: new Date(`${data.period?.endDate}T23:59:59.999`),
+          },
+        },
+        include: { customer: true, items: true },
+      })
+      const isReg = (t?: string | null) => !!t && t.length === 15
+      const noteDetail = notes.map((n) => ({
+        noteNumber: n.noteNumber,
+        noteDate: n.noteDate,
+        noteType: n.type,
+        totalAmount: n.totalAmount,
+        isInterState: n.isInterState,
+        customer: { taxId: n.customer?.taxId },
+        items: n.items,
+      }))
+      const withNotes = {
+        ...data,
+        sections: {
+          ...data.sections,
+          cdnr: { ...(data.sections?.cdnr ?? {}), notes: noteDetail.filter((n) => isReg(n.customer.taxId)) },
+          cdnur: { ...(data.sections?.cdnur ?? {}), notes: noteDetail.filter((n) => !isReg(n.customer.taxId)) },
+        },
+      }
+
+      const payload = toGSTNGstr1(withNotes, gstin)
       return { success: true, data: JSON.stringify(payload, null, 2) }
     } catch (error) {
       return {

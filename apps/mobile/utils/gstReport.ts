@@ -124,6 +124,7 @@ interface NoteRow {
   customerName: string | null
   taxId: string | null
   type: string
+  isInterState: boolean
   subtotal: number
   totalAmount: number
   igstAmount: number
@@ -207,6 +208,7 @@ async function fetchNotes(db: Db, range: GstRange): Promise<NoteRow[]> {
       customerName: schema.customer.name,
       taxId: schema.customer.taxId,
       type: schema.creditDebitNote.type,
+      isInterState: schema.creditDebitNote.isInterState,
       subtotal: schema.creditDebitNote.subtotal,
       totalAmount: schema.creditDebitNote.totalAmount,
       igstAmount: schema.creditDebitNote.igstAmount,
@@ -374,8 +376,9 @@ export async function getGstr1PortalData(
   range: GstRange,
   startDateIso: string,
 ): Promise<any> {
-  const [invoices, hsnSummary] = await Promise.all([
+  const [invoices, notes, hsnSummary] = await Promise.all([
     fetchInvoices(db, range),
+    fetchNotes(db, range),
     getHSNSummary(db, range),
   ])
 
@@ -421,11 +424,49 @@ export async function getGstr1PortalData(
     if (key === 'b2b' || key === 'b2cl' || key === 'b2cs') grouped[key].push(toDetail(inv))
   }
 
+  // Credit/debit notes with their item-level rate detail — the shared builder
+  // routes registered ones into cdnr, qualifying unregistered ones into cdnur,
+  // and nets the small unregistered ones into b2cs.
+  const noteIds = notes.map((n) => n.id)
+  const noteItems = noteIds.length
+    ? await db
+        .select({
+          creditDebitNoteId: schema.creditDebitNoteItem.creditDebitNoteId,
+          quantity: schema.creditDebitNoteItem.quantity,
+          rate: schema.creditDebitNoteItem.rate,
+          discount: schema.creditDebitNoteItem.discount,
+          taxRate: schema.creditDebitNoteItem.taxRate,
+          taxableAmount: schema.creditDebitNoteItem.taxableAmount,
+          igstAmount: schema.creditDebitNoteItem.igstAmount,
+          cgstAmount: schema.creditDebitNoteItem.cgstAmount,
+          sgstAmount: schema.creditDebitNoteItem.sgstAmount,
+        })
+        .from(schema.creditDebitNoteItem)
+        .where(inArray(schema.creditDebitNoteItem.creditDebitNoteId, noteIds))
+    : []
+  const itemsByNote = new Map<string, typeof noteItems>()
+  for (const it of noteItems) {
+    const list = itemsByNote.get(it.creditDebitNoteId) ?? []
+    list.push(it)
+    itemsByNote.set(it.creditDebitNoteId, list)
+  }
+  const noteDetail = notes.map((n) => ({
+    noteNumber: n.noteNumber,
+    noteDate: n.noteDate,
+    noteType: n.type,
+    totalAmount: n.totalAmount,
+    isInterState: n.isInterState,
+    customer: { taxId: n.taxId },
+    items: itemsByNote.get(n.id) ?? [],
+  }))
+
   return {
     sections: {
       b2b: { invoices: grouped.b2b },
       b2cl: { invoices: grouped.b2cl },
       b2cs: { invoices: grouped.b2cs },
+      cdnr: { notes: noteDetail.filter((n) => isRegistered(n.customer.taxId)) },
+      cdnur: { notes: noteDetail.filter((n) => !isRegistered(n.customer.taxId)) },
     },
     hsnSummary,
     docSummary: {
