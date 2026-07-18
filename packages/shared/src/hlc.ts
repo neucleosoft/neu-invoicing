@@ -146,9 +146,9 @@ export function createHlcClock(device: string, opts: HlcClockOptions = {}): HlcC
 // state the comparator already falls back from). Desktop writes via Prisma,
 // so it never sets this — its stamping lives in the client extension.
 
-let globalStamper: (() => string) | null = null
+let globalStamper: (() => string | null) | null = null
 
-export function setGlobalHlcStamper(fn: (() => string) | null): void {
+export function setGlobalHlcStamper(fn: (() => string | null) | null): void {
   globalStamper = fn
 }
 

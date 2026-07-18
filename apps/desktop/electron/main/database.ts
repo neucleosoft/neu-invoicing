@@ -3,7 +3,9 @@ import path from 'path'
 import { app } from 'electron'
 import fs from 'fs'
 import { execSync } from 'child_process'
-import { appHlcExtensionArgs, initAppHlcClock, reobserveDbMaxHlc } from './hlcStamp'
+import { setGlobalHlcStamper } from '@neu/shared'
+import { appHlcExtensionArgs, initAppHlcClock, nextAppHlc, reobserveDbMaxHlc } from './hlcStamp'
+import { openDrizzle, reopenDrizzle } from './db'
 import { getDeviceId } from './sync'
 
 let prisma: PrismaClient
@@ -181,6 +183,12 @@ export const setupDatabase = async () => {
   await initAppHlcClock(prisma, getDeviceId())
   prisma = prisma.$extends(appHlcExtensionArgs()) as unknown as PrismaClient
 
+  // Prisma→Drizzle migration: the drizzle connection on the SAME file.
+  // Drizzle-side writes stamp hlc through the shared schema's
+  // $defaultFn/$onUpdate hooks, routed to the same app clock.
+  await openDrizzle(dbPath)
+  setGlobalHlcStamper(nextAppHlc)
+
   await backfillPreviousInvoiceSerialNumbers()
 }
 
@@ -196,6 +204,7 @@ export const getPrisma = () => {
 export const reconnectDatabase = async () => {
   await prisma.$disconnect()
   await prisma.$connect()
+  await reopenDrizzle(getDatabasePath())
   // The replaced file may carry HLC stamps above anything this device has
   // seen — the ratchet must never issue below them.
   await reobserveDbMaxHlc(prisma)
