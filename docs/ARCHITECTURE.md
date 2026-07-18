@@ -168,6 +168,12 @@ device.
   quirk, lives in `MIGRATIONS.md`.
 - Typecheck: `pnpm exec tsc --noEmit` inside each app (never `npx tsc` — a
   decoy npm package shadows it).
+- Tests: `pnpm test` at the root runs the shared-brain proof harnesses
+  (`packages/shared/tests/` — sync merge rules, diary format, recompute vs
+  write paths) plus the Prisma↔Drizzle schema-parity guard. CI
+  (`.github/workflows/ci.yml`) runs the same on every push. The two-device
+  sandbox (`pnpm --dir apps/desktop sandbox:rowsync`) is a manual tool that
+  needs a real local DB.
 - Secrets live in each app's `.env` (gitignored): desktop OAuth + OCR keys,
   mobile `EXPO_PUBLIC_OPENROUTER_API_KEY` (inlined at bundle time — restart
   the dev server after changing it).

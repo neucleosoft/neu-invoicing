@@ -8,6 +8,7 @@
     "packages/*"
   ],
   "scripts": {
+    "test": "pnpm --dir packages/shared test && pnpm --dir apps/desktop verify:parity",
     "dev": "turbo run dev",
     "build": "turbo run build",
     "build:win": "turbo run build:win",

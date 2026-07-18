@@ -36,6 +36,11 @@ The user never sees any of this. They just open the app and it works.
 
 ## Troubleshooting
 
+**"tsc says my new column doesn't exist right after `prisma generate`" (pnpm dual-client quirk)**
+- pnpm keeps TWO copies of the generated client: the app's custom output (`apps/desktop/node_modules/.prisma/client`, fresh) and the pnpm-store copy `@prisma/client` actually resolves to (stale after a schema change).
+- FIXED AUTOMATICALLY: `pnpm prisma:generate` now chains `scripts/sync-prisma-client.mjs`, which overwrites the store copy with the fresh one. If you ran raw `prisma generate` instead, run that script (or the pnpm script) and the errors disappear.
+- CI runs the same chain, and the schema-parity guard (`pnpm verify:parity`) fails the build if `schema.prisma` and the shared Drizzle schema ever drift apart.
+
 **"User updated but their data isn't showing / a column is missing"**
 - Have them open the app's devtools (`Ctrl+Shift+I` → Console tab) and look for `migrate deploy failed` or `Migration error` lines.
 - If a migration's SQL has a bug, it'll show up there. Fix the SQL, ship a new migration that corrects it, NOT an edit to the old one.

@@ -1,0 +1,45 @@
+# The regression net: every push re-proves the shared brain (sync merge rules,
+# diary format, recompute-vs-write-paths), re-checks Prisma↔Drizzle schema
+# parity, and typechecks both apps. These are the same harnesses that gated the
+# sync build — now they run without anyone remembering to.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4 # version comes from packageManager in package.json
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client (+ pnpm store sync)
+        run: pnpm --dir apps/desktop prisma:generate
+
+      - name: Shared-brain tests (sync apply · diary format · recompute money paths)
+        run: pnpm --dir packages/shared test
+
+      - name: Schema parity guard (Prisma ↔ Drizzle)
+        run: pnpm --dir apps/desktop verify:parity
+
+      - name: Typecheck desktop
+        run: pnpm --dir apps/desktop exec tsc --noEmit
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
+
+      - name: Typecheck mobile
+        run: pnpm --dir apps/mobile exec tsc --noEmit
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
