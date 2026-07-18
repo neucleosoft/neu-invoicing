@@ -7,7 +7,7 @@ each section says *what* exists, *where* it lives, and *why it's shaped that way
 ## The one-paragraph version
 
 Neu Invoicing is a **monorepo with two apps and one brain**. The desktop app
-(Electron + React + Prisma) and the mobile app (Expo + React Native + Drizzle)
+(Electron + React) and the mobile app (Expo + React Native)
 each own their platform glue — screens, IPC, file access — but every rule that
 touches money, tax, or merging lives once in `packages/shared` and is imported
 by both. There is no server: each business syncs through its **own Google
@@ -17,16 +17,17 @@ Drive** `appDataFolder`, which acts as a mailbox between the user's devices.
 neu_invoicing/
 ├── apps/
 │   ├── desktop/               # Electron shell
-│   │   ├── electron/main/     # Node side: Prisma DB, OAuth, sync, IPC handlers/
+│   │   ├── electron/main/     # Node side: Drizzle DB (libsql), OAuth, sync, IPC handlers/
 │   │   ├── src/               # React renderer (pages, components)
-│   │   └── prisma/            # schema.prisma + migrations
+│   │   └── prisma/migrations/ # FROZEN pre-2026-07 upgrade SQL (boot data only)
 │   └── mobile/                # Expo (React Native) app
 │       ├── app/               # expo-router screens
 │       ├── sync/              # row sync, backups, ladder, purge, auth glue
 │       ├── utils/             # save-path logic, PDF payload builders, reports
-│       └── drizzle/           # generated migrations (bundled into the app)
+│       └── db/                # drizzle bootstrap + one-time repairs
 └── packages/shared/src/       # THE BRAIN — imported by both apps
-    ├── schema.ts              # Drizzle schema (hand-mirrored with schema.prisma)
+    ├── schema.ts              # THE schema — one Drizzle definition, both apps
+    ├── drizzle/ (../drizzle)  # THE migration lineage — applied by both apps
     ├── gstCompute.ts          # ONE GST implementation (CGST/SGST vs IGST split)
     ├── paymentLogic.ts        # applyPayment / reversePayment (exact inverses)
     ├── recompute.ts           # rebuilds every derived number from documents
@@ -162,15 +163,17 @@ device.
 - Desktop dev: `cd apps/desktop && pnpm dev`. Mobile dev: `cd apps/mobile &&
   pnpm dev` and open the Expo dev client (a new native build is only needed
   when native modules or app config change — plain TS/JS rides in over Metro).
-- **Schema changes touch BOTH schemas** — `packages/shared/src/schema.ts`
-  (Drizzle, used by mobile) and `apps/desktop/prisma/schema.prisma` are
-  hand-mirrored twins. The full recipe, including the pnpm dual-Prisma-client
-  quirk, lives in `MIGRATIONS.md`.
+- **Schema changes touch ONE schema** — `packages/shared/src/schema.ts`,
+  used by BOTH apps since the Prisma→Drizzle migration (desktop runs it over
+  libsql, mobile over expo-sqlite). Generate migrations with `drizzle-kit
+  generate` from apps/mobile (they land in `packages/shared/drizzle/`). The
+  full recipe, including how pre-migration desktop DBs are upgraded at boot,
+  lives in `MIGRATIONS.md`.
 - Typecheck: `pnpm exec tsc --noEmit` inside each app (never `npx tsc` — a
   decoy npm package shadows it).
 - Tests: `pnpm test` at the root runs the shared-brain proof harnesses
   (`packages/shared/tests/` — sync merge rules, diary format, recompute vs
-  write paths) plus the Prisma↔Drizzle schema-parity guard. CI
+  write paths, HLC ordering, GSTN JSON). CI
   (`.github/workflows/ci.yml`) runs the same on every push. The two-device
   sandbox (`pnpm --dir apps/desktop sandbox:rowsync`) is a manual tool that
   needs a real local DB.

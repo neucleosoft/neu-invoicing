@@ -32,7 +32,7 @@ Run your shop, your studio, your side hustle without paying a SaaS tax every mon
 
 ## ⚡ Quick Start (Non-Technical)
 
-Three steps. No terminal, no Node, no Prisma.
+Three steps. No terminal, no Node, no database setup.
 
 <table>
 <tr>
@@ -202,7 +202,6 @@ pnpm install
 # Desktop
 cd apps/desktop
 cp .env.example .env        # fill in GOOGLE_CLIENT_ID / SECRET (see below)
-pnpm prisma:generate
 pnpm dev
 
 # Mobile (Expo dev client)
@@ -251,8 +250,8 @@ Desktop output lands in `apps/desktop/release/`; EAS gives you a download link.
 <summary><b>Tech stack</b></summary>
 
 - **Monorepo:** pnpm workspaces — `apps/desktop`, `apps/mobile`, `packages/shared`
-- **Desktop shell:** Electron (main + preload + renderer split), React + TypeScript + Tailwind + Zustand, SQLite via Prisma
-- **Mobile:** Expo SDK 54 / React Native, expo-router, SQLite via Drizzle (same schema, hand-mirrored with Prisma's)
+- **Desktop shell:** Electron (main + preload + renderer split), React + TypeScript + Tailwind + Zustand, SQLite via Drizzle (libsql)
+- **Mobile:** Expo SDK 54 / React Native, expo-router, SQLite via Drizzle (expo-sqlite) — the SAME shared schema and migration lineage as desktop
 - **The shared brain (`packages/shared`):** GST engine, payment logic, recompute engine, sync merge rules, GSTN JSON builder, and every pdfmake document blueprint — imported by both apps so money math exists exactly once
 - **PDF:** pdfmake everywhere (desktop renders directly; mobile runs pdfmake inside a hidden WebView) — all 5 invoice templates + every other document
 - **Excel:** ExcelJS (desktop), CSV via share sheet (mobile)
@@ -269,18 +268,18 @@ Desktop output lands in `apps/desktop/release/`; EAS gives you a download link.
 neu_invoicing/
 ├── apps/
 │   ├── desktop/
-│   │   ├── electron/main/        # Node side: Prisma DB, OAuth, backups, row sync
+│   │   ├── electron/main/        # Node side: Drizzle DB (libsql), OAuth, backups, row sync
 │   │   │   ├── sync.ts           # Full backup + ladder + restore
 │   │   │   ├── rowSync.ts        # Two-device diary sync
 │   │   │   └── handlers/         # One file per domain (sales, purchase, …)
 │   │   ├── src/pages/            # React renderer
-│   │   └── prisma/schema.prisma
+│   │   └── prisma/migrations/    # Frozen pre-Drizzle upgrade SQL (boot data)
 │   └── mobile/
 │       ├── app/                  # expo-router screens
 │       ├── sync/                 # Row sync, backups, ladder, purge (mobile twins)
-│       └── drizzle/              # Generated migrations, bundled into the app
 ├── packages/shared/src/          # The shared brain (see docs/ARCHITECTURE.md)
-│   ├── schema.ts                 # Drizzle schema (mirrors schema.prisma)
+│   ├── schema.ts                 # THE schema — one Drizzle definition for both apps
+│   ├── drizzle/ (packages/shared/drizzle)  # THE migration lineage, applied by both apps
 │   ├── gstCompute.ts             # The one GST implementation
 │   ├── paymentLogic.ts           # applyPayment / reversePayment
 │   ├── recompute.ts              # Rebuild every derived number
