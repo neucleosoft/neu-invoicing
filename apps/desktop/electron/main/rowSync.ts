@@ -1,9 +1,9 @@
 // Row-level sync ("Sync now") — desktop shell around the shared sync brain.
 //
 // The intelligence lives in @neu/shared (syncPackets = diary format,
-// syncApply = merge rules, recompute = totals rebuild); the Prisma fetch/
-// execute half lives in rowSyncCore.ts (electron-free, so the sandbox runner
-// can drive the real code path); THIS file is only the Drive diary IO, auth,
+// syncApply = merge rules, rowSyncDb = the drizzle collect/index/execute,
+// recomputeDb = totals rebuild — since the Prisma→Drizzle migration BOTH
+// apps run the same DB code); THIS file is only the Drive diary IO, auth,
 // and the IPC handler. Mobile has the exact twin in apps/mobile/sync/rowSync.ts.
 //
 // The diary model is STATELESS and idempotent: every push rewrites this
@@ -20,20 +20,28 @@ import { ipcMain } from 'electron'
 import { google } from 'googleapis'
 import Store from 'electron-store'
 import { Readable } from 'stream'
-import { billImageFileName, hlcPhysicalMs, parseDiary, planApply, previousInvoiceFileName, toEpochMs, TRIPWIRE_THRESHOLD, type SyncPacket } from '@neu/shared'
+import {
+  billImageFileName,
+  buildLocalIndexDb,
+  collectDiaryDb,
+  diaryFileName,
+  executePlanDb,
+  hlcPhysicalMs,
+  parseDiary,
+  planApply,
+  previousInvoiceFileName,
+  toEpochMs,
+  TRIPWIRE_THRESHOLD,
+  type RowSyncResult,
+  type SyncPacket,
+} from '@neu/shared'
 import { getAppHlcClock } from './hlcStamp'
 import { getOAuth2Client, isAuthError } from './auth'
 import { getPrisma } from './database'
+import { getDb } from './db'
 import { withDbFileLock } from './dbLock'
 import { recomputeAll } from './recompute'
 import { getDeviceId } from './sync'
-import {
-  buildLocalIndex,
-  collectDiary,
-  diaryFileName,
-  executePlan,
-  type RowSyncResult,
-} from './rowSyncCore'
 
 const store = new Store()
 
@@ -483,7 +491,8 @@ export const rowSyncNow = async (
   rowSyncInFlight = true
 
   try {
-    const prisma = getPrisma()
+    const prisma = getPrisma() // photo push/fetch below — converts in phase 2
+    const db = getDb()
     const auth = getOAuth2Client()
     const drive = google.drive({ version: 'v3', auth })
     const deviceId = getDeviceId()
@@ -521,7 +530,7 @@ export const rowSyncNow = async (
     let recomputeChanges = 0
     let log: RowSyncResult['log'] = []
     if (packets.length > 0) {
-      const local = await buildLocalIndex(prisma)
+      const local = await buildLocalIndexDb(db)
       const plan = planApply(packets, local, now, nextHlc)
 
       // D6 tripwire: a pull that wants to remove many live rows pauses for a
@@ -535,14 +544,16 @@ export const rowSyncNow = async (
       // Merge + recompute hold the DB-file lock as ONE unit — a concurrent
       // backup/ladder snapshot must never capture a half-merged ledger.
       await withDbFileLock(async () => {
-        await executePlan(prisma, plan, nextHlc)
+        // Renumber hlc stamping now rides the shared schema's $onUpdate hook
+        // (the stamper is wired at boot), same as mobile.
+        await executePlanDb(db, plan)
 
         // Recompute ONLY when the merge changed rows. A no-op sync must not
         // silently rewrite numbers that pre-date sync — legacy drift is surfaced
         // by the explicit recompute dry-run/Data Health flows, reviewed by a
         // human, not applied as a side effect of an empty pull.
         if (plan.upserts.length > 0 || plan.localRenumbers.length > 0) {
-          const recompute = await recomputeAll(prisma, { apply: true })
+          const recompute = await recomputeAll(db, { apply: true })
           recomputeChanges = recompute.totalChanges
         }
       })
@@ -555,7 +566,7 @@ export const rowSyncNow = async (
     }
 
     // PUSH: rewrite this device's whole 30-day diary (stateless, idempotent).
-    const diary = await collectDiary(prisma, deviceId, now)
+    const diary = await collectDiaryDb(db, deviceId, now)
     await uploadOwnDiary(drive, deviceId, JSON.stringify(diary))
 
     // S4 image split: photos of the changed bills ride as their own Drive

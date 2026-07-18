@@ -1,32 +1,28 @@
 // Row-level sync ("Sync now") — mobile plumbing around the shared sync brain.
 //
 // The MOBILE twin of apps/desktop/electron/main/rowSync.ts: the intelligence
-// (diary format, merge rules, recompute) lives in @neu/shared; this file is
-// only the Drizzle fetches, the Drive REST diary IO, and the mechanical plan
-// execution. Same stateless model: push rewrites this device's whole 30-day
+// (diary format, merge rules, DB collect/index/execute, recompute) lives in
+// @neu/shared — since the Prisma→Drizzle migration BOTH apps run the same
+// rowSyncDb.ts code, so this file is only the Drive REST diary IO and the
+// flow. Same stateless model: push rewrites this device's whole 30-day
 // diary; pull reads the peers' diaries in full and planApply skips the rest.
 // Re-running Sync now is always harmless.
 
-import { and, eq, gt, inArray, isNull, or } from 'drizzle-orm'
 import {
-  buildDiary,
-  hlcLowerBound,
+  buildLocalIndexDb,
+  collectDiaryDb,
+  diaryFileName,
+  executePlanDb,
   hlcPhysicalMs,
   parseDiary,
   planApply,
-  reviveRowDates,
-  toEpochMs,
-  SYNC_DOCUMENT_TABLES,
-  SYNC_SINGLE_TABLES,
+  recomputeAllDb,
   TRIPWIRE_THRESHOLD,
-  type ApplyPlan,
-  type DocumentBundle,
-  type LocalIndex,
+  type RowSyncResult,
   type SyncPacket,
 } from '@neu/shared'
 
-import { schema, useDb } from '@/db'
-import { recomputeAll } from '@/utils/recompute'
+import { useDb } from '@/db'
 
 import { appendSyncActivity } from './activityLog'
 import { withDbFileLock } from './dbFileLock'
@@ -43,198 +39,6 @@ type Db = ReturnType<typeof useDb>
 
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files'
-
-// Push everything changed in this window; peers dedupe/skip what they have.
-const DIARY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
-
-const diaryFileName = (deviceId: string) => `changes-${deviceId}.json`
-
-export interface RowSyncResult {
-  success: boolean
-  error?: string
-  /** D6 tripwire: the pull wants to remove this many live rows — nothing was
-   *  applied or pushed; re-run with confirmRemovals after the user agrees. */
-  needsConfirmation?: boolean
-  removalsPending?: number
-  pushedPackets?: number
-  applied?: number
-  skipped?: number
-  localRenumbers?: number
-  removalsApplied?: number
-  recomputeChanges?: number
-  photosPushed?: number
-  log?: { kind: string; table: string; rowId: string; detail: string }[]
-}
-
-const tableOf = (name: string): any => (schema as Record<string, any>)[name]
-
-// Rows changed inside the window. Stamped rows key the window on hlc — the
-// ratchet's physical part can never jump backwards, so a wall-clock reset
-// can't strand edits outside the diary forever. Legacy rows (hlc null: never
-// written since the column landed) keep the wall-clock branch; its isNull
-// sub-branch only matters for payment rows minted before updatedAt existed.
-const changedSince = (table: any, cutoff: Date, hlcCutoff: string) =>
-  or(
-    gt(table.hlc, hlcCutoff),
-    and(isNull(table.hlc), gt(table.updatedAt, cutoff)),
-    and(isNull(table.hlc), isNull(table.updatedAt), gt(table.createdAt, cutoff)),
-  )
-
-// ── Collect (push side) ──────────────────────────────────────────────────────
-
-async function collectDiary(db: Db, deviceId: string, now: number) {
-  const cutoff = new Date(now - DIARY_WINDOW_MS)
-  const hlcCutoff = hlcLowerBound(now - DIARY_WINDOW_MS)
-
-  const singles: Record<string, Record<string, unknown>[]> = {}
-  for (const name of SYNC_SINGLE_TABLES) {
-    const table = tableOf(name)
-    singles[name] = await db.select().from(table).where(changedSince(table, cutoff, hlcCutoff))
-  }
-
-  const documents: Record<string, DocumentBundle[]> = {}
-  for (const spec of SYNC_DOCUMENT_TABLES) {
-    const table = tableOf(spec.table)
-    const headers: any[] = await db.select().from(table).where(changedSince(table, cutoff, hlcCutoff))
-    if (headers.length === 0) continue
-    const ids = headers.map((h) => h.id)
-    const childTable = tableOf(spec.childTable)
-    const children: any[] = await db.select().from(childTable).where(inArray(childTable[spec.childFk], ids))
-    const movements: any[] = spec.movementRef
-      ? await db
-          .select()
-          .from(schema.stockMovement)
-          .where(and(eq(schema.stockMovement.referenceType, spec.movementRef), inArray(schema.stockMovement.referenceId, ids)))
-      : []
-    documents[spec.table] = headers.map((h) => ({
-      header: h,
-      children: children.filter((c) => c[spec.childFk] === h.id),
-      ...(spec.movementRef ? { movements: movements.filter((m) => m.referenceId === h.id) } : {}),
-    }))
-  }
-
-  return buildDiary({ device: deviceId, now, singles: singles as any, documents })
-}
-
-// ── Local index (pull side input) ────────────────────────────────────────────
-
-async function buildLocalIndex(db: Db): Promise<LocalIndex> {
-  const headers: LocalIndex['headers'] = {}
-  const numbers: NonNullable<LocalIndex['numbers']> = {}
-
-  const indexTable = async (name: string, numberColumn?: string) => {
-    // purchaseBill / previousInvoice rows carry BLOBs — never load those just
-    // to build an id→timestamp index (a real archive would OOM the phone).
-    const rows: any[] =
-      name === 'purchaseBill'
-        ? await db
-            .select({
-              id: schema.purchaseBill.id,
-              billNumber: schema.purchaseBill.billNumber,
-              hlc: schema.purchaseBill.hlc,
-              updatedAt: schema.purchaseBill.updatedAt,
-              createdAt: schema.purchaseBill.createdAt,
-              deletedAt: schema.purchaseBill.deletedAt,
-              cancelledAt: schema.purchaseBill.cancelledAt,
-              status: schema.purchaseBill.status,
-            })
-            .from(schema.purchaseBill)
-        : name === 'previousInvoice'
-          ? await db
-              .select({
-                id: schema.previousInvoice.id,
-                serialNumber: schema.previousInvoice.serialNumber,
-                hlc: schema.previousInvoice.hlc,
-                updatedAt: schema.previousInvoice.updatedAt,
-                createdAt: schema.previousInvoice.createdAt,
-                deletedAt: schema.previousInvoice.deletedAt,
-              })
-              .from(schema.previousInvoice)
-          : await db.select().from(tableOf(name))
-    headers[name] = {}
-    if (numberColumn) numbers[name] = {}
-    for (const r of rows) {
-      headers[name][r.id] = {
-        // Same fallback the collector uses when stamping packets: a legacy
-        // null updatedAt compares as createdAt, so an unchanged row is
-        // NOT_NEWER instead of re-applying on every sync.
-        updatedAt: toEpochMs(r.updatedAt) ?? toEpochMs(r.createdAt),
-        hlc: r.hlc ?? null,
-        createdAt: toEpochMs(r.createdAt),
-        deletedAt: toEpochMs(r.deletedAt),
-        cancelledAt: toEpochMs(r.cancelledAt),
-        status: r.status ?? null,
-      }
-      const num = numberColumn ? r[numberColumn] : null
-      if (numberColumn && num != null) {
-        numbers[name][String(num)] = { rowId: r.id, createdAt: toEpochMs(r.createdAt) }
-      }
-    }
-  }
-
-  for (const name of SYNC_SINGLE_TABLES) await indexTable(name)
-  for (const spec of SYNC_DOCUMENT_TABLES) await indexTable(spec.table, spec.numberColumn)
-
-  return { headers, numbers }
-}
-
-// ── Execute (pull side output) ───────────────────────────────────────────────
-
-async function executePlan(db: Db, plan: ApplyPlan): Promise<void> {
-  if (plan.upserts.length === 0 && plan.localRenumbers.length === 0) return
-  await db.transaction(async (tx) => {
-    // Local renumbers FIRST: the incoming doc that keeps the number cannot be
-    // inserted while the local later-created doc still holds it (UNIQUE fires
-    // at statement time). $onUpdate auto-bumps updatedAt AND hlc here, so the
-    // renumber propagates on the next push.
-    for (const r of plan.localRenumbers) {
-      const table = tableOf(r.table)
-      await tx.update(table).set({ [r.column]: r.to }).where(eq(table.id, r.rowId))
-    }
-
-    for (const u of plan.upserts) {
-      const table = tableOf(u.table)
-      const data = reviveRowDates(u.row)
-      // Apply must land the row EXACTLY as the packet says: a legacy packet
-      // without hlc lands with hlc null — explicit, so the schema's
-      // $defaultFn/$onUpdate can't mint a local stamp for a peer's row.
-      if (!('hlc' in data)) data.hlc = null
-      let createData = data
-      let updateData = data
-      // previousInvoice's NOT-NULL fileData is stripped from packets: inserts
-      // get the empty-blob sentinel ("on Drive, not fetched yet"); updates
-      // must NEVER touch fileData, or a packet would wipe a fetched file.
-      if (u.table === 'previousInvoice' && !('fileData' in data)) {
-        createData = { ...data, fileData: Buffer.alloc(0) }
-      }
-      if (u.table === 'previousInvoice' && 'fileData' in updateData) {
-        const { fileData: _dropped, ...rest } = updateData
-        updateData = rest
-      }
-      await tx.insert(table).values(createData).onConflictDoUpdate({ target: table.id, set: updateData })
-      if (u.children) {
-        const childTable = tableOf(u.children.table)
-        await tx.delete(childTable).where(eq(childTable[u.children.fk], u.rowId))
-        if (u.children.rows.length) {
-          await tx.insert(childTable).values(u.children.rows.map(reviveRowDates))
-        }
-      }
-      if (u.movements) {
-        await tx
-          .delete(schema.stockMovement)
-          .where(
-            and(
-              eq(schema.stockMovement.referenceType, u.movements.referenceType),
-              eq(schema.stockMovement.referenceId, u.movements.referenceId),
-            ),
-          )
-        if (u.movements.rows.length) {
-          await tx.insert(schema.stockMovement).values(u.movements.rows.map(reviveRowDates) as any)
-        }
-      }
-    }
-  })
-}
 
 // ── Drive diary IO ───────────────────────────────────────────────────────────
 
@@ -356,7 +160,7 @@ export async function rowSyncNow(
     let recomputeChanges = 0
     let log: RowSyncResult['log'] = []
     if (packets.length > 0) {
-      const local = await buildLocalIndex(db)
+      const local = await buildLocalIndexDb(db)
       const plan = planApply(packets, local, now, nextHlc)
 
       // D6 tripwire: a pull that wants to remove many live rows pauses for a
@@ -369,7 +173,7 @@ export async function rowSyncNow(
       // Merge + recompute hold the DB-file lock as ONE unit — a concurrent
       // backup/ladder snapshot must never capture a half-merged ledger.
       await withDbFileLock(async () => {
-        await executePlan(db, plan)
+        await executePlanDb(db, plan)
 
         // Recompute ONLY when the merge changed rows. A no-op sync must not
         // silently rewrite numbers that pre-date sync — legacy drift is surfaced
@@ -377,7 +181,7 @@ export async function rowSyncNow(
         // a side effect of an empty pull. (openingStock backfill already ran at
         // app start, before any sync can.)
         if (plan.upserts.length > 0 || plan.localRenumbers.length > 0) {
-          const recompute = await recomputeAll(db, { apply: true })
+          const recompute = await recomputeAllDb(db, { apply: true })
           recomputeChanges = recompute.totalChanges
         }
       })
@@ -390,7 +194,7 @@ export async function rowSyncNow(
     }
 
     // PUSH: rewrite this device's whole 30-day diary (stateless, idempotent).
-    const diary = await collectDiary(db, deviceId, now)
+    const diary = await collectDiaryDb(db, deviceId, now)
     await uploadOwnDiary(accessToken, deviceId, JSON.stringify(diary))
 
     // S4 image split: photos of the changed bills ride as their own Drive

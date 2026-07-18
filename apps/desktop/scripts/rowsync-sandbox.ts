@@ -12,20 +12,32 @@ import fs from 'fs'
 import os from 'os'
 import path from 'path'
 import { PrismaClient } from '@prisma/client'
+import { createClient, type Client } from '@libsql/client'
+import { drizzle } from 'drizzle-orm/libsql'
 import {
+  buildLocalIndexDb,
+  collectDiaryDb,
   createHlcClock,
+  executePlanDb,
   parseDiary,
   planApply,
+  recomputeAllDb,
+  setGlobalHlcStamper,
 } from '../../../packages/shared/src/index'
-import {
-  buildLocalIndex,
-  collectDiary,
-  executePlan,
-} from '../electron/main/rowSyncCore'
 import { buildHlcExtensionArgs } from '../electron/main/hlcStamp'
-import { recomputeAll } from '../electron/main/recompute'
 
 const MONTH_MS = 30 * 24 * 60 * 60 * 1000
+
+// The shared drizzle DB layer (rowSyncDb/recomputeDb) — the REAL code both
+// apps now run — driven here through libsql on the sandbox copies. Prisma
+// stays only to STAGE user-like edits through the hlc client extension
+// (that's the desktop's current coexistence state during the migration).
+async function openSandboxDb(file: string) {
+  const client = createClient({ url: `file:${file}` })
+  await client.execute('PRAGMA foreign_keys = ON')
+  await client.execute('PRAGMA busy_timeout = 10000')
+  return { client, db: drizzle(client) }
+}
 
 const APPDATA = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
 const REAL_DB = path.join(APPDATA, 'neu-invoicing', 'neuinvoicing.db')
@@ -62,6 +74,8 @@ async function main() {
     .$extends(buildHlcExtensionArgs(() => clockB.next())) as unknown as PrismaClient
   await prismaA.$connect()
   await prismaB.$connect()
+  const { client: clientA, db: dbA } = await openSandboxDb(DB_A)
+  const { client: clientB, db: dbB } = await openSandboxDb(DB_B)
 
   // The real DB predates the payment-updatedAt migration (it applies at next
   // app startup). Bring the sandbox copies up to schema the same way startup
@@ -200,7 +214,7 @@ async function main() {
 
   // ── sync A → B through the real pipeline ────────────────────────────────
   console.log('\nSync A → B (collect → JSON → parse → plan → execute)')
-  const diaryA = await collectDiary(prismaA, 'sandbox-A', Date.now())
+  const diaryA = await collectDiaryDb(dbA, 'sandbox-A', Date.now())
   const parsed = parseDiary(JSON.stringify(diaryA))
   check('diary survives JSON round-trip', parsed.ok)
   if (!parsed.ok) throw new Error('diary parse failed')
@@ -208,7 +222,7 @@ async function main() {
   // Mirror rowSyncNow: the puller feeds every peer stamp into its ratchet
   // BEFORE planning, so its own next stamps order above everything seen.
   for (const p of parsed.diary.packets) clockB.observe(p.row?.hlc)
-  const localB = await buildLocalIndex(prismaB)
+  const localB = await buildLocalIndexDb(dbB)
   const plan = planApply(parsed.diary.packets, localB, Date.now(), () => clockB.next())
   check('plan renumbers the later-created incoming invoice',
     plan.log.some((l) => l.kind === 'RENUMBER_INCOMING'))
@@ -219,7 +233,10 @@ async function main() {
     tables.indexOf('supplier') < tables.indexOf('purchaseBill') &&
     tables.indexOf('purchaseBill') < tables.indexOf('paymentTransaction'),
     tables.join(','))
-  await executePlan(prismaB, plan, () => clockB.next())
+  // The schema's $onUpdate(hlcStamp) is what stamps renumbers now — route the
+  // global stamper to the device doing the applying, like each app does.
+  setGlobalHlcStamper(() => clockB.next())
+  await executePlanDb(dbB, plan)
 
   // ── assertions on B ─────────────────────────────────────────────────────
   console.log('\nAssertions on device B')
@@ -260,7 +277,7 @@ async function main() {
     invA2OnB?.invoiceNumber === 'SBX-LOCAL-001', `got ${invA2OnB?.invoiceNumber}`)
 
   // ── recompute B end-to-end ──────────────────────────────────────────────
-  await recomputeAll(prismaB, { apply: true })
+  await recomputeAllDb(dbB, { apply: true })
   const custAfter = await prismaB.customer.findUnique({ where: { id: custA.id } })
   check('recompute lands the synced customer balance at ₹128 (118 + 10)',
     Math.abs((custAfter?.currentBalance ?? 0) - 128) < 0.01, `got ${custAfter?.currentBalance}`)
@@ -276,7 +293,7 @@ async function main() {
 
   // ── idempotency: sync the SAME diary again ──────────────────────────────
   console.log('\nIdempotency: applying the same diary again')
-  const localB2 = await buildLocalIndex(prismaB)
+  const localB2 = await buildLocalIndexDb(dbB)
   const plan2 = planApply(parsed.diary.packets, localB2, Date.now(), () => clockB.next())
   check('second apply is a no-op (everything skips)', plan2.upserts.length === 0,
     `upserts=${plan2.upserts.length} sample=${JSON.stringify(plan2.upserts.slice(0, 2).map((u) => [u.table, u.rowId]))}`)
@@ -320,10 +337,11 @@ async function main() {
   // updatedAt ordering, B's edit is "a month older" than what A already has
   // and would be silently discarded. The hlc (ratcheted past A's stamps at
   // pull time) must carry it back and WIN on A.
-  const diaryA2 = await collectDiary(prismaA, 'sandbox-A', Date.now())
+  const diaryA2 = await collectDiaryDb(dbA, 'sandbox-A', Date.now())
   for (const p of diaryA2.packets) clockB.observe(p.row?.hlc)
-  const planB2 = planApply(diaryA2.packets, await buildLocalIndex(prismaB), Date.now(), () => clockB.next())
-  await executePlan(prismaB, planB2, () => clockB.next())
+  const planB2 = planApply(diaryA2.packets, await buildLocalIndexDb(dbB), Date.now(), () => clockB.next())
+  setGlobalHlcStamper(() => clockB.next())
+  await executePlanDb(dbB, planB2)
 
   await prismaB.customer.update({
     where: { id: custA.id },
@@ -338,18 +356,22 @@ async function main() {
 
   // 40 days puts the edit OUTSIDE the 30-day updatedAt window — under the old
   // filter this edit would never even be PUSHED. The hlc window must carry it.
-  const diaryB = await collectDiary(prismaB, 'sandbox-B', Date.now())
+  const diaryB = await collectDiaryDb(dbB, 'sandbox-B', Date.now())
   check('hlc window keeps a 40-day-backdated edit in the diary',
     diaryB.packets.some((p) => p.table === 'customer' && p.rowId === custA.id))
 
   for (const p of diaryB.packets) clockA.observe(p.row?.hlc)
-  const planA = planApply(diaryB.packets, await buildLocalIndex(prismaA), Date.now(), () => clockA.next())
-  await executePlan(prismaA, planA, () => clockA.next())
+  const planA = planApply(diaryB.packets, await buildLocalIndexDb(dbA), Date.now(), () => clockA.next())
+  setGlobalHlcStamper(() => clockA.next())
+  await executePlanDb(dbA, planA)
   const custBackOnA = await prismaA.customer.findUnique({ where: { id: custA.id } })
   check('backdated-clock edit WON on A — hlc beat a month-newer updatedAt',
     custBackOnA?.billingAddress === 'edited on the backdated device',
     `got ${custBackOnA?.billingAddress}`)
 
+  setGlobalHlcStamper(null)
+  clientA.close()
+  clientB.close()
   await prismaA.$disconnect()
   await prismaB.$disconnect()
 
