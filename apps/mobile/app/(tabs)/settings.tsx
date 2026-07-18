@@ -23,6 +23,7 @@ import { getLadderInfo, restoreFromLadder, type LadderRungInfo } from '@/sync/la
 import { rowSyncNow } from '@/sync/rowSync';
 import { getBackupFrequency, setBackupFrequency, type BackupFrequency } from '@/sync/scheduledBackup';
 import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
+import { clearPin, isPinSet, setPin, verifyPin } from '@/utils/appLock';
 import { getLogFileUri } from '@/utils/appLog';
 import { getSetting, setSetting } from '@/utils/appSettings';
 import { INVOICE_TEMPLATE_INFO, type InvoiceTemplate } from '@neu/shared';
@@ -49,6 +50,61 @@ export default function SettingsScreen() {
   const [backingUp, setBackingUp] = useState(false);
   const [ladderInfo, setLadderInfo] = useState<LadderRungInfo[]>([]);
   const [ladderRestoring, setLadderRestoring] = useState<string | null>(null);
+
+  // App lock (PIN). The PIN is stored as a salted hash in SecureStore; the
+  // lock screen itself lives in components/AppLockGate.tsx.
+  const [pinSet, setPinSet] = useState(false);
+  const [lockCurrent, setLockCurrent] = useState('');
+  const [lockNew, setLockNew] = useState('');
+  const [lockConfirm, setLockConfirm] = useState('');
+  const [lockBusy, setLockBusy] = useState(false);
+  useEffect(() => {
+    isPinSet().then(setPinSet);
+  }, []);
+
+  async function handleSavePin() {
+    if (lockNew.length < 4) {
+      Alert.alert('Validation', 'PIN must be at least 4 digits.');
+      return;
+    }
+    if (lockNew !== lockConfirm) {
+      Alert.alert('Validation', 'The two PINs do not match.');
+      return;
+    }
+    setLockBusy(true);
+    try {
+      if (pinSet && !(await verifyPin(lockCurrent))) {
+        Alert.alert('Wrong PIN', 'Enter your current PIN to change it.');
+        return;
+      }
+      await setPin(lockNew);
+      setPinSet(true);
+      setLockCurrent('');
+      setLockNew('');
+      setLockConfirm('');
+      Alert.alert('App lock on', 'The app now asks for this PIN on open and after 5 minutes in the background.');
+    } finally {
+      setLockBusy(false);
+    }
+  }
+
+  async function handleDisablePin() {
+    setLockBusy(true);
+    try {
+      if (!(await verifyPin(lockCurrent))) {
+        Alert.alert('Wrong PIN', 'Enter your current PIN to turn the lock off.');
+        return;
+      }
+      await clearPin();
+      setPinSet(false);
+      setLockCurrent('');
+      setLockNew('');
+      setLockConfirm('');
+      Alert.alert('App lock off', 'The app opens without a PIN now.');
+    } finally {
+      setLockBusy(false);
+    }
+  }
 
   // Theme override (Appearance): light / dark / system, applied app-wide by
   // the use-color-scheme hook.
@@ -699,6 +755,55 @@ export default function SettingsScreen() {
       </ThemedView>
 
       <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">App Lock</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          {pinSet
+            ? 'PIN is ON — asked on open and after 5 minutes in the background. Enter the current PIN to change or turn it off.'
+            : 'Set a PIN so a stolen or borrowed phone can’t open your books.'}
+        </ThemedText>
+        {pinSet ? (
+          <TextInput
+            value={lockCurrent}
+            onChangeText={(v) => setLockCurrent(v.replace(/[^0-9]/g, '').slice(0, 6))}
+            keyboardType="number-pad"
+            secureTextEntry
+            placeholder="Current PIN"
+            placeholderTextColor="#9ca3af"
+            style={styles.pinInput}
+          />
+        ) : null}
+        <TextInput
+          value={lockNew}
+          onChangeText={(v) => setLockNew(v.replace(/[^0-9]/g, '').slice(0, 6))}
+          keyboardType="number-pad"
+          secureTextEntry
+          placeholder={pinSet ? 'New PIN (4–6 digits)' : 'PIN (4–6 digits)'}
+          placeholderTextColor="#9ca3af"
+          style={styles.pinInput}
+        />
+        <TextInput
+          value={lockConfirm}
+          onChangeText={(v) => setLockConfirm(v.replace(/[^0-9]/g, '').slice(0, 6))}
+          keyboardType="number-pad"
+          secureTextEntry
+          placeholder="Confirm PIN"
+          placeholderTextColor="#9ca3af"
+          style={styles.pinInput}
+        />
+        <Button
+          title={lockBusy ? 'Working…' : pinSet ? 'Change PIN' : 'Turn on App Lock'}
+          variant="primary"
+          onPress={handleSavePin}
+          disabled={lockBusy}
+        />
+        {pinSet ? (
+          <Pressable onPress={handleDisablePin} disabled={lockBusy} style={styles.lockOff}>
+            <ThemedText style={styles.lockOffText}>Turn off App Lock</ThemedText>
+          </Pressable>
+        ) : null}
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Diagnostics</ThemedText>
         <ThemedText style={styles.businessHint}>
           Every error the app hits is written to a log file. If something
@@ -930,6 +1035,19 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   poInputTall: { minHeight: 180 },
+  pinInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    letterSpacing: 6,
+    color: '#111827',
+    backgroundColor: '#f9fafb',
+  },
+  lockOff: { paddingVertical: 10, alignItems: 'center' },
+  lockOffText: { color: '#dc2626', fontWeight: '600' },
   templateRow: {
     flexDirection: 'row',
     alignItems: 'center',

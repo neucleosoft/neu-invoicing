@@ -32,6 +32,7 @@ import { loadThemePreference } from '@/hooks/theme-preference';
 import { initAppLog } from '@/utils/appLog';
 import { runMigrations, schema, useDb } from '@/db';
 import { AuthProvider, useAuth } from '@/auth';
+import { AppLockGate } from '@/components/AppLockGate';
 import { AutoSync } from '@/sync/AutoSync';
 
 // Field logging first — a crash during boot must still leave a trace.
@@ -163,19 +164,23 @@ function RootLayoutInner() {
           every minute while active. Tripwire pauses still require the manual
           Sync button in Settings. */}
       <AutoSync />
-      {/* Default headerShown: false — detail/edit/new screens render their
-          own header. Without this, unregistered routes (invoice/[id], etc.)
-          fall back to Expo's default header which shows the raw filename. */}
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="login" />
-        <Stack.Screen name="company/setup" />
-        <Stack.Screen name="company/edit" />
-        <Stack.Screen
-          name="modal"
-          options={{ presentation: 'modal', title: 'Modal', headerShown: true }}
-        />
-      </Stack>
+      {/* App lock wraps the WHOLE navigator so no route or deep link renders
+          under it; AutoSync stays outside — the lock protects eyes, not sync. */}
+      <AppLockGate>
+        {/* Default headerShown: false — detail/edit/new screens render their
+            own header. Without this, unregistered routes (invoice/[id], etc.)
+            fall back to Expo's default header which shows the raw filename. */}
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="login" />
+          <Stack.Screen name="company/setup" />
+          <Stack.Screen name="company/edit" />
+          <Stack.Screen
+            name="modal"
+            options={{ presentation: 'modal', title: 'Modal', headerShown: true }}
+          />
+        </Stack>
+      </AppLockGate>
       <StatusBar style="auto" />
     </ThemeProvider>
   );
