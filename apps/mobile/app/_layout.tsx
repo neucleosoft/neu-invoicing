@@ -29,9 +29,13 @@ if (typeof (globalThis as { Buffer?: unknown }).Buffer === 'undefined') {
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { loadThemePreference } from '@/hooks/theme-preference';
+import { initAppLog } from '@/utils/appLog';
 import { runMigrations, schema, useDb } from '@/db';
 import { AuthProvider, useAuth } from '@/auth';
 import { AutoSync } from '@/sync/AutoSync';
+
+// Field logging first — a crash during boot must still leave a trace.
+initAppLog()
 
 // Load the persisted theme override before first render settles — a stale
 // 'system' flash for one frame is fine; a permanent ignore of the user's

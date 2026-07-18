@@ -40,6 +40,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     },
   },
 
+  // Diagnostics — field logging (electron/main/logger.ts)
+  log: {
+    openFolder: () => ipcRenderer.invoke("log:openFolder"),
+    send: (level: string, message: string) =>
+      ipcRenderer.invoke("log:fromRenderer", level, message),
+  },
+
   // Company
   company: {
     get: () => ipcRenderer.invoke("company:get"),

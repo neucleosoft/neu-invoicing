@@ -2,6 +2,7 @@ import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, DevSettings, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { ThemedText } from '@/components/themed-text';
@@ -22,6 +23,7 @@ import { getLadderInfo, restoreFromLadder, type LadderRungInfo } from '@/sync/la
 import { rowSyncNow } from '@/sync/rowSync';
 import { getBackupFrequency, setBackupFrequency, type BackupFrequency } from '@/sync/scheduledBackup';
 import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
+import { getLogFileUri } from '@/utils/appLog';
 import { getSetting, setSetting } from '@/utils/appSettings';
 import { INVOICE_TEMPLATE_INFO, type InvoiceTemplate } from '@neu/shared';
 import {
@@ -694,6 +696,32 @@ export default function SettingsScreen() {
             />
           </>
         )}
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Diagnostics</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Every error the app hits is written to a log file. If something
+          misbehaves, share it from here.
+        </ThemedText>
+        <Button
+          title="Share logs"
+          variant="secondary"
+          onPress={async () => {
+            try {
+              const uri = await getLogFileUri();
+              if (!uri) {
+                Alert.alert('No logs yet', 'Nothing has been logged on this device.');
+                return;
+              }
+              if (await Sharing.isAvailableAsync()) {
+                await Sharing.shareAsync(uri, { mimeType: 'text/plain', dialogTitle: 'Share app logs' });
+              }
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : 'Failed to share logs');
+            }
+          }}
+        />
       </ThemedView>
 
       <ThemedView style={styles.section}>

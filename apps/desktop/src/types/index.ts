@@ -645,6 +645,10 @@ declare global {
         setBackupFrequency: (freq: 'off' | 'daily' | 'weekly' | 'monthly') => Promise<{ success: boolean }>
         onSyncStatusChange: (callback: (status: SyncStatus) => void) => void
       }
+      log: {
+        openFolder: () => Promise<{ success: boolean }>
+        send: (level: string, message: string) => Promise<{ success: boolean }>
+      }
       company: {
         get: () => Promise<{ success: boolean; data?: Company; error?: string }>
         create: (data: Partial<Company>) => Promise<{ success: boolean; data?: Company; error?: string }>

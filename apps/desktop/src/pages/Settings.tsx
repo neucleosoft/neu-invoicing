@@ -936,6 +936,20 @@ const Settings = () => {
                     backup layer for your important business data.
                   </p>
                 </div>
+
+                <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-2">Diagnostics</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                    Every error the app hits is written to a log file. If something misbehaves,
+                    open the folder and share the newest <code>app.log</code>.
+                  </p>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => window.electronAPI.log.openFolder()}
+                  >
+                    Open logs folder
+                  </button>
+                </div>
               </div>
               {connectDialog}
             </>

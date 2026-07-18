@@ -37,6 +37,18 @@ export async function snapshotDbTo(
     await LegacyFS.deleteAsync(`${destUri}${suffix}`, { idempotent: true })
   }
   return withDbFileLock(async () => {
+    // INTEGRITY GATE: a corrupted database must fail the backup loudly instead
+    // of silently overwriting the good cloud copy with a corrupt one.
+    const verdictRow = (await liveDb.getFirstAsync('PRAGMA quick_check(1)')) as
+      | Record<string, unknown>
+      | null
+    const verdict = verdictRow ? Object.values(verdictRow)[0] : undefined
+    if (verdict !== 'ok') {
+      console.error('[integrity] quick_check failed before snapshot:', JSON.stringify(verdictRow))
+      throw new Error(
+        'Database integrity check FAILED — backup aborted so a corrupt copy never overwrites a good one. Share logs from Settings.',
+      )
+    }
     try {
       const plainPath = decodeURIComponent(destUri.replace(/^file:\/\//, ''))
       await liveDb.execAsync(`VACUUM INTO '${plainPath.replace(/'/g, "''")}'`)

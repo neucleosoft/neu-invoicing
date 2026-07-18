@@ -6,6 +6,7 @@ import path from 'path'
 import fs from 'fs'
 
 import { app, BrowserWindow, protocol } from 'electron'
+import { initLogging } from './logger'
 import { setupDatabase } from './database'
 import { setupAuthHandlers } from './auth'
 import { setupSyncHandlers, startBackupScheduler } from './sync'
@@ -87,6 +88,9 @@ const createWindow = () => {
 }
 
 app.whenReady().then(async () => {
+  // File logging FIRST — so even a setupDatabase failure leaves a trace.
+  initLogging()
+
   // Initialize database
   await setupDatabase()
 
