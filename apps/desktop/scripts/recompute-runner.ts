@@ -4,9 +4,9 @@
  *   pnpm run recompute            # DRY RUN — rebuilds every number, prints what would change
  *   pnpm run recompute -- --apply # writes the rebuilt numbers back (only after a clean dry run)
  *
- * Unlike scripts/verify-recompute.js (which re-derives the formulas in plain JS), this calls
- * the SAME electron/main/recompute.ts the app uses, which calls the SAME shared engine. So a
- * green run here proves the real engine — not a parallel copy of it — against your data.
+ * Calls the SAME shared recomputeAllDb the app uses (through drizzle/libsql
+ * since the Prisma→Drizzle migration), so a green run here proves the real
+ * engine — not a parallel copy of it — against your data.
  *
  * It's a .ts file because it imports the TS engine; the `recompute` npm script bundles it with
  * esbuild (already a dependency) before running, since the repo has no standalone TS runner.
@@ -15,8 +15,9 @@
 import path from 'path'
 import os from 'os'
 import fs from 'fs'
-import { PrismaClient } from '@prisma/client'
-import { recomputeAll, formatRecomputeReport } from '../electron/main/recompute'
+import { createClient } from '@libsql/client'
+import { drizzle } from 'drizzle-orm/libsql'
+import { formatRecomputeReport, recomputeAllDb } from '../../../packages/shared/src/index'
 
 const APPDATA = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
 const DB_PATH = path.join(APPDATA, 'neu-invoicing', 'neuinvoicing.db')
@@ -27,17 +28,16 @@ async function main() {
     console.error(`Database not found: ${DB_PATH}`)
     process.exit(1)
   }
-  const prisma = new PrismaClient({ datasources: { db: { url: `file:${DB_PATH}` } } })
-  await prisma.$connect()
+  const client = createClient({ url: `file:${DB_PATH}` })
   console.log(`\nDB: ${DB_PATH}`)
   if (apply) {
     console.log(`\n⚠️  APPLY MODE — this WILL overwrite stored numbers with the rebuilt ones.`)
     console.log(`   Only do this after a dry run you've eyeballed. Dirty documents become wrong balances.\n`)
   }
-  const report = await recomputeAll(prisma, { apply })
+  const report = await recomputeAllDb(drizzle(client), { apply })
   console.log(formatRecomputeReport(report))
   console.log('')
-  await prisma.$disconnect()
+  client.close()
 }
 
 main().catch((e) => {

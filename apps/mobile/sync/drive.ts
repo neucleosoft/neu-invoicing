@@ -9,7 +9,7 @@ import * as LegacyFS from 'expo-file-system/legacy'
 import * as SecureStore from 'expo-secure-store'
 import * as SQLite from 'expo-sqlite'
 
-import drizzleMigrations from '../drizzle/migrations'
+import drizzleMigrations from '../../../packages/shared/drizzle/migrations'
 import { snapshotDbTo, withDbFileLock } from './dbFileLock'
 import { getDeviceId } from './deviceId'
 

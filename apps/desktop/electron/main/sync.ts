@@ -1,9 +1,10 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { google } from 'googleapis'
-import { PrismaClient } from '@prisma/client'
+import { createClient } from '@libsql/client'
 import { getOAuth2Client, isAuthError, clearStoredCredentials } from './auth'
 import { eq, syncMetadata } from '@neu/shared'
-import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
+import { getDatabasePath, reconnectDatabase } from './database'
+import { ensureTablesExist } from './bootMigrate'
 import { closeDrizzle, getDb } from './db'
 import { snapshotDatabaseTo, withDbFileLock } from './dbLock'
 import fs from 'fs'
@@ -463,7 +464,6 @@ const replaceLocalDbFromDrive = async (
   // DB-file lock so it WAITS for an in-flight row-sync merge or snapshot to
   // finish instead of killing it mid-transaction via $disconnect.
   await withDbFileLock(async () => {
-    await getPrisma().$disconnect()
     closeDrizzle() // the libsql handle would block the rename on Windows
     for (const suffix of ['-wal', '-shm', '-journal']) {
       const sidecar = `${dbPath}${suffix}`
@@ -498,7 +498,7 @@ const replaceLocalDbFromDrive = async (
       try { fs.unlinkSync(tmpPath) } catch { /* keep the spare copy */ }
     }
 
-    ensureTablesExist(`file:${dbPath}`)
+    await ensureTablesExist(dbPath)
     await reconnectDatabase()
   })
 }
@@ -674,14 +674,14 @@ const buildStrippedLedgerCopy = async (): Promise<string> => {
   // WAL content in without a separate checkpoint.
   await snapshotDatabaseTo(tmpPath)
 
-  const tmp = new PrismaClient({ datasources: { db: { url: `file:${tmpPath}` } } })
+  const tmp = createClient({ url: `file:${tmpPath}` })
   try {
-    await tmp.$executeRawUnsafe(`UPDATE "PurchaseBill" SET "attachmentData" = NULL`)
+    await tmp.execute(`UPDATE "PurchaseBill" SET "attachmentData" = NULL`)
     // fileData is NOT NULL — empty blob, not NULL.
-    await tmp.$executeRawUnsafe(`UPDATE "PreviousInvoice" SET "fileData" = X''`)
-    await tmp.$executeRawUnsafe(`VACUUM`)
+    await tmp.execute(`UPDATE "PreviousInvoice" SET "fileData" = X''`)
+    await tmp.execute(`VACUUM`)
   } finally {
-    await tmp.$disconnect()
+    tmp.close()
   }
   return tmpPath
 }
