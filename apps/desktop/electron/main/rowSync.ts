@@ -218,6 +218,56 @@ async function pushBillImages(
   return pushed
 }
 
+// BACKSTOP SWEEP (throttled, ~3 days): push any photo/archive file that never
+// reached Drive, regardless of the 30-day diary window. Without it, a device
+// whose pushes kept failing for 30 straight days would strand its photos
+// locally forever — and rows older than the window (e.g. the pre-sync archive)
+// would never upload their files at all. Only MISSING/0-byte files are pushed
+// (staleness is the windowed push's job), pre-filtered against the single
+// img-* listing so a quiet sweep costs one Drive call.
+const PHOTO_SWEEP_THROTTLE_MS = 3 * 24 * 60 * 60 * 1000
+const LAST_PHOTO_SWEEP_KEY = 'last_photo_sweep_at'
+
+async function sweepMissingPhotosIfDue(drive: any, prisma: any): Promise<number> {
+  try {
+    const last = store.get(LAST_PHOTO_SWEEP_KEY) as number | undefined
+    const now = Date.now()
+    if (last && now - last < PHOTO_SWEEP_THROTTLE_MS) return 0
+    store.set(LAST_PHOTO_SWEEP_KEY, now)
+
+    const bills = await prisma.purchaseBill.findMany({
+      where: { attachmentData: { not: null } },
+      select: { id: true },
+    })
+    const prevs = await prisma.previousInvoice.findMany({ select: { id: true } })
+    if (bills.length === 0 && prevs.length === 0) return 0
+
+    const images = await listDriveImages(drive)
+    const missing = (name: string) => {
+      const f = images.get(name)
+      return !f || f.size === 0
+    }
+    const billIds = bills.map((b: any) => b.id).filter((id: string) => missing(billImageFileName(id)))
+    const prevIds = prevs.map((p: any) => p.id).filter((id: string) => missing(previousInvoiceFileName(id)))
+    if (billIds.length === 0 && prevIds.length === 0) return 0
+    console.log(`[rowSync] photo sweep: ${billIds.length} bill photo(s), ${prevIds.length} archive file(s) missing on Drive`)
+
+    // Chunked so the blob loads stay bounded (the first archive sweep can be
+    // hundreds of files).
+    let pushed = 0
+    for (let i = 0; i < billIds.length; i += 20) {
+      pushed += await pushBillImages(drive, prisma, billIds.slice(i, i + 20), images)
+    }
+    for (let i = 0; i < prevIds.length; i += 20) {
+      pushed += await pushPreviousInvoiceFiles(drive, prisma, prevIds.slice(i, i + 20), images)
+    }
+    return pushed
+  } catch (e) {
+    console.warn('[rowSync] photo sweep failed (best-effort, next due run retries):', e)
+    return 0
+  }
+}
+
 async function pushPreviousInvoiceFiles(
   drive: any,
   prisma: any,
@@ -392,6 +442,9 @@ async function purgeArchivedDocs(drive: any): Promise<void> {
       where: { deletedAt: { not: null, lte: cutoff } },
       select: { id: true },
     })
+    // One img-* listing for the whole purge run instead of one Drive lookup
+    // per archived file.
+    const images = prevs.length > 0 ? await listDriveImages(drive) : new Map()
     for (const pi of prevs) {
       await prisma.$transaction([
         prisma.previousInvoiceItem.deleteMany({ where: { previousInvoiceId: pi.id } }),
@@ -400,7 +453,7 @@ async function purgeArchivedDocs(drive: any): Promise<void> {
       purged++
       // Free the archived file's Drive object — best-effort.
       try {
-        const found = await findDriveImage(drive, previousInvoiceFileName(pi.id))
+        const found = images.get(previousInvoiceFileName(pi.id))
         if (found) await drive.files.delete({ fileId: found.id })
       } catch { /* the next purge run (or the other device) retries */ }
     }
@@ -500,6 +553,7 @@ export const rowSyncNow = async (
         (await pushBillImages(drive, prisma, changedBillIds, images)) +
         (await pushPreviousInvoiceFiles(drive, prisma, changedPrevInvIds, images))
     }
+    photosPushed += await sweepMissingPhotosIfDue(drive, prisma)
 
     store.set(LAST_ROW_SYNC_KEY, Date.now())
     store.delete(PENDING_REMOVALS_KEY)

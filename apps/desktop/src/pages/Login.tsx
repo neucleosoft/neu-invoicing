@@ -49,6 +49,14 @@ const Login = () => {
         // data. (An earlier version restored from here; that path is gone.)
         const companyResult = await window.electronAPI.company.get()
 
+        // Fresh device (no company): reload so the boot flow re-runs and can
+        // show the restore-from-cloud offer THIS session, instead of only
+        // after a manual app relaunch.
+        if (!(companyResult.success && companyResult.data)) {
+          window.location.reload()
+          return
+        }
+
         // Now update state — React renders the right page in one go
         setAuthStatus({ isAuthenticated: true, user: result.user })
         if (companyResult.success && companyResult.data) {

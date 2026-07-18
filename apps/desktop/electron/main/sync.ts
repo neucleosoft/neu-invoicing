@@ -89,6 +89,10 @@ export const resetSyncBaseline = () => {
   store.delete(LAST_KNOWN_LOCAL_MTIME_KEY)
   store.delete(LAST_UPLOAD_TIMESTAMP_KEY)
   store.delete(LAST_SCHEDULED_SYNC_KEY)
+  // A pending-tripwire flag describes the PRE-restore database — surviving the
+  // restore it would show a stale "removals pending" banner until the next
+  // successful sync. (Key literal matches rowSync.ts's PENDING_REMOVALS_KEY.)
+  store.delete('row_sync_pending_removals')
 }
 
 // Scheduled-backup configuration. Per-device (electron-store, not synced).
@@ -533,6 +537,9 @@ export const syncDownload = async (): Promise<{ success: boolean; error?: string
     }
 
     await replaceLocalDbFromDrive(drive, cloudFile.id!, expectedSize)
+    // Same reasoning as resetSyncBaseline: a tripwire pause recorded against
+    // the replaced database is meaningless for the restored one.
+    store.delete('row_sync_pending_removals')
 
     if (cloudFile.modifiedTime) {
       setLastKnownCloudMtime(cloudFile.modifiedTime)

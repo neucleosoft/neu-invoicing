@@ -10,6 +10,7 @@
 
 import { eq, inArray, isNotNull, and } from 'drizzle-orm'
 import * as LegacyFS from 'expo-file-system/legacy'
+import * as SecureStore from 'expo-secure-store'
 import { billImageFileName, previousInvoiceFileName, toEpochMs } from '@neu/shared'
 
 import { schema, useDb } from '@/db'
@@ -210,6 +211,50 @@ export async function pushPreviousInvoiceFiles(
     }
   }
   return pushed
+}
+
+// BACKSTOP SWEEP (throttled, ~3 days — mirrors desktop's
+// sweepMissingPhotosIfDue): push any photo/archive file that never reached
+// Drive, regardless of the 30-day diary window. Only MISSING/0-byte files are
+// pushed, pre-filtered against the single img-* listing; chunked so blob loads
+// stay bounded on the phone.
+const PHOTO_SWEEP_THROTTLE_MS = 3 * 24 * 60 * 60 * 1000
+const LAST_PHOTO_SWEEP_KEY = 'neu.sync.lastPhotoSweepAt'
+
+export async function sweepMissingPhotosIfDue(db: Db, accessToken: string): Promise<number> {
+  try {
+    const last = await SecureStore.getItemAsync(LAST_PHOTO_SWEEP_KEY)
+    const now = Date.now()
+    if (last && now - Number(last) < PHOTO_SWEEP_THROTTLE_MS) return 0
+    await SecureStore.setItemAsync(LAST_PHOTO_SWEEP_KEY, String(now))
+
+    const bills = await db
+      .select({ id: schema.purchaseBill.id })
+      .from(schema.purchaseBill)
+      .where(isNotNull(schema.purchaseBill.attachmentData))
+    const prevs = await db.select({ id: schema.previousInvoice.id }).from(schema.previousInvoice)
+    if (bills.length === 0 && prevs.length === 0) return 0
+
+    const images = await listDriveImages(accessToken)
+    const missing = (name: string) => {
+      const f = images.get(name)
+      return !f || f.size === 0
+    }
+    const billIds = bills.map((b) => b.id).filter((id) => missing(billImageFileName(id)))
+    const prevIds = prevs.map((p) => p.id).filter((id) => missing(previousInvoiceFileName(id)))
+    if (billIds.length === 0 && prevIds.length === 0) return 0
+
+    let pushed = 0
+    for (let i = 0; i < billIds.length; i += 10) {
+      pushed += await pushBillImages(db, accessToken, billIds.slice(i, i + 10), images)
+    }
+    for (let i = 0; i < prevIds.length; i += 10) {
+      pushed += await pushPreviousInvoiceFiles(db, accessToken, prevIds.slice(i, i + 10), images)
+    }
+    return pushed
+  } catch {
+    return 0 // best-effort — the next due run retries
+  }
 }
 
 /**

@@ -29,7 +29,12 @@ import { recomputeAll } from '@/utils/recompute'
 import { appendSyncActivity } from './activityLog'
 import { withDbFileLock } from './dbFileLock'
 import { getDeviceId } from './deviceId'
-import { listDriveImages, pushBillImages, pushPreviousInvoiceFiles } from './imageStore'
+import {
+  listDriveImages,
+  pushBillImages,
+  pushPreviousInvoiceFiles,
+  sweepMissingPhotosIfDue,
+} from './imageStore'
 
 type Db = ReturnType<typeof useDb>
 
@@ -366,6 +371,7 @@ export async function rowSyncNow(
         (await pushBillImages(db, accessToken, changedBillIds, images)) +
         (await pushPreviousInvoiceFiles(db, accessToken, changedPrevInvIds, images))
     }
+    photosPushed += await sweepMissingPhotosIfDue(db, accessToken)
 
     return {
       success: true,
