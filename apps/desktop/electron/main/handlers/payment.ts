@@ -1,5 +1,11 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { applyPayment, desc, eq, inArray, reversePayment, type PaymentEffect } from '@neu/shared'
+import { getDb, getDbClient, schema } from '../db'
+
+// The money brain now comes from @neu/shared/paymentLogic — the EXACT code
+// mobile runs (applyPayment/reversePayment are precise inverses; adjusts
+// preserve updatedAt+hlc per the F5 machine-write rule). This file only wires
+// it to IPC and keeps the desktop-only legacy backfills.
 
 // One-time data backfill — runs on every launch, no-op once aligned. Old desktop invoices
 // stamped `amountPaid` as a column with NO PaymentTransaction row behind it. The recompute
@@ -9,17 +15,30 @@ import { getPrisma } from '../database'
 // safe to run automatically on every device. Desktop-only: mobile always wrote a real row.
 // (Leaves cancelled/reversed invoices and the ambiguous "PAID with amountPaid 0" cases alone.)
 export async function backfillInlinePayments(): Promise<void> {
-  const prisma = getPrisma()
+  const db = getDb()
   try {
     const [invoices, payments] = await Promise.all([
-      prisma.salesInvoice.findMany({
-        where: { type: 'INVOICE' },
-        select: { id: true, customerId: true, invoiceDate: true, amountPaid: true, status: true, deletedAt: true, cancelledAt: true },
-      }),
-      prisma.paymentTransaction.findMany({
-        where: { type: 'PAYMENT_IN' },
-        select: { salesInvoiceId: true, amount: true, deletedAt: true, cancelledAt: true },
-      }),
+      db
+        .select({
+          id: schema.salesInvoice.id,
+          customerId: schema.salesInvoice.customerId,
+          invoiceDate: schema.salesInvoice.invoiceDate,
+          amountPaid: schema.salesInvoice.amountPaid,
+          status: schema.salesInvoice.status,
+          deletedAt: schema.salesInvoice.deletedAt,
+          cancelledAt: schema.salesInvoice.cancelledAt,
+        })
+        .from(schema.salesInvoice)
+        .where(eq(schema.salesInvoice.type, 'INVOICE')),
+      db
+        .select({
+          salesInvoiceId: schema.paymentTransaction.salesInvoiceId,
+          amount: schema.paymentTransaction.amount,
+          deletedAt: schema.paymentTransaction.deletedAt,
+          cancelledAt: schema.paymentTransaction.cancelledAt,
+        })
+        .from(schema.paymentTransaction)
+        .where(eq(schema.paymentTransaction.type, 'PAYMENT_IN')),
     ])
     const paidRows = new Map<string, number>()
     for (const p of payments)
@@ -32,22 +51,20 @@ export async function backfillInlinePayments(): Promise<void> {
       .filter(({ gap }) => gap > 0.01)
     if (gaps.length === 0) return
 
-    await prisma.$transaction(
-      gaps.map(({ inv, gap }) =>
-        prisma.paymentTransaction.create({
-          data: {
-            type: 'PAYMENT_IN',
-            customerId: inv.customerId,
-            amount: gap,
-            paymentMode: 'CASH',
-            paymentDate: inv.invoiceDate,
-            referenceType: 'INVOICE',
-            salesInvoiceId: inv.id,
-            notes: 'Paid with invoice (backfilled)',
-          },
-        }),
-      ),
-    )
+    await db.transaction(async (tx) => {
+      for (const { inv, gap } of gaps) {
+        await tx.insert(schema.paymentTransaction).values({
+          type: 'PAYMENT_IN',
+          customerId: inv.customerId,
+          amount: gap,
+          paymentMode: 'CASH',
+          paymentDate: inv.invoiceDate,
+          referenceType: 'INVOICE',
+          salesInvoiceId: inv.id,
+          notes: 'Paid with invoice (backfilled)',
+        })
+      }
+    })
     console.log(`[inlinePaymentBackfill] recorded ${gaps.length} missing payment(s)`)
   } catch (e) {
     console.error('[inlinePaymentBackfill] failed, app continues:', e)
@@ -61,16 +78,28 @@ export async function backfillInlinePayments(): Promise<void> {
 // amount — this records the missing PAYMENT_OUT rows so the rebuild sees the money.
 // Additive + idempotent, same rules as the sales backfill above.
 export async function backfillInlinePurchasePayments(): Promise<void> {
-  const prisma = getPrisma()
+  const db = getDb()
   try {
     const [bills, payments] = await Promise.all([
-      prisma.purchaseBill.findMany({
-        select: { id: true, supplierId: true, billDate: true, amountPaid: true, deletedAt: true, cancelledAt: true },
-      }),
-      prisma.paymentTransaction.findMany({
-        where: { type: 'PAYMENT_OUT' },
-        select: { purchaseBillId: true, amount: true, deletedAt: true, cancelledAt: true },
-      }),
+      db
+        .select({
+          id: schema.purchaseBill.id,
+          supplierId: schema.purchaseBill.supplierId,
+          billDate: schema.purchaseBill.billDate,
+          amountPaid: schema.purchaseBill.amountPaid,
+          deletedAt: schema.purchaseBill.deletedAt,
+          cancelledAt: schema.purchaseBill.cancelledAt,
+        })
+        .from(schema.purchaseBill),
+      db
+        .select({
+          purchaseBillId: schema.paymentTransaction.purchaseBillId,
+          amount: schema.paymentTransaction.amount,
+          deletedAt: schema.paymentTransaction.deletedAt,
+          cancelledAt: schema.paymentTransaction.cancelledAt,
+        })
+        .from(schema.paymentTransaction)
+        .where(eq(schema.paymentTransaction.type, 'PAYMENT_OUT')),
     ])
     const paidRows = new Map<string, number>()
     for (const p of payments)
@@ -83,22 +112,20 @@ export async function backfillInlinePurchasePayments(): Promise<void> {
       .filter(({ gap }) => gap > 0.01)
     if (gaps.length === 0) return
 
-    await prisma.$transaction(
-      gaps.map(({ b, gap }) =>
-        prisma.paymentTransaction.create({
-          data: {
-            type: 'PAYMENT_OUT',
-            supplierId: b.supplierId,
-            amount: gap,
-            paymentMode: 'CASH',
-            paymentDate: b.billDate,
-            referenceType: 'BILL',
-            purchaseBillId: b.id,
-            notes: 'Paid with bill (backfilled)',
-          },
-        }),
-      ),
-    )
+    await db.transaction(async (tx) => {
+      for (const { b, gap } of gaps) {
+        await tx.insert(schema.paymentTransaction).values({
+          type: 'PAYMENT_OUT',
+          supplierId: b.supplierId,
+          amount: gap,
+          paymentMode: 'CASH',
+          paymentDate: b.billDate,
+          referenceType: 'BILL',
+          purchaseBillId: b.id,
+          notes: 'Paid with bill (backfilled)',
+        })
+      }
+    })
     console.log(`[inlinePurchaseBackfill] recorded ${gaps.length} missing payment(s)`)
   } catch (e) {
     console.error('[inlinePurchaseBackfill] failed, app continues:', e)
@@ -111,9 +138,8 @@ export async function backfillInlinePurchasePayments(): Promise<void> {
 // old rows keep updatedAt NULL and newest-wins sync has nothing to compare.
 // Idempotent single statement; new rows are stamped by the client.
 export async function backfillPaymentUpdatedAt(): Promise<void> {
-  const prisma = getPrisma()
   try {
-    await prisma.$executeRawUnsafe(
+    await getDbClient().execute(
       `UPDATE "PaymentTransaction" SET "updatedAt" = "createdAt" WHERE "updatedAt" IS NULL`,
     )
   } catch (e) {
@@ -121,87 +147,8 @@ export async function backfillPaymentUpdatedAt(): Promise<void> {
   }
 }
 
-// Recompute an invoice/bill payment status from its total and amount paid.
-const computeStatus = (total: number, paid: number): 'PAID' | 'PARTIAL' | 'DRAFT' => {
-  if (total - paid <= 0) return 'PAID'
-  if (paid > 0) return 'PARTIAL'
-  return 'DRAFT'
-}
-
-// Apply a payment's effect: reduce the party's balance and credit the linked
-// invoice/bill. Used when a payment is (re-)applied.
-const applyPayment = async (tx: any, p: any) => {
-  if (p.type === 'PAYMENT_IN') {
-    if (p.customerId) {
-      await tx.customer.update({ where: { id: p.customerId }, data: { currentBalance: { decrement: p.amount } } })
-    }
-    if (p.salesInvoiceId) {
-      const inv = await tx.salesInvoice.findUnique({ where: { id: p.salesInvoiceId } })
-      if (inv) {
-        const paid = inv.amountPaid + p.amount
-        // updatedAt preserved: posting money against a doc is a derived-column
-        // write, not a content edit — auto-bumping it would let this machine
-        // write beat a real human edit in sync's newest-edit-wins.
-        await tx.salesInvoice.update({
-          where: { id: p.salesInvoiceId },
-          data: { amountPaid: paid, balanceDue: inv.totalAmount - paid, status: computeStatus(inv.totalAmount, paid), updatedAt: inv.updatedAt },
-        })
-      }
-    }
-  } else {
-    if (p.supplierId) {
-      await tx.supplier.update({ where: { id: p.supplierId }, data: { currentBalance: { decrement: p.amount } } })
-    }
-    if (p.purchaseBillId) {
-      const bill = await tx.purchaseBill.findUnique({ where: { id: p.purchaseBillId } })
-      if (bill) {
-        const paid = bill.amountPaid + p.amount
-        await tx.purchaseBill.update({
-          where: { id: p.purchaseBillId },
-          data: { amountPaid: paid, balanceDue: bill.totalAmount - paid, status: computeStatus(bill.totalAmount, paid), updatedAt: bill.updatedAt },
-        })
-      }
-    }
-  }
-}
-
-// Reverse a payment's effect — the exact inverse of applyPayment. Used when a
-// payment is deleted or before an update re-applies the new values. Exported so
-// purchase:cancel can reverse a bill's linked payments before cancelling it.
-export const reversePayment = async (tx: any, p: any) => {
-  if (p.type === 'PAYMENT_IN') {
-    if (p.customerId) {
-      await tx.customer.update({ where: { id: p.customerId }, data: { currentBalance: { increment: p.amount } } })
-    }
-    if (p.salesInvoiceId) {
-      const inv = await tx.salesInvoice.findUnique({ where: { id: p.salesInvoiceId } })
-      if (inv) {
-        const paid = inv.amountPaid - p.amount
-        await tx.salesInvoice.update({
-          where: { id: p.salesInvoiceId },
-          data: { amountPaid: paid, balanceDue: inv.totalAmount - paid, status: computeStatus(inv.totalAmount, paid), updatedAt: inv.updatedAt },
-        })
-      }
-    }
-  } else {
-    if (p.supplierId) {
-      await tx.supplier.update({ where: { id: p.supplierId }, data: { currentBalance: { increment: p.amount } } })
-    }
-    if (p.purchaseBillId) {
-      const bill = await tx.purchaseBill.findUnique({ where: { id: p.purchaseBillId } })
-      if (bill) {
-        const paid = bill.amountPaid - p.amount
-        await tx.purchaseBill.update({
-          where: { id: p.purchaseBillId },
-          data: { amountPaid: paid, balanceDue: bill.totalAmount - paid, status: computeStatus(bill.totalAmount, paid), updatedAt: bill.updatedAt },
-        })
-      }
-    }
-  }
-}
-
 export const setupPaymentHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
   // Record payment in (from customer)
   ipcMain.handle('payment:recordPaymentIn', async (_, data) => {
@@ -210,9 +157,10 @@ export const setupPaymentHandlers = () => {
         return { success: false, error: 'Invalid payment: customerId and positive amount required' }
       }
 
-      const payment = await prisma.$transaction(async (tx: any) => {
-        const created = await tx.paymentTransaction.create({
-          data: {
+      const payment = await db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(schema.paymentTransaction)
+          .values({
             type: 'PAYMENT_IN',
             customerId: data.customerId,
             amount: data.amount,
@@ -222,44 +170,12 @@ export const setupPaymentHandlers = () => {
             referenceId: data.referenceId,
             salesInvoiceId: data.referenceType === 'INVOICE' ? data.referenceId : null,
             notes: data.notes
-          }
-        })
-
-        // Update customer balance
-        await tx.customer.update({
-          where: { id: data.customerId },
-          data: { currentBalance: { decrement: data.amount } }
-        })
-
-        // Update invoice if reference is provided
-        const invoiceId = data.referenceType === 'INVOICE' ? data.referenceId : null
-        if (invoiceId) {
-          const invoice = await tx.salesInvoice.findUnique({
-            where: { id: invoiceId }
           })
+          .returning()
 
-          if (invoice) {
-            const newAmountPaid = invoice.amountPaid + data.amount
-            const newBalanceDue = invoice.totalAmount - newAmountPaid
-
-            let newStatus = invoice.status
-            if (newBalanceDue <= 0) {
-              newStatus = 'PAID'
-            } else if (newAmountPaid > 0) {
-              newStatus = 'PARTIAL'
-            }
-
-            await tx.salesInvoice.update({
-              where: { id: invoiceId },
-              data: {
-                amountPaid: newAmountPaid,
-                balanceDue: newBalanceDue,
-                status: newStatus
-              }
-            })
-          }
-        }
-
+        // Shared money brain: party balance + linked-invoice amountPaid/
+        // balanceDue/status, updatedAt+hlc preserved on the doc (F5).
+        await applyPayment(tx, created as unknown as PaymentEffect)
         return created
       })
 
@@ -279,9 +195,10 @@ export const setupPaymentHandlers = () => {
         return { success: false, error: 'Invalid payment: supplierId and positive amount required' }
       }
 
-      const payment = await prisma.$transaction(async (tx: any) => {
-        const created = await tx.paymentTransaction.create({
-          data: {
+      const payment = await db.transaction(async (tx) => {
+        const [created] = await tx
+          .insert(schema.paymentTransaction)
+          .values({
             type: 'PAYMENT_OUT',
             supplierId: data.supplierId,
             amount: data.amount,
@@ -291,44 +208,10 @@ export const setupPaymentHandlers = () => {
             referenceId: data.referenceId,
             purchaseBillId: data.referenceType === 'BILL' ? data.referenceId : null,
             notes: data.notes
-          }
-        })
-
-        // Update supplier balance (decrement = we paid the supplier, reducing what we owe)
-        await tx.supplier.update({
-          where: { id: data.supplierId },
-          data: { currentBalance: { decrement: data.amount } }
-        })
-
-        // Update purchase bill if reference is provided
-        const billId = data.referenceType === 'BILL' ? data.referenceId : null
-        if (billId) {
-          const bill = await tx.purchaseBill.findUnique({
-            where: { id: billId }
           })
+          .returning()
 
-          if (bill) {
-            const newAmountPaid = bill.amountPaid + data.amount
-            const newBalanceDue = bill.totalAmount - newAmountPaid
-
-            let newStatus = bill.status
-            if (newBalanceDue <= 0) {
-              newStatus = 'PAID'
-            } else if (newAmountPaid > 0) {
-              newStatus = 'PARTIAL'
-            }
-
-            await tx.purchaseBill.update({
-              where: { id: billId },
-              data: {
-                amountPaid: newAmountPaid,
-                balanceDue: newBalanceDue,
-                status: newStatus
-              }
-            })
-          }
-        }
-
+        await applyPayment(tx, created as unknown as PaymentEffect)
         return created
       })
 
@@ -344,21 +227,42 @@ export const setupPaymentHandlers = () => {
   // Get all payments
   ipcMain.handle('payment:getAll', async (_, type?: string) => {
     try {
-      const where = type ? { type: type as any } : {}
-      const payments = await prisma.paymentTransaction.findMany({
-        where,
-        include: {
-          customer: true,
-          supplier: true,
-          purchaseBill: {
-            include: {
-              supplier: true
-            }
-          }
-        },
-        orderBy: { paymentDate: 'desc' }
-      })
-      return { success: true, data: payments }
+      const payments: any[] = await db
+        .select()
+        .from(schema.paymentTransaction)
+        .where(type ? eq(schema.paymentTransaction.type, type) : undefined)
+        .orderBy(desc(schema.paymentTransaction.paymentDate))
+
+      // Attach customer / supplier / linked bill (with its supplier) the way
+      // Prisma's include used to.
+      const customerIds = [...new Set(payments.map((p) => p.customerId).filter(Boolean))] as string[]
+      const supplierIds = [...new Set(payments.map((p) => p.supplierId).filter(Boolean))] as string[]
+      const billIds = [...new Set(payments.map((p) => p.purchaseBillId).filter(Boolean))] as string[]
+      const [customers, suppliers, bills] = await Promise.all([
+        customerIds.length ? db.select().from(schema.customer).where(inArray(schema.customer.id, customerIds)) : Promise.resolve([]),
+        supplierIds.length ? db.select().from(schema.supplier).where(inArray(schema.supplier.id, supplierIds)) : Promise.resolve([]),
+        billIds.length
+          ? db
+              .select({
+                bill: schema.purchaseBill,
+                supplier: schema.supplier,
+              })
+              .from(schema.purchaseBill)
+              .leftJoin(schema.supplier, eq(schema.purchaseBill.supplierId, schema.supplier.id))
+              .where(inArray(schema.purchaseBill.id, billIds))
+          : Promise.resolve([]),
+      ])
+      const customerById = new Map((customers as any[]).map((c) => [c.id, c]))
+      const supplierById = new Map((suppliers as any[]).map((s) => [s.id, s]))
+      const billById = new Map((bills as any[]).map((r) => [r.bill.id, { ...r.bill, supplier: r.supplier }]))
+
+      const data = payments.map((p) => ({
+        ...p,
+        customer: p.customerId ? (customerById.get(p.customerId) ?? null) : null,
+        supplier: p.supplierId ? (supplierById.get(p.supplierId) ?? null) : null,
+        purchaseBill: p.purchaseBillId ? (billById.get(p.purchaseBillId) ?? null) : null,
+      }))
+      return { success: true, data }
     } catch (error) {
       return {
         success: false,
@@ -370,28 +274,29 @@ export const setupPaymentHandlers = () => {
   // Update a payment — reverse the original effect, then apply the new values.
   ipcMain.handle('payment:update', async (_, id: string, data) => {
     try {
-      const existing = await prisma.paymentTransaction.findUnique({ where: { id } })
+      const [existing] = await db.select().from(schema.paymentTransaction).where(eq(schema.paymentTransaction.id, id)).limit(1)
       if (!existing) return { success: false, error: 'Payment not found' }
       if (!data.amount || data.amount <= 0) {
         return { success: false, error: 'A positive amount is required' }
       }
 
-      const updated = await prisma.$transaction(async (tx: any) => {
-        await reversePayment(tx, existing)
+      const updated = await db.transaction(async (tx) => {
+        await reversePayment(tx, existing as unknown as PaymentEffect)
 
-        const row = await tx.paymentTransaction.update({
-          where: { id },
-          data: {
+        const [row] = await tx
+          .update(schema.paymentTransaction)
+          .set({
             customerId: existing.type === 'PAYMENT_IN' ? data.customerId ?? existing.customerId : existing.customerId,
             supplierId: existing.type === 'PAYMENT_OUT' ? data.supplierId ?? existing.supplierId : existing.supplierId,
             amount: data.amount,
             paymentMode: data.paymentMode || existing.paymentMode,
             paymentDate: data.paymentDate ? new Date(data.paymentDate) : existing.paymentDate,
             notes: data.notes ?? existing.notes,
-          },
-        })
+          })
+          .where(eq(schema.paymentTransaction.id, id))
+          .returning()
 
-        await applyPayment(tx, row)
+        await applyPayment(tx, row as unknown as PaymentEffect)
         return row
       })
 
@@ -409,14 +314,14 @@ export const setupPaymentHandlers = () => {
   // record, marked Cancelled, forever. Terminal — there is no restore.
   ipcMain.handle('payment:cancel', async (_, id: string) => {
     try {
-      const existing = await prisma.paymentTransaction.findUnique({ where: { id } })
+      const [existing] = await db.select().from(schema.paymentTransaction).where(eq(schema.paymentTransaction.id, id)).limit(1)
       if (!existing) return { success: false, error: 'Payment not found' }
       // Already cancelled — never reverse the balance twice (idempotency guard).
       if (existing.cancelledAt) return { success: true }
 
-      await prisma.$transaction(async (tx: any) => {
-        await reversePayment(tx, existing)
-        await tx.paymentTransaction.update({ where: { id }, data: { cancelledAt: new Date() } })
+      await db.transaction(async (tx) => {
+        await reversePayment(tx, existing as unknown as PaymentEffect)
+        await tx.update(schema.paymentTransaction).set({ cancelledAt: new Date() }).where(eq(schema.paymentTransaction.id, id))
       })
 
       return { success: true }

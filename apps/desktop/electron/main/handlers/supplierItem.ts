@@ -1,21 +1,34 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { asc, eq } from '@neu/shared'
+import { getDb, schema } from '../db'
 
 export const setupSupplierItemHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
   // Get all supplier items, optionally filtered by supplier
   ipcMain.handle('supplierItem:getAll', async (_, supplierId?: string) => {
     try {
-      const where = supplierId ? { supplierId } : {}
-      const items = await prisma.supplierItem.findMany({
-        where,
-        include: {
-          supplier: { select: { id: true, name: true } },
-          linkedItem: { select: { id: true, name: true, currentStock: true, trackStock: true } }
-        },
-        orderBy: { name: 'asc' }
-      })
+      const rows = await db
+        .select({
+          item: schema.supplierItem,
+          supplier: { id: schema.supplier.id, name: schema.supplier.name },
+          linkedItem: {
+            id: schema.item.id,
+            name: schema.item.name,
+            currentStock: schema.item.currentStock,
+            trackStock: schema.item.trackStock,
+          },
+        })
+        .from(schema.supplierItem)
+        .leftJoin(schema.supplier, eq(schema.supplierItem.supplierId, schema.supplier.id))
+        .leftJoin(schema.item, eq(schema.supplierItem.linkedItemId, schema.item.id))
+        .where(supplierId ? eq(schema.supplierItem.supplierId, supplierId) : undefined)
+        .orderBy(asc(schema.supplierItem.name))
+      const items = rows.map((r: any) => ({
+        ...r.item,
+        supplier: r.supplier,
+        linkedItem: r.linkedItem?.id ? r.linkedItem : null,
+      }))
       return { success: true, data: items }
     } catch (error) {
       return {
@@ -28,13 +41,18 @@ export const setupSupplierItemHandlers = () => {
   // Get supplier item by ID
   ipcMain.handle('supplierItem:getById', async (_, id: string) => {
     try {
-      const item = await prisma.supplierItem.findUnique({
-        where: { id },
-        include: {
-          supplier: true,
-          linkedItem: true
-        }
-      })
+      const [row] = await db
+        .select({
+          item: schema.supplierItem,
+          supplier: schema.supplier,
+          linkedItem: schema.item,
+        })
+        .from(schema.supplierItem)
+        .leftJoin(schema.supplier, eq(schema.supplierItem.supplierId, schema.supplier.id))
+        .leftJoin(schema.item, eq(schema.supplierItem.linkedItemId, schema.item.id))
+        .where(eq(schema.supplierItem.id, id))
+        .limit(1)
+      const item = row ? { ...row.item, supplier: row.supplier, linkedItem: row.linkedItem } : null
       return { success: true, data: item }
     } catch (error) {
       return {
@@ -47,8 +65,9 @@ export const setupSupplierItemHandlers = () => {
   // Create supplier item
   ipcMain.handle('supplierItem:create', async (_, data) => {
     try {
-      const item = await prisma.supplierItem.create({
-        data: {
+      const [item] = await db
+        .insert(schema.supplierItem)
+        .values({
           supplierId: data.supplierId,
           name: data.name,
           hsnCode: data.hsnCode,
@@ -56,8 +75,8 @@ export const setupSupplierItemHandlers = () => {
           lastPurchasePrice: data.lastPurchasePrice || 0,
           defaultTaxRate: data.defaultTaxRate || 0,
           linkedItemId: data.linkedItemId || null
-        }
-      })
+        })
+        .returning()
       return { success: true, data: item }
     } catch (error) {
       return {
@@ -70,17 +89,18 @@ export const setupSupplierItemHandlers = () => {
   // Update supplier item
   ipcMain.handle('supplierItem:update', async (_, id: string, data) => {
     try {
-      const item = await prisma.supplierItem.update({
-        where: { id },
-        data: {
+      const [item] = await db
+        .update(schema.supplierItem)
+        .set({
           name: data.name,
           hsnCode: data.hsnCode,
           unit: data.unit,
           lastPurchasePrice: data.lastPurchasePrice,
           defaultTaxRate: data.defaultTaxRate,
           linkedItemId: data.linkedItemId ?? null
-        }
-      })
+        })
+        .where(eq(schema.supplierItem.id, id))
+        .returning()
       return { success: true, data: item }
     } catch (error) {
       return {
@@ -93,20 +113,14 @@ export const setupSupplierItemHandlers = () => {
   // Delete supplier item (soft)
   ipcMain.handle('supplierItem:delete', async (_, id: string) => {
     try {
-      const supplierItem = await prisma.supplierItem.findUnique({
-        where: { id }
-      })
-
+      const [supplierItem] = await db.select({ id: schema.supplierItem.id }).from(schema.supplierItem).where(eq(schema.supplierItem.id, id)).limit(1)
       if (!supplierItem) {
         throw new Error('Supplier item not found')
       }
 
-      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row stays put so
-      // a restore brings the catalog entry back intact.
-      await prisma.supplierItem.update({
-        where: { id },
-        data: { deletedAt: new Date() }
-      })
+      // Soft-delete: stamp deletedAt (updatedAt + hlc auto-bump). The row stays
+      // put so a restore brings the catalog entry back intact.
+      await db.update(schema.supplierItem).set({ deletedAt: new Date() }).where(eq(schema.supplierItem.id, id))
 
       return { success: true }
     } catch (error) {
@@ -120,18 +134,12 @@ export const setupSupplierItemHandlers = () => {
   // Restore supplier item
   ipcMain.handle('supplierItem:restore', async (_, id: string) => {
     try {
-      const supplierItem = await prisma.supplierItem.findUnique({
-        where: { id }
-      })
-
+      const [supplierItem] = await db.select({ id: schema.supplierItem.id }).from(schema.supplierItem).where(eq(schema.supplierItem.id, id)).limit(1)
       if (!supplierItem) {
         throw new Error('Supplier item not found')
       }
 
-      await prisma.supplierItem.update({
-        where: { id },
-        data: { deletedAt: null }
-      })
+      await db.update(schema.supplierItem).set({ deletedAt: null }).where(eq(schema.supplierItem.id, id))
 
       return { success: true }
     } catch (error) {

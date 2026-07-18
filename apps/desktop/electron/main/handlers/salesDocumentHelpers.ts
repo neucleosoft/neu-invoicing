@@ -1,4 +1,15 @@
-import { computeGstValues } from '@neu/shared'
+import {
+  and,
+  computeGstValues,
+  createInvoiceFromSource,
+  desc,
+  eq,
+  like,
+  type DrizzleDbLike,
+  type SourceDoc,
+} from '@neu/shared'
+import { getDb, schema } from '../db'
+import { attachCustomerAndItems } from './docLoaders'
 
 // Paid-status is DERIVED from the money, never hand-set: amountPaid vs total.
 // Mirrors the shared computePaymentStatus / desktop computeStatus rule so the
@@ -31,75 +42,51 @@ const getFiscalYear = (): string => {
   }
 }
 
-const generateNextInvoiceSeriesNumber = async (
-  prisma: any,
-  seriesCode: 'SL'
-): Promise<string> => {
+// Next number in a NS/<code>/<FY>/NN series for one of the sales-document
+// tables. Deleted rows ARE counted on purpose — numbers never get reused.
+const nextInSeries = async (db: DrizzleDbLike, table: any, code: string): Promise<string> => {
   const fy = getFiscalYear()
-  const prefix = `NS/${seriesCode}/${fy}/`
-
-  const lastDocument = await prisma.salesInvoice.findFirst({
-    where: {
-      type: 'INVOICE',
-      invoiceNumber: { startsWith: prefix }
-    },
-    orderBy: { invoiceNumber: 'desc' }
-  })
-
+  const prefix = `NS/${code}/${fy}/`
+  const rows = await db
+    .select({ invoiceNumber: table.invoiceNumber })
+    .from(table)
+    .where(like(table.invoiceNumber, `${prefix}%`))
+    .orderBy(desc(table.invoiceNumber))
+    .limit(1)
   let nextNum = 1
-  if (lastDocument) {
-    const lastPart = lastDocument.invoiceNumber.split('/').pop()
-    const parsed = parseInt(lastPart || '0')
+  const last = rows[0]?.invoiceNumber
+  if (last) {
+    const parsed = parseInt(last.split('/').pop() || '0')
     if (!isNaN(parsed)) nextNum = parsed + 1
   }
-
   return `${prefix}${String(nextNum).padStart(2, '0')}`
 }
 
-export const generateNextInvoiceNumber = async (prisma: any): Promise<string> =>
-  generateNextInvoiceSeriesNumber(prisma, 'SL')
-
-export const generateNextQuotationNumber = async (prisma: any): Promise<string> => {
+export const generateNextInvoiceNumber = async (db: DrizzleDbLike): Promise<string> => {
+  // Only real invoices share the SL series (quotation/proforma live in their
+  // own tables now, but salesInvoice still carries legacy type values).
   const fy = getFiscalYear()
-  const prefix = `NS/QT/${fy}/`
-
-  const lastDocument = await prisma.quotation.findFirst({
-    where: {
-      invoiceNumber: { startsWith: prefix }
-    },
-    orderBy: { invoiceNumber: 'desc' }
-  })
-
+  const prefix = `NS/SL/${fy}/`
+  const rows = await db
+    .select({ invoiceNumber: schema.salesInvoice.invoiceNumber })
+    .from(schema.salesInvoice)
+    .where(and(eq(schema.salesInvoice.type, 'INVOICE'), like(schema.salesInvoice.invoiceNumber, `${prefix}%`)))
+    .orderBy(desc(schema.salesInvoice.invoiceNumber))
+    .limit(1)
   let nextNum = 1
-  if (lastDocument) {
-    const lastPart = lastDocument.invoiceNumber.split('/').pop()
-    const parsed = parseInt(lastPart || '0')
+  const last = rows[0]?.invoiceNumber
+  if (last) {
+    const parsed = parseInt(last.split('/').pop() || '0')
     if (!isNaN(parsed)) nextNum = parsed + 1
   }
-
   return `${prefix}${String(nextNum).padStart(2, '0')}`
 }
 
-export const generateNextProformaInvoiceNumber = async (prisma: any): Promise<string> => {
-  const fy = getFiscalYear()
-  const prefix = `NS/PI/${fy}/`
+export const generateNextQuotationNumber = (db: DrizzleDbLike): Promise<string> =>
+  nextInSeries(db, schema.quotation, 'QT')
 
-  const lastDocument = await prisma.proformaInvoice.findFirst({
-    where: {
-      invoiceNumber: { startsWith: prefix }
-    },
-    orderBy: { invoiceNumber: 'desc' }
-  })
-
-  let nextNum = 1
-  if (lastDocument) {
-    const lastPart = lastDocument.invoiceNumber.split('/').pop()
-    const parsed = parseInt(lastPart || '0')
-    if (!isNaN(parsed)) nextNum = parsed + 1
-  }
-
-  return `${prefix}${String(nextNum).padStart(2, '0')}`
-}
+export const generateNextProformaInvoiceNumber = (db: DrizzleDbLike): Promise<string> =>
+  nextInSeries(db, schema.proformaInvoice, 'PI')
 
 export const determineSupplyType = (customer: any, totalAmount: number, isInterState: boolean): string => {
   const hasGstin = customer?.taxId && customer.taxId.length === 15
@@ -113,9 +100,9 @@ export const determineSupplyType = (customer: any, totalAmount: number, isInterS
   }
 }
 
-export const buildSalesDocumentValues = async (tx: any, data: any) => {
-  const customer = await tx.customer.findUnique({ where: { id: data.customerId } })
-  const company = await tx.company.findFirst()
+export const buildSalesDocumentValues = async (tx: DrizzleDbLike, data: any) => {
+  const [customer] = await tx.select().from(schema.customer).where(eq(schema.customer.id, data.customerId)).limit(1)
+  const [company] = await tx.select().from(schema.company).limit(1)
 
   if (!customer) throw new Error('Customer not found')
 
@@ -123,13 +110,12 @@ export const buildSalesDocumentValues = async (tx: any, data: any) => {
   // item.hsnCode → item.skuHsn) the shared helper applies.
   const catalogItems: any[] = []
   for (const item of data.items) {
-    catalogItems.push(await tx.item.findUnique({ where: { id: item.itemId } }))
+    const [row] = await tx.select().from(schema.item).where(eq(schema.item.id, item.itemId)).limit(1)
+    catalogItems.push(row ?? null)
   }
 
   // ONE GST implementation for the whole product: the shared computeGstValues
-  // (packages/shared/src/gstCompute.ts) that mobile already uses. This function
-  // used to hand-roll the identical math; delegating removes the second copy so
-  // the two apps can never drift.
+  // (packages/shared/src/gstCompute.ts) that mobile already uses.
   const gst = computeGstValues({
     company: company ? { stateCode: company.stateCode, stateName: company.stateName } : null,
     party: { taxId: customer.taxId, stateCode: customer.stateCode, stateName: customer.stateName },
@@ -188,143 +174,42 @@ export const buildSalesDocumentValues = async (tx: any, data: any) => {
   }
 }
 
-const createInvoiceFromSourceDocument = async (
-  tx: any,
-  source: any,
-  relationData: { convertedFromQuotationId?: string; convertedFromProformaId?: string }
+// Load a freshly-created invoice the way Prisma's include used to return it
+// (items with catalog item + customer) — the renderer's post-convert shape.
+const loadInvoiceFull = async (db: ReturnType<typeof getDb>, invoiceId: string) => {
+  const [header] = await db.select().from(schema.salesInvoice).where(eq(schema.salesInvoice.id, invoiceId)).limit(1)
+  if (!header) throw new Error('Converted invoice not found')
+  const [full] = await attachCustomerAndItems(db, [header], schema.salesInvoiceItem, 'salesInvoiceId')
+  return full
+}
+
+// Convert a source document into a real invoice through the SHARED
+// createInvoiceFromSource (the exact code mobile runs — deterministic
+// `conv-<sourceId>` id, balance bump, stock decrement + SALE movements).
+const convertSourceDocument = async (
+  sourceTable: any,
+  childTable: any,
+  fkName: string,
+  sourceId: string,
+  ref: { convertedFromQuotationId: string } | { convertedFromProformaId: string },
 ) => {
-  const newInvoiceNumber = await generateNextInvoiceNumber(tx)
-
-  const invoice = await tx.salesInvoice.create({
-    data: {
-      // Deterministic id: both devices converting this quotation/proforma
-      // offline mint the SAME invoice row — sync converges to one invoice.
-      id: `conv-${source.id}`,
-      invoiceNumber: newInvoiceNumber,
-      invoiceDate: new Date(),
-      type: 'INVOICE',
-      customerId: source.customerId,
-      subtotal: source.subtotal,
-      discount: source.discount,
-      taxAmount: source.taxAmount,
-      totalAmount: source.totalAmount,
-      amountPaid: 0,
-      balanceDue: source.totalAmount,
-      status: 'DRAFT',
-      notes: source.notes,
-      placeOfSupply: source.placeOfSupply,
-      placeOfSupplyName: source.placeOfSupplyName,
-      isInterState: source.isInterState,
-      reverseCharge: source.reverseCharge,
-      cgstAmount: source.cgstAmount,
-      sgstAmount: source.sgstAmount,
-      igstAmount: source.igstAmount,
-      cessAmount: source.cessAmount,
-      supplyType: source.supplyType,
-      ecommerceGstin: source.ecommerceGstin,
-      poNumber: source.poNumber,
-      ewayBillNo: source.ewayBillNo,
-      vehicleNumber: source.vehicleNumber,
-      warrantyPeriod: source.warrantyPeriod,
-      dispatchedThrough: source.dispatchedThrough,
-      ...relationData,
-      items: {
-        create: source.items.map((item: any) => ({
-          itemId: item.itemId,
-          quantity: item.quantity,
-          rate: item.rate,
-          discount: item.discount,
-          taxRate: item.taxRate,
-          total: item.total,
-          hsnCode: item.hsnCode,
-          taxableAmount: item.taxableAmount,
-          cgstRate: item.cgstRate,
-          cgstAmount: item.cgstAmount,
-          sgstRate: item.sgstRate,
-          sgstAmount: item.sgstAmount,
-          igstRate: item.igstRate,
-          igstAmount: item.igstAmount,
-          cessRate: item.cessRate,
-          cessAmount: item.cessAmount
-        }))
-      }
-    },
-    include: {
-      items: {
-        include: {
-          item: true
-        }
-      },
-      customer: true
-    }
+  const db = getDb()
+  const invoiceId = await db.transaction(async (tx) => {
+    const [source] = await tx.select().from(sourceTable).where(eq(sourceTable.id, sourceId)).limit(1)
+    if (!source) throw new Error('Invalid source document')
+    const lines: any[] = await tx.select().from(childTable).where(eq(childTable[fkName], sourceId))
+    const doc: SourceDoc = { ...(source as any), lines }
+    return createInvoiceFromSource(tx as any, doc, ref)
   })
-
-  await tx.customer.update({
-    where: { id: source.customerId },
-    data: {
-      currentBalance: {
-        increment: source.totalAmount
-      }
-    }
-  })
-
-  for (const item of source.items) {
-    const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
-    if (dbItem && dbItem.trackStock) {
-      await tx.item.update({
-        where: { id: item.itemId },
-        data: {
-          currentStock: {
-            decrement: item.quantity
-          }
-        }
-      })
-
-      await tx.stockMovement.create({
-        data: {
-          itemId: item.itemId,
-          movementType: 'SALE',
-          quantity: -item.quantity,
-          referenceType: 'INVOICE',
-          referenceId: invoice.id
-        }
-      })
-    }
-  }
-
-  return invoice
+  return loadInvoiceFull(db, invoiceId)
 }
 
-export const convertQuotationToInvoice = async (prisma: any, quoteId: string) => {
-  return prisma.$transaction(async (tx: any) => {
-    const quote = await tx.quotation.findUnique({
-      where: { id: quoteId },
-      include: {
-        items: true
-      }
-    })
-
-    if (!quote) {
-      throw new Error('Invalid quotation')
-    }
-
-    return createInvoiceFromSourceDocument(tx, quote, { convertedFromQuotationId: quoteId })
+export const convertQuotationToInvoice = (quoteId: string) =>
+  convertSourceDocument(schema.quotation, schema.quotationItem, 'quotationId', quoteId, {
+    convertedFromQuotationId: quoteId,
   })
-}
 
-export const convertProformaInvoiceToInvoice = async (prisma: any, proformaInvoiceId: string) => {
-  return prisma.$transaction(async (tx: any) => {
-    const proformaInvoice = await tx.proformaInvoice.findUnique({
-      where: { id: proformaInvoiceId },
-      include: {
-        items: true
-      }
-    })
-
-    if (!proformaInvoice) {
-      throw new Error('Invalid proforma invoice')
-    }
-
-    return createInvoiceFromSourceDocument(tx, proformaInvoice, { convertedFromProformaId: proformaInvoiceId })
+export const convertProformaInvoiceToInvoice = (proformaInvoiceId: string) =>
+  convertSourceDocument(schema.proformaInvoice, schema.proformaInvoiceItem, 'proformaInvoiceId', proformaInvoiceId, {
+    convertedFromProformaId: proformaInvoiceId,
   })
-}

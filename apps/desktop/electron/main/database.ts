@@ -3,9 +3,9 @@ import path from 'path'
 import { app } from 'electron'
 import fs from 'fs'
 import { execSync } from 'child_process'
-import { setGlobalHlcStamper } from '@neu/shared'
+import { asc, eq, isNull, previousInvoice, setGlobalHlcStamper, sql } from '@neu/shared'
 import { appHlcExtensionArgs, initAppHlcClock, nextAppHlc, reobserveDbMaxHlc } from './hlcStamp'
-import { openDrizzle, reopenDrizzle } from './db'
+import { getDb, openDrizzle, reopenDrizzle } from './db'
 import { getDeviceId } from './sync'
 
 let prisma: PrismaClient
@@ -124,19 +124,19 @@ export const ensureTablesExist = (dbUrl: string) => {
 // Non-fatal — log and continue on failure.
 const backfillPreviousInvoiceSerialNumbers = async () => {
   try {
-    const orphans = await prisma.previousInvoice.findMany({
-      where: { serialNumber: null },
-      orderBy: { createdAt: 'asc' },
-      select: { id: true },
-    })
+    const db = getDb()
+    const orphans = await db
+      .select({ id: previousInvoice.id })
+      .from(previousInvoice)
+      .where(isNull(previousInvoice.serialNumber))
+      .orderBy(asc(previousInvoice.createdAt))
     if (orphans.length === 0) return
-    const agg = await prisma.previousInvoice.aggregate({ _max: { serialNumber: true } })
-    let next = (agg._max.serialNumber ?? 0) + 1
+    const [agg] = await db
+      .select({ max: sql<number | null>`max(${previousInvoice.serialNumber})` })
+      .from(previousInvoice)
+    let next = (agg?.max ?? 0) + 1
     for (const row of orphans) {
-      await prisma.previousInvoice.update({
-        where: { id: row.id },
-        data: { serialNumber: next++ },
-      })
+      await db.update(previousInvoice).set({ serialNumber: next++ }).where(eq(previousInvoice.id, row.id))
     }
     console.log(`Backfilled serialNumber for ${orphans.length} previous invoice row(s)`)
   } catch (err) {

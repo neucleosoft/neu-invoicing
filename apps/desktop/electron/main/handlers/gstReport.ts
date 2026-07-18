@@ -1,8 +1,9 @@
 import { ipcMain, app } from 'electron'
-import { toGSTNGstr1 } from '@neu/shared'
-import { getPrisma } from '../database'
+import { and, asc, eq, gte, inArray, lte, toGSTNGstr1 } from '@neu/shared'
+import { getDb, schema } from '../db'
 import ExcelJS from 'exceljs'
 import path from 'path'
+import { attachBillRelations, attachCustomerAndItems } from './docLoaders'
 import { notCancelled, notDeleted } from './softDelete'
 
 // Indian State Codes
@@ -262,33 +263,43 @@ function toFriendlyGstr1(data: any, company: any): any {
 }
 
 export const setupGSTReportHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
+
+  // Period-filtered invoice load with customer + items(+item) — the shape the
+  // report builders below have always consumed (Prisma include, batched).
+  const loadInvoicesForPeriod = async (startDate: Date, endDate: Date) => {
+    const headers = await db
+      .select()
+      .from(schema.salesInvoice)
+      .where(and(
+        eq(schema.salesInvoice.type, 'INVOICE'),
+        notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
+        gte(schema.salesInvoice.invoiceDate, startDate),
+        lte(schema.salesInvoice.invoiceDate, endDate),
+      ))
+      .orderBy(asc(schema.salesInvoice.invoiceDate))
+    return attachCustomerAndItems(db, headers, schema.salesInvoiceItem, 'salesInvoiceId')
+  }
+
+  const loadBillsForPeriod = async (startDate: Date, endDate: Date) => {
+    const headers = await db
+      .select()
+      .from(schema.purchaseBill)
+      .where(and(
+        notDeleted(schema.purchaseBill.deletedAt),
+        notCancelled(schema.purchaseBill.cancelledAt),
+        gte(schema.purchaseBill.billDate, startDate),
+        lte(schema.purchaseBill.billDate, endDate),
+      ))
+      .orderBy(asc(schema.purchaseBill.billDate))
+    return attachBillRelations(db, headers)
+  }
 
   // Get GSTR-1 Report (Sales/Outward Supplies)
   ipcMain.handle('gstReport:getGSTR1', async (_, filters: GSTReportFilters) => {
     try {
-      const where: any = {
-        type: 'INVOICE',
-        ...notDeleted,
-        ...notCancelled,
-        invoiceDate: {
-          gte: new Date(filters.startDate),
-          lte: new Date(filters.endDate)
-        }
-      }
-
-      const invoices = await prisma.salesInvoice.findMany({
-        where,
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true
-            }
-          }
-        },
-        orderBy: { invoiceDate: 'asc' }
-      })
+      const invoices = await loadInvoicesForPeriod(new Date(filters.startDate), new Date(filters.endDate))
 
       // Categorize invoices into GSTR-1 sections
       const b2bInvoices: any[] = []
@@ -406,31 +417,7 @@ export const setupGSTReportHandlers = () => {
   // Get GSTR-2 Report (Purchases/Inward Supplies)
   ipcMain.handle('gstReport:getGSTR2', async (_, filters: GSTReportFilters) => {
     try {
-      const where: any = {
-        ...notDeleted,
-        ...notCancelled,
-        billDate: {
-          gte: new Date(filters.startDate),
-          lte: new Date(filters.endDate)
-        }
-      }
-
-      const bills = await prisma.purchaseBill.findMany({
-        where,
-        include: {
-          supplier: true,
-          items: {
-            include: {
-              supplierItem: {
-                include: {
-                  linkedItem: true
-                }
-              }
-            }
-          }
-        },
-        orderBy: { billDate: 'asc' }
-      })
+      const bills = await loadBillsForPeriod(new Date(filters.startDate), new Date(filters.endDate))
 
       // Categorize bills
       const b2bPurchases: any[] = []
@@ -539,31 +526,10 @@ export const setupGSTReportHandlers = () => {
       const endDate = new Date(filters.endDate)
 
       // Get all sales invoices
-      const salesInvoices = await prisma.salesInvoice.findMany({
-        where: {
-          type: 'INVOICE',
-          ...notDeleted,
-          ...notCancelled,
-          invoiceDate: { gte: startDate, lte: endDate }
-        },
-        include: {
-          customer: true,
-          items: true
-        }
-      })
+      const salesInvoices = await loadInvoicesForPeriod(startDate, endDate)
 
       // Get all purchase bills
-      const purchaseBills = await prisma.purchaseBill.findMany({
-        where: {
-          ...notDeleted,
-          ...notCancelled,
-          billDate: { gte: startDate, lte: endDate }
-        },
-        include: {
-          supplier: true,
-          items: true
-        }
-      })
+      const purchaseBills = await loadBillsForPeriod(startDate, endDate)
 
       // 3.1 - Outward Supplies (Taxable)
       const outwardTaxable = {
@@ -713,31 +679,10 @@ export const setupGSTReportHandlers = () => {
       const endDate = new Date(filters.endDate)
 
       // Get all sales invoices for the year
-      const salesInvoices = await prisma.salesInvoice.findMany({
-        where: {
-          type: 'INVOICE',
-          ...notDeleted,
-          ...notCancelled,
-          invoiceDate: { gte: startDate, lte: endDate }
-        },
-        include: {
-          customer: true,
-          items: true
-        }
-      })
+      const salesInvoices = await loadInvoicesForPeriod(startDate, endDate)
 
       // Get all purchase bills for the year
-      const purchaseBills = await prisma.purchaseBill.findMany({
-        where: {
-          ...notDeleted,
-          ...notCancelled,
-          billDate: { gte: startDate, lte: endDate }
-        },
-        include: {
-          supplier: true,
-          items: true
-        }
-      })
+      const purchaseBills = await loadBillsForPeriod(startDate, endDate)
 
       // Part II - Outward supplies during the year
       const outwardSupplies = {
@@ -914,21 +859,7 @@ export const setupGSTReportHandlers = () => {
       const startDate = new Date(filters.startDate)
       const endDate = new Date(filters.endDate)
 
-      const invoices = await prisma.salesInvoice.findMany({
-        where: {
-          type: 'INVOICE',
-          ...notDeleted,
-          ...notCancelled,
-          invoiceDate: { gte: startDate, lte: endDate }
-        },
-        include: {
-          items: {
-            include: {
-              item: true
-            }
-          }
-        }
-      })
+      const invoices = await loadInvoicesForPeriod(startDate, endDate)
 
       const hsnSummary = await generateHSNSummary(invoices)
 
@@ -967,7 +898,7 @@ export const setupGSTReportHandlers = () => {
   // Company table — fails loudly if unset, since the schema requires it.
   ipcMain.handle('gstReport:exportGSTR1ToGSTNJSON', async (_, data: any) => {
     try {
-      const company = await prisma.company.findFirst()
+      const [company] = await db.select().from(schema.company).limit(1)
       const gstin = company?.taxId
       if (!gstin) {
         return {
@@ -980,18 +911,27 @@ export const setupGSTReportHandlers = () => {
       // table (Mode B), which the legacy on-screen GSTR-1 (negative-total
       // invoices) never sees. Fetch them for the report period and attach as
       // sections.cdnr/.cdnur `notes` — the shape the shared builder reads.
-      const notes = await prisma.creditDebitNote.findMany({
-        where: {
-          status: 'ACTIVE',
-          ...notDeleted,
-          ...notCancelled,
-          noteDate: {
-            gte: new Date(data.period?.startDate),
-            lte: new Date(`${data.period?.endDate}T23:59:59.999`),
-          },
-        },
-        include: { customer: true, items: true },
-      })
+      const noteHeaders = await db
+        .select({ note: schema.creditDebitNote, customerTaxId: schema.customer.taxId })
+        .from(schema.creditDebitNote)
+        .leftJoin(schema.customer, eq(schema.creditDebitNote.customerId, schema.customer.id))
+        .where(and(
+          eq(schema.creditDebitNote.status, 'ACTIVE'),
+          notDeleted(schema.creditDebitNote.deletedAt),
+          notCancelled(schema.creditDebitNote.cancelledAt),
+          gte(schema.creditDebitNote.noteDate, new Date(data.period?.startDate)),
+          lte(schema.creditDebitNote.noteDate, new Date(`${data.period?.endDate}T23:59:59.999`)),
+        ))
+      const noteIds = noteHeaders.map((r) => r.note.id)
+      const noteItems = noteIds.length
+        ? await db.select().from(schema.creditDebitNoteItem).where(inArray(schema.creditDebitNoteItem.creditDebitNoteId, noteIds))
+        : []
+      const itemsByNote = new Map<string, any[]>()
+      for (const it of noteItems) {
+        if (!itemsByNote.has(it.creditDebitNoteId)) itemsByNote.set(it.creditDebitNoteId, [])
+        itemsByNote.get(it.creditDebitNoteId)!.push(it)
+      }
+      const notes = noteHeaders.map((r) => ({ ...r.note, customer: { taxId: r.customerTaxId }, items: itemsByNote.get(r.note.id) ?? [] }))
       const isReg = (t?: string | null) => !!t && t.length === 15
       const noteDetail = notes.map((n) => ({
         noteNumber: n.noteNumber,
@@ -1027,7 +967,7 @@ export const setupGSTReportHandlers = () => {
   // review and archiving — NOT for portal upload.
   ipcMain.handle('gstReport:exportGSTR1ToFriendlyJSON', async (_, data: any) => {
     try {
-      const company = await prisma.company.findFirst()
+      const [company] = await db.select().from(schema.company).limit(1)
       const payload = toFriendlyGstr1(data, company)
       return { success: true, data: JSON.stringify(payload, null, 2) }
     } catch (error) {
@@ -1308,7 +1248,7 @@ export const setupGSTReportHandlers = () => {
   // Get company GST details
   ipcMain.handle('gstReport:getCompanyGSTDetails', async () => {
     try {
-      const company = await prisma.company.findFirst()
+      const [company] = await db.select().from(schema.company).limit(1)
 
       if (!company) {
         return {

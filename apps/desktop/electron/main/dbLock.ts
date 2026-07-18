@@ -5,7 +5,7 @@
 // that window produces a torn, corrupt backup. Everything that snapshots the
 // DB file, and the row-sync apply, must run through this lock.
 import fs from 'fs'
-import { getPrisma } from './database'
+import { getDbClient } from './db'
 
 let tail: Promise<void> = Promise.resolve()
 
@@ -31,14 +31,14 @@ export async function snapshotDatabaseTo(targetPath: string): Promise<void> {
   // VACUUM INTO refuses to overwrite an existing file.
   if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath)
   await withDbFileLock(async () => {
-    const rows = (await getPrisma().$queryRawUnsafe(`PRAGMA quick_check(1)`)) as Record<string, unknown>[]
-    const verdict = rows?.[0] ? Object.values(rows[0])[0] : undefined
+    const check = await getDbClient().execute(`PRAGMA quick_check(1)`)
+    const verdict = check.rows?.[0] ? Object.values(check.rows[0])[0] : undefined
     if (verdict !== 'ok') {
-      console.error('[integrity] quick_check failed before snapshot:', JSON.stringify(rows))
+      console.error('[integrity] quick_check failed before snapshot:', JSON.stringify(check.rows))
       throw new Error(
         'Database integrity check FAILED — backup aborted so a corrupt copy never overwrites a good one. See Settings → Open logs folder.',
       )
     }
-    await getPrisma().$executeRawUnsafe(`VACUUM INTO '${targetPath.replace(/'/g, "''")}'`)
+    await getDbClient().execute(`VACUUM INTO '${targetPath.replace(/'/g, "''")}'`)
   })
 }

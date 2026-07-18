@@ -23,12 +23,17 @@
 import { createClient, type Client } from '@libsql/client'
 import { drizzle } from 'drizzle-orm/libsql'
 import * as schema from '@neu/shared'
+import type { SharedSqliteDb } from '@neu/shared'
 
 export { schema }
 
-const buildDb = (c: Client) => drizzle(c, { schema })
+// The ONE sanctioned cast (see @neu/shared drizzleClient.ts): the libsql
+// driver instance is typed with the SHARED drizzle-orm copy so that queries
+// against the shared schema tables typecheck; runtime compatibility across
+// pnpm's dual instances is a documented drizzle design property (entityKind).
+const buildDb = (c: Client): SharedSqliteDb => drizzle(c, { schema }) as unknown as SharedSqliteDb
 
-export type DesktopDb = ReturnType<typeof buildDb>
+export type DesktopDb = SharedSqliteDb
 
 let client: Client | null = null
 let db: DesktopDb | null = null
@@ -52,13 +57,21 @@ export function getDbClient(): Client {
   return client
 }
 
-/** Reopen after the DB file was REPLACED on disk (cloud restore / time
- *  machine) — the old client still holds a handle to the outgoing file. */
-export async function reopenDrizzle(dbPath: string): Promise<void> {
+/** Close the libsql handle so a restore can swap the DB file out from under
+ *  us — Windows refuses the rename while any handle stays open. */
+export function closeDrizzle(): void {
   try {
     client?.close()
   } catch {
     // closing a dead handle must never block the swap
   }
+  client = null
+  db = null
+}
+
+/** Reopen after the DB file was REPLACED on disk (cloud restore / time
+ *  machine) — the old client still holds a handle to the outgoing file. */
+export async function reopenDrizzle(dbPath: string): Promise<void> {
+  closeDrizzle()
   await openDrizzle(dbPath)
 }

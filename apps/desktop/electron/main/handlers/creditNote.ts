@@ -1,20 +1,20 @@
 import { ipcMain } from 'electron'
-import { computeGstValues } from '@neu/shared'
-import { getPrisma } from '../database'
+import { computeGstValues, desc, eq, sql, type DrizzleDbLike } from '@neu/shared'
+import { getDb, schema } from '../db'
+import { attachCustomerAndItems } from './docLoaders'
 
 // GST split for a note's lines via the shared computeGstValues — the same
-// implementation mobile's credit-note screens use; this file used to hand-roll
-// the identical math twice (create + update). Cess is deliberately NOT passed:
-// the CreditDebitNote tables have no cess columns on either platform, and the
-// old loops excluded it too.
-const buildNoteGstValues = async (tx: any, customerId: string, items: any[]) => {
-  const customer = await tx.customer.findUnique({ where: { id: customerId } })
-  const company = await tx.company.findFirst()
+// implementation mobile's credit-note screens use. Cess is deliberately NOT
+// passed: the CreditDebitNote tables have no cess columns on either platform.
+const buildNoteGstValues = async (tx: DrizzleDbLike, customerId: string, items: any[]) => {
+  const [customer] = await tx.select().from(schema.customer).where(eq(schema.customer.id, customerId)).limit(1)
+  const [company] = await tx.select().from(schema.company).limit(1)
   if (!customer) throw new Error('Customer not found')
 
   const catalogItems: any[] = []
   for (const item of items) {
-    catalogItems.push(await tx.item.findUnique({ where: { id: item.itemId } }))
+    const [row] = await tx.select().from(schema.item).where(eq(schema.item.id, item.itemId)).limit(1)
+    catalogItems.push(row ?? null)
   }
 
   const gst = computeGstValues({
@@ -55,24 +55,28 @@ const buildNoteGstValues = async (tx: any, customerId: string, items: any[]) => 
 }
 
 export const setupCreditNoteHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
+
+  // Load a note with the relations the renderer expects.
+  const loadNoteFull = async (id: string) => {
+    const [header] = await db.select().from(schema.creditDebitNote).where(eq(schema.creditDebitNote.id, id)).limit(1)
+    if (!header) return null
+    const [note] = await attachCustomerAndItems(db, [header], schema.creditDebitNoteItem, 'creditDebitNoteId')
+    const [referenceInvoice] = header.referenceInvoiceId
+      ? await db.select().from(schema.salesInvoice).where(eq(schema.salesInvoice.id, header.referenceInvoiceId)).limit(1)
+      : [null]
+    return { ...note, referenceInvoice: referenceInvoice ?? null }
+  }
 
   // Get all credit/debit notes
   ipcMain.handle('creditNote:getAll', async (_, type?: string) => {
     try {
-      const where = type ? { type: type as any } : {}
-      const notes = await prisma.creditDebitNote.findMany({
-        where,
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true
-            }
-          }
-        },
-        orderBy: { noteDate: 'desc' }
-      })
+      const headers = await db
+        .select()
+        .from(schema.creditDebitNote)
+        .where(type ? eq(schema.creditDebitNote.type, type) : undefined)
+        .orderBy(desc(schema.creditDebitNote.noteDate))
+      const notes = await attachCustomerAndItems(db, headers, schema.creditDebitNoteItem, 'creditDebitNoteId')
       return { success: true, data: notes }
     } catch (error) {
       return {
@@ -85,18 +89,7 @@ export const setupCreditNoteHandlers = () => {
   // Get note by ID
   ipcMain.handle('creditNote:getById', async (_, id: string) => {
     try {
-      const note = await prisma.creditDebitNote.findUnique({
-        where: { id },
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true
-            }
-          },
-          referenceInvoice: true
-        }
-      })
+      const note = await loadNoteFull(id)
       return { success: true, data: note }
     } catch (error) {
       return {
@@ -109,15 +102,13 @@ export const setupCreditNoteHandlers = () => {
   // Create credit/debit note
   ipcMain.handle('creditNote:create', async (_, data) => {
     try {
-      const note = await prisma.$transaction(async (tx: any) => {
+      const createdId = await db.transaction(async (tx) => {
         const { gst, processedItems } = await buildNoteGstValues(tx, data.customerId, data.items)
         const { subtotal, taxAmount, totalAmount, isInterState } = gst
-        const totalCgst = gst.totalCgst
-        const totalSgst = gst.totalSgst
-        const totalIgst = gst.totalIgst
 
-        const created = await tx.creditDebitNote.create({
-          data: {
+        const [created] = await tx
+          .insert(schema.creditDebitNote)
+          .values({
             noteNumber: data.noteNumber,
             noteDate: new Date(data.noteDate),
             type: data.type,
@@ -127,70 +118,61 @@ export const setupCreditNoteHandlers = () => {
             subtotal,
             taxAmount,
             totalAmount,
-            cgstAmount: totalCgst,
-            sgstAmount: totalSgst,
-            igstAmount: totalIgst,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
             isInterState,
             status: 'ACTIVE',
             notes: data.notes || null,
             termsConditions: data.termsConditions ?? null,
-            items: {
-              create: processedItems
-            }
-          },
-          include: {
-            items: { include: { item: true } },
-            customer: true,
-            referenceInvoice: true
-          }
-        })
+          })
+          .returning({ id: schema.creditDebitNote.id })
+
+        if (processedItems.length) {
+          await tx
+            .insert(schema.creditDebitNoteItem)
+            .values(processedItems.map((i: any) => ({ ...i, creditDebitNoteId: created.id })))
+        }
 
         // Update customer balance
         // CREDIT_NOTE: reduces what the customer owes (decrement balance)
         // DEBIT_NOTE: increases what the customer owes (increment balance)
-        if (data.type === 'CREDIT_NOTE') {
-          await tx.customer.update({
-            where: { id: data.customerId},
-            data: { currentBalance: { decrement: totalAmount } }
-          })
-        } else {
-          await tx.customer.update({
-            where: { id: data.customerId},
-            data: { currentBalance: { increment: totalAmount } }
-          })
-        }
+        const sign = data.type === 'CREDIT_NOTE' ? sql`- ${totalAmount}` : sql`+ ${totalAmount}`
+        await tx
+          .update(schema.customer)
+          .set({ currentBalance: sql`${schema.customer.currentBalance} ${sign}` })
+          .where(eq(schema.customer.id, data.customerId))
 
         // Update referenced invoice balanceDue if provided
         if (data.referenceInvoiceId) {
-          const invoice = await tx.salesInvoice.findUnique({
-            where: { id: data.referenceInvoiceId }
-          })
+          const [invoice] = await tx.select().from(schema.salesInvoice).where(eq(schema.salesInvoice.id, data.referenceInvoiceId)).limit(1)
           if (invoice) {
             if (data.type === 'CREDIT_NOTE') {
               const newBalanceDue = invoice.balanceDue - totalAmount
-              await tx.salesInvoice.update({
-                where: { id: data.referenceInvoiceId },
-                data: {
+              await tx
+                .update(schema.salesInvoice)
+                .set({
                   balanceDue: newBalanceDue,
                   status: newBalanceDue <= 0 ? 'PAID' : (invoice.amountPaid > 0 ? 'PARTIAL' : invoice.status)
-                }
-              })
+                })
+                .where(eq(schema.salesInvoice.id, data.referenceInvoiceId))
             } else {
               const newBalanceDue = invoice.balanceDue + totalAmount
-              await tx.salesInvoice.update({
-                where: { id: data.referenceInvoiceId },
-                data: {
+              await tx
+                .update(schema.salesInvoice)
+                .set({
                   balanceDue: newBalanceDue,
                   status: newBalanceDue > 0 && invoice.status === 'PAID' ? 'PARTIAL' : invoice.status
-                }
-              })
+                })
+                .where(eq(schema.salesInvoice.id, data.referenceInvoiceId))
             }
           }
         }
 
-        return created
+        return created.id
       })
 
+      const note = await loadNoteFull(createdId)
       return { success: true, data: note }
     } catch (error) {
       return {
@@ -203,63 +185,41 @@ export const setupCreditNoteHandlers = () => {
   // Update credit/debit note
   ipcMain.handle('creditNote:update', async (_, id: string, data) => {
     try {
-      const note = await prisma.$transaction(async (tx: any) => {
-        const existingNote = await tx.creditDebitNote.findUnique({
-          where: { id },
-          include: { items: true }
-        })
+      await db.transaction(async (tx) => {
+        const [existingNote] = await tx.select().from(schema.creditDebitNote).where(eq(schema.creditDebitNote.id, id)).limit(1)
 
         if (!existingNote) {
           throw new Error('Credit/Debit note not found')
         }
 
         // Reverse old balance changes
-        if (existingNote.type === 'CREDIT_NOTE') {
-          await tx.customer.update({
-            where: { id: existingNote.customerId},
-            data: { currentBalance: { increment: existingNote.totalAmount } }
-          })
-        } else {
-          await tx.customer.update({
-            where: { id: existingNote.customerId},
-            data: { currentBalance: { decrement: existingNote.totalAmount } }
-          })
-        }
+        const reverseSign = existingNote.type === 'CREDIT_NOTE' ? sql`+ ${existingNote.totalAmount}` : sql`- ${existingNote.totalAmount}`
+        await tx
+          .update(schema.customer)
+          .set({ currentBalance: sql`${schema.customer.currentBalance} ${reverseSign}` })
+          .where(eq(schema.customer.id, existingNote.customerId))
 
         // Reverse old reference invoice changes
         if (existingNote.referenceInvoiceId) {
-          const oldInvoice = await tx.salesInvoice.findUnique({
-            where: { id: existingNote.referenceInvoiceId }
-          })
+          const [oldInvoice] = await tx.select().from(schema.salesInvoice).where(eq(schema.salesInvoice.id, existingNote.referenceInvoiceId)).limit(1)
           if (oldInvoice) {
-            if (existingNote.type === 'CREDIT_NOTE') {
-              await tx.salesInvoice.update({
-                where: { id: existingNote.referenceInvoiceId },
-                data: { balanceDue: { increment: existingNote.totalAmount } }
-              })
-            } else {
-              await tx.salesInvoice.update({
-                where: { id: existingNote.referenceInvoiceId },
-                data: { balanceDue: { decrement: existingNote.totalAmount } }
-              })
-            }
+            const invSign = existingNote.type === 'CREDIT_NOTE' ? sql`+ ${existingNote.totalAmount}` : sql`- ${existingNote.totalAmount}`
+            await tx
+              .update(schema.salesInvoice)
+              .set({ balanceDue: sql`${schema.salesInvoice.balanceDue} ${invSign}` })
+              .where(eq(schema.salesInvoice.id, existingNote.referenceInvoiceId))
           }
         }
 
         const { gst, processedItems } = await buildNoteGstValues(tx, data.customerId, data.items)
         const { subtotal, taxAmount, totalAmount, isInterState } = gst
-        const totalCgst = gst.totalCgst
-        const totalSgst = gst.totalSgst
-        const totalIgst = gst.totalIgst
 
         // Delete existing items
-        await tx.creditDebitNoteItem.deleteMany({
-          where: { creditDebitNoteId: id }
-        })
+        await tx.delete(schema.creditDebitNoteItem).where(eq(schema.creditDebitNoteItem.creditDebitNoteId, id))
 
-        const updated = await tx.creditDebitNote.update({
-          where: { id },
-          data: {
+        await tx
+          .update(schema.creditDebitNote)
+          .set({
             noteDate: new Date(data.noteDate),
             type: data.type,
             customerId: data.customerId,
@@ -268,67 +228,56 @@ export const setupCreditNoteHandlers = () => {
             subtotal,
             taxAmount,
             totalAmount,
-            cgstAmount: totalCgst,
-            sgstAmount: totalSgst,
-            igstAmount: totalIgst,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
             isInterState,
             notes: data.notes || null,
             termsConditions: data.termsConditions ?? null,
-            items: {
-              create: processedItems
-            }
-          },
-          include: {
-            items: { include: { item: true } },
-            customer: true,
-            referenceInvoice: true
-          }
-        })
+          })
+          .where(eq(schema.creditDebitNote.id, id))
+
+        if (processedItems.length) {
+          await tx
+            .insert(schema.creditDebitNoteItem)
+            .values(processedItems.map((i: any) => ({ ...i, creditDebitNoteId: id })))
+        }
 
         // Apply new balance changes
-        if (data.type === 'CREDIT_NOTE') {
-          await tx.customer.update({
-            where: { id: data.customerId},
-            data: { currentBalance: { decrement: totalAmount } }
-          })
-        } else {
-          await tx.customer.update({
-            where: { id: data.customerId},
-            data: { currentBalance: { increment: totalAmount } }
-          })
-        }
+        const applySign = data.type === 'CREDIT_NOTE' ? sql`- ${totalAmount}` : sql`+ ${totalAmount}`
+        await tx
+          .update(schema.customer)
+          .set({ currentBalance: sql`${schema.customer.currentBalance} ${applySign}` })
+          .where(eq(schema.customer.id, data.customerId))
 
         // Apply new reference invoice changes
         if (data.referenceInvoiceId) {
-          const newInvoice = await tx.salesInvoice.findUnique({
-            where: { id: data.referenceInvoiceId }
-          })
+          const [newInvoice] = await tx.select().from(schema.salesInvoice).where(eq(schema.salesInvoice.id, data.referenceInvoiceId)).limit(1)
           if (newInvoice) {
             if (data.type === 'CREDIT_NOTE') {
               const newBalanceDue = newInvoice.balanceDue - totalAmount
-              await tx.salesInvoice.update({
-                where: { id: data.referenceInvoiceId },
-                data: {
+              await tx
+                .update(schema.salesInvoice)
+                .set({
                   balanceDue: newBalanceDue,
                   status: newBalanceDue <= 0 ? 'PAID' : (newInvoice.amountPaid > 0 ? 'PARTIAL' : newInvoice.status)
-                }
-              })
+                })
+                .where(eq(schema.salesInvoice.id, data.referenceInvoiceId))
             } else {
               const newBalanceDue = newInvoice.balanceDue + totalAmount
-              await tx.salesInvoice.update({
-                where: { id: data.referenceInvoiceId },
-                data: {
+              await tx
+                .update(schema.salesInvoice)
+                .set({
                   balanceDue: newBalanceDue,
                   status: newBalanceDue > 0 && newInvoice.status === 'PAID' ? 'PARTIAL' : newInvoice.status
-                }
-              })
+                })
+                .where(eq(schema.salesInvoice.id, data.referenceInvoiceId))
             }
           }
         }
-
-        return updated
       })
 
+      const note = await loadNoteFull(id)
       return { success: true, data: note }
     } catch (error) {
       return {
@@ -343,9 +292,7 @@ export const setupCreditNoteHandlers = () => {
   // Cancelled, forever. Terminal — there is no restore.
   ipcMain.handle('creditNote:cancel', async (_, id: string) => {
     try {
-      const existingNote = await prisma.creditDebitNote.findUnique({
-        where: { id }
-      })
+      const [existingNote] = await db.select().from(schema.creditDebitNote).where(eq(schema.creditDebitNote.id, id)).limit(1)
 
       if (!existingNote) {
         throw new Error('Credit/Debit note not found')
@@ -356,45 +303,28 @@ export const setupCreditNoteHandlers = () => {
         return { success: true }
       }
 
-      await prisma.$transaction(async (tx: any) => {
+      await db.transaction(async (tx) => {
         // Reverse balance changes
-        if (existingNote.type === 'CREDIT_NOTE') {
-          await tx.customer.update({
-            where: { id: existingNote.customerId},
-            data: { currentBalance: { increment: existingNote.totalAmount } }
-          })
-        } else {
-          await tx.customer.update({
-            where: { id: existingNote.customerId},
-            data: { currentBalance: { decrement: existingNote.totalAmount } }
-          })
-        }
+        const sign = existingNote.type === 'CREDIT_NOTE' ? sql`+ ${existingNote.totalAmount}` : sql`- ${existingNote.totalAmount}`
+        await tx
+          .update(schema.customer)
+          .set({ currentBalance: sql`${schema.customer.currentBalance} ${sign}` })
+          .where(eq(schema.customer.id, existingNote.customerId))
 
         // Reverse reference invoice changes
         if (existingNote.referenceInvoiceId) {
-          const invoice = await tx.salesInvoice.findUnique({
-            where: { id: existingNote.referenceInvoiceId }
-          })
+          const [invoice] = await tx.select().from(schema.salesInvoice).where(eq(schema.salesInvoice.id, existingNote.referenceInvoiceId)).limit(1)
           if (invoice) {
-            if (existingNote.type === 'CREDIT_NOTE') {
-              await tx.salesInvoice.update({
-                where: { id: existingNote.referenceInvoiceId },
-                data: { balanceDue: { increment: existingNote.totalAmount } }
-              })
-            } else {
-              await tx.salesInvoice.update({
-                where: { id: existingNote.referenceInvoiceId },
-                data: { balanceDue: { decrement: existingNote.totalAmount } }
-              })
-            }
+            const invSign = existingNote.type === 'CREDIT_NOTE' ? sql`+ ${existingNote.totalAmount}` : sql`- ${existingNote.totalAmount}`
+            await tx
+              .update(schema.salesInvoice)
+              .set({ balanceDue: sql`${schema.salesInvoice.balanceDue} ${invSign}` })
+              .where(eq(schema.salesInvoice.id, existingNote.referenceInvoiceId))
           }
         }
 
         // CANCEL, not delete: stamp cancelledAt; the note + items stay on record.
-        await tx.creditDebitNote.update({
-          where: { id },
-          data: { cancelledAt: new Date() }
-        })
+        await tx.update(schema.creditDebitNote).set({ cancelledAt: new Date() }).where(eq(schema.creditDebitNote.id, id))
       })
 
       return { success: true }
@@ -412,10 +342,12 @@ export const setupCreditNoteHandlers = () => {
       const prefix = type === 'CREDIT_NOTE' ? 'CN' : 'DN'
       const year = new Date().getFullYear()
 
-      const lastNote = await prisma.creditDebitNote.findFirst({
-        where: { type },
-        orderBy: { noteNumber: 'desc' }
-      })
+      const [lastNote] = await db
+        .select({ noteNumber: schema.creditDebitNote.noteNumber })
+        .from(schema.creditDebitNote)
+        .where(eq(schema.creditDebitNote.type, type))
+        .orderBy(desc(schema.creditDebitNote.noteNumber))
+        .limit(1)
 
       const lastNumber = lastNote ? parseInt(lastNote.noteNumber.split('-').pop() || '0') : 0
       const newNoteNumber = `${prefix}-${year}-${String(lastNumber + 1).padStart(3, '0')}`

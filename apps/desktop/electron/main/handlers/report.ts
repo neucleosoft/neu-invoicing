@@ -1,53 +1,31 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { and, asc, desc, eq, gt, gte, lte, type SQL } from '@neu/shared'
+import { getDb, schema } from '../db'
+import { attachCustomerAndItems } from './docLoaders'
 import { creditNoteNet, notCancelled, notDeleted } from './softDelete'
 
 export const setupReportHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
   // Sales Report
   ipcMain.handle('report:getSalesReport', async (_, filters: any) => {
     try {
-      const where: any = {
-        type: 'INVOICE',
-        ...notDeleted,
-        ...notCancelled
-      }
+      const conds: (SQL | undefined)[] = [
+        eq(schema.salesInvoice.type, 'INVOICE'),
+        notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
+      ]
+      if (filters.startDate) conds.push(gte(schema.salesInvoice.invoiceDate, new Date(filters.startDate)))
+      if (filters.endDate) conds.push(lte(schema.salesInvoice.invoiceDate, new Date(filters.endDate)))
+      if (filters.customerId) conds.push(eq(schema.salesInvoice.customerId, filters.customerId))
+      if (filters.status) conds.push(eq(schema.salesInvoice.status, filters.status))
 
-      if (filters.startDate) {
-        where.invoiceDate = {
-          ...where.invoiceDate,
-          gte: new Date(filters.startDate)
-        }
-      }
-
-      if (filters.endDate) {
-        where.invoiceDate = {
-          ...where.invoiceDate,
-          lte: new Date(filters.endDate)
-        }
-      }
-
-      if (filters.customerId) {
-        where.customerId = filters.customerId
-      }
-
-      if (filters.status) {
-        where.status = filters.status
-      }
-
-      const invoices = await prisma.salesInvoice.findMany({
-        where,
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true
-            }
-          }
-        },
-        orderBy: { invoiceDate: 'desc' }
-      })
+      const headers = await db
+        .select()
+        .from(schema.salesInvoice)
+        .where(and(...conds))
+        .orderBy(desc(schema.salesInvoice.invoiceDate))
+      const invoices = await attachCustomerAndItems(db, headers, schema.salesInvoiceItem, 'salesInvoiceId')
 
       // Calculate totals
       const totals = {
@@ -61,7 +39,7 @@ export const setupReportHandlers = () => {
 
       // Net out credit notes for the same period (a return/reversal reduces sales).
       // amountPaid/balanceDue/discount are receivable-side — left as-is.
-      const cn = await creditNoteNet(prisma, {
+      const cn = await creditNoteNet(db, {
         gte: filters.startDate ? new Date(filters.startDate) : undefined,
         lte: filters.endDate ? new Date(filters.endDate) : undefined,
         customerId: filters.customerId || undefined,
@@ -82,13 +60,11 @@ export const setupReportHandlers = () => {
   // Stock Summary
   ipcMain.handle('report:getStockSummary', async () => {
     try {
-      const items = await prisma.item.findMany({
-        where: {
-          trackStock: true,
-          ...notDeleted
-        },
-        orderBy: { name: 'asc' }
-      })
+      const items = await db
+        .select()
+        .from(schema.item)
+        .where(and(eq(schema.item.trackStock, true), notDeleted(schema.item.deletedAt)))
+        .orderBy(asc(schema.item.name))
 
       const stockData = items.map(item => ({
         ...item,
@@ -116,33 +92,37 @@ export const setupReportHandlers = () => {
   // Outstanding Receivables
   ipcMain.handle('report:getReceivables', async () => {
     try {
-      const customers = await prisma.customer.findMany({
-        where: {
-          currentBalance: {
-            gt: 0
-          },
-          ...notDeleted
-        },
-        include: {
-          salesInvoices: {
-            where: {
-              balanceDue: {
-                gt: 0
-              },
-              ...notDeleted
-            },
-            orderBy: { invoiceDate: 'asc' }
-          }
-        },
-        orderBy: { currentBalance: 'desc' }
-      })
+      const customers = await db
+        .select()
+        .from(schema.customer)
+        .where(and(gt(schema.customer.currentBalance, 0), notDeleted(schema.customer.deletedAt)))
+        .orderBy(desc(schema.customer.currentBalance))
 
+      const customerIds = customers.map((c) => c.id)
+      const openInvoices = customerIds.length
+        ? await db
+            .select()
+            .from(schema.salesInvoice)
+            .where(and(
+              gt(schema.salesInvoice.balanceDue, 0),
+              notDeleted(schema.salesInvoice.deletedAt),
+            ))
+            .orderBy(asc(schema.salesInvoice.invoiceDate))
+        : []
+      const invoicesByCustomer = new Map<string, any[]>()
+      for (const inv of openInvoices) {
+        if (!inv.customerId) continue
+        if (!invoicesByCustomer.has(inv.customerId)) invoicesByCustomer.set(inv.customerId, [])
+        invoicesByCustomer.get(inv.customerId)!.push(inv)
+      }
+
+      const parties = customers.map((c) => ({ ...c, salesInvoices: invoicesByCustomer.get(c.id) ?? [] }))
       const totalReceivables = customers.reduce((sum, customer) => sum + customer.currentBalance, 0)
 
       return {
         success: true,
         data: {
-          parties: customers,
+          parties,
           totalReceivables
         }
       }
@@ -157,33 +137,35 @@ export const setupReportHandlers = () => {
   // Outstanding Payables
   ipcMain.handle('report:getPayables', async () => {
     try {
-      const suppliers = await prisma.supplier.findMany({
-        where: {
-          currentBalance: {
-            gt: 0
-          },
-          ...notDeleted
-        },
-        include: {
-          purchaseBills: {
-            where: {
-              balanceDue: {
-                gt: 0
-              },
-              ...notDeleted
-            },
-            orderBy: { billDate: 'asc' }
-          }
-        },
-        orderBy: { currentBalance: 'desc' }
-      })
+      const suppliers = await db
+        .select()
+        .from(schema.supplier)
+        .where(and(gt(schema.supplier.currentBalance, 0), notDeleted(schema.supplier.deletedAt)))
+        .orderBy(desc(schema.supplier.currentBalance))
 
+      const openBills = suppliers.length
+        ? await db
+            .select()
+            .from(schema.purchaseBill)
+            .where(and(
+              gt(schema.purchaseBill.balanceDue, 0),
+              notDeleted(schema.purchaseBill.deletedAt),
+            ))
+            .orderBy(asc(schema.purchaseBill.billDate))
+        : []
+      const billsBySupplier = new Map<string, any[]>()
+      for (const bill of openBills) {
+        if (!billsBySupplier.has(bill.supplierId)) billsBySupplier.set(bill.supplierId, [])
+        billsBySupplier.get(bill.supplierId)!.push(bill)
+      }
+
+      const parties = suppliers.map((s) => ({ ...s, purchaseBills: billsBySupplier.get(s.id) ?? [] }))
       const totalPayables = suppliers.reduce((sum, supplier) => sum + supplier.currentBalance, 0)
 
       return {
         success: true,
         data: {
-          parties: suppliers,
+          parties,
           totalPayables
         }
       }
@@ -198,69 +180,63 @@ export const setupReportHandlers = () => {
   // Tax Report
   ipcMain.handle('report:getTaxReport', async (_, filters: any) => {
     try {
-      const where: any = {}
-
-      if (filters.startDate) {
-        where.invoiceDate = {
-          ...where.invoiceDate,
-          gte: new Date(filters.startDate)
-        }
-      }
-
-      if (filters.endDate) {
-        where.invoiceDate = {
-          ...where.invoiceDate,
-          lte: new Date(filters.endDate)
-        }
-      }
-
       // Tax collected on sales
-      const salesInvoices = await prisma.salesInvoice.findMany({
-        where: {
-          ...where,
-          type: 'INVOICE',
-          ...notDeleted,
-          ...notCancelled
-        },
-        select: {
-          invoiceDate: true,
-          invoiceNumber: true,
-          taxAmount: true,
-          totalAmount: true,
-          customer: {
-            select: {
-              name: true
-            }
-          }
-        }
-      })
+      const invConds: (SQL | undefined)[] = [
+        eq(schema.salesInvoice.type, 'INVOICE'),
+        notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
+      ]
+      if (filters.startDate) invConds.push(gte(schema.salesInvoice.invoiceDate, new Date(filters.startDate)))
+      if (filters.endDate) invConds.push(lte(schema.salesInvoice.invoiceDate, new Date(filters.endDate)))
 
-      // Tax paid on purchases — build billDate filter from same date range
-      const billWhere: any = {}
-      if (filters.startDate) {
-        billWhere.billDate = { ...billWhere.billDate, gte: new Date(filters.startDate) }
-      }
-      if (filters.endDate) {
-        billWhere.billDate = { ...billWhere.billDate, lte: new Date(filters.endDate) }
-      }
+      const salesRows = await db
+        .select({
+          invoiceDate: schema.salesInvoice.invoiceDate,
+          invoiceNumber: schema.salesInvoice.invoiceNumber,
+          taxAmount: schema.salesInvoice.taxAmount,
+          totalAmount: schema.salesInvoice.totalAmount,
+          customerName: schema.customer.name,
+        })
+        .from(schema.salesInvoice)
+        .leftJoin(schema.customer, eq(schema.salesInvoice.customerId, schema.customer.id))
+        .where(and(...invConds))
+      const salesInvoices = salesRows.map((r) => ({
+        invoiceDate: r.invoiceDate,
+        invoiceNumber: r.invoiceNumber,
+        taxAmount: r.taxAmount,
+        totalAmount: r.totalAmount,
+        customer: { name: r.customerName ?? '' },
+      }))
 
-      const purchaseBills = await prisma.purchaseBill.findMany({
-        where: { ...billWhere, ...notDeleted, ...notCancelled },
-        select: {
-          billDate: true,
-          billNumber: true,
-          taxAmount: true,
-          totalAmount: true,
-          supplier: {
-            select: {
-              name: true
-            }
-          }
-        }
-      })
+      // Tax paid on purchases — same date range on billDate
+      const billConds: (SQL | undefined)[] = [
+        notDeleted(schema.purchaseBill.deletedAt),
+        notCancelled(schema.purchaseBill.cancelledAt),
+      ]
+      if (filters.startDate) billConds.push(gte(schema.purchaseBill.billDate, new Date(filters.startDate)))
+      if (filters.endDate) billConds.push(lte(schema.purchaseBill.billDate, new Date(filters.endDate)))
+
+      const billRows = await db
+        .select({
+          billDate: schema.purchaseBill.billDate,
+          billNumber: schema.purchaseBill.billNumber,
+          taxAmount: schema.purchaseBill.taxAmount,
+          totalAmount: schema.purchaseBill.totalAmount,
+          supplierName: schema.supplier.name,
+        })
+        .from(schema.purchaseBill)
+        .leftJoin(schema.supplier, eq(schema.purchaseBill.supplierId, schema.supplier.id))
+        .where(and(...billConds))
+      const purchaseBills = billRows.map((r) => ({
+        billDate: r.billDate,
+        billNumber: r.billNumber,
+        taxAmount: r.taxAmount,
+        totalAmount: r.totalAmount,
+        supplier: { name: r.supplierName ?? '' },
+      }))
 
       // Credit notes reduce the tax you collected (a return gives the GST back).
-      const cnTax = await creditNoteNet(prisma, {
+      const cnTax = await creditNoteNet(db, {
         gte: filters.startDate ? new Date(filters.startDate) : undefined,
         lte: filters.endDate ? new Date(filters.endDate) : undefined,
       })

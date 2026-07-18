@@ -1,45 +1,38 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { and, asc, desc, eq, gte, inArray, lt, sql } from '@neu/shared'
+import { getDb, schema } from '../db'
 import { creditNoteNet, notCancelled, notDeleted } from './softDelete'
 
 export const setupDashboardHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
   // Get dashboard metrics
   ipcMain.handle('dashboard:getMetrics', async () => {
     try {
       // Total Receivables (Outstanding from customers)
-      const receivables = await prisma.salesInvoice.aggregate({
-        where: {
-          type: 'INVOICE',
-          status: {
-            in: ['DRAFT', 'PARTIAL', 'OVERDUE']
-          },
-          ...notDeleted,
-          ...notCancelled
-        },
-        _sum: {
-          balanceDue: true
-        }
-      })
+      const [receivables] = await db
+        .select({ sum: sql<number | null>`sum(${schema.salesInvoice.balanceDue})` })
+        .from(schema.salesInvoice)
+        .where(and(
+          eq(schema.salesInvoice.type, 'INVOICE'),
+          inArray(schema.salesInvoice.status, ['DRAFT', 'PARTIAL', 'OVERDUE']),
+          notDeleted(schema.salesInvoice.deletedAt),
+          notCancelled(schema.salesInvoice.cancelledAt),
+        ))
 
       // Total Payables (Outstanding to suppliers)
-      const payables = await prisma.purchaseBill.aggregate({
-        where: {
-          status: {
-            in: ['DRAFT', 'PARTIAL', 'OVERDUE']
-          },
-          ...notDeleted,
-          ...notCancelled
-        },
-        _sum: {
-          balanceDue: true
-        }
-      })
+      const [payables] = await db
+        .select({ sum: sql<number | null>`sum(${schema.purchaseBill.balanceDue})` })
+        .from(schema.purchaseBill)
+        .where(and(
+          inArray(schema.purchaseBill.status, ['DRAFT', 'PARTIAL', 'OVERDUE']),
+          notDeleted(schema.purchaseBill.deletedAt),
+          notCancelled(schema.purchaseBill.cancelledAt),
+        ))
 
       // Total Sales (Current fiscal year)
       const currentYear = new Date().getFullYear()
-      const company = await prisma.company.findFirst()
+      const [company] = await db.select().from(schema.company).limit(1)
       const fiscalYearStart = company?.fiscalYearStart || 4
 
       let fiscalYearStartDate: Date
@@ -49,63 +42,54 @@ export const setupDashboardHandlers = () => {
         fiscalYearStartDate = new Date(currentYear - 1, fiscalYearStart - 1, 1)
       }
 
-      const totalSales = await prisma.salesInvoice.aggregate({
-        where: {
-          type: 'INVOICE',
-          invoiceDate: {
-            gte: fiscalYearStartDate
-          },
-          ...notDeleted,
-          ...notCancelled
-        },
-        _sum: {
-          totalAmount: true
-        }
-      })
+      const [totalSales] = await db
+        .select({ sum: sql<number | null>`sum(${schema.salesInvoice.totalAmount})` })
+        .from(schema.salesInvoice)
+        .where(and(
+          eq(schema.salesInvoice.type, 'INVOICE'),
+          gte(schema.salesInvoice.invoiceDate, fiscalYearStartDate),
+          notDeleted(schema.salesInvoice.deletedAt),
+          notCancelled(schema.salesInvoice.cancelledAt),
+        ))
 
       // Net out credit notes issued this FY so returns/reversals don't inflate sales.
-      const cnFy = await creditNoteNet(prisma, { gte: fiscalYearStartDate })
+      const cnFy = await creditNoteNet(db, { gte: fiscalYearStartDate })
 
       // Low Stock Items Count - fetch items and compare fields
-      const stockItems = await prisma.item.findMany({
-        where: {
-          trackStock: true,
-          ...notDeleted
-        },
-        select: {
-          currentStock: true,
-          lowStockWarning: true
-        }
-      })
+      const stockItems = await db
+        .select({ currentStock: schema.item.currentStock, lowStockWarning: schema.item.lowStockWarning })
+        .from(schema.item)
+        .where(and(eq(schema.item.trackStock, true), notDeleted(schema.item.deletedAt)))
       const lowStockItems = stockItems.filter(item => item.currentStock <= item.lowStockWarning).length
 
       // Overdue invoices count
       const now = new Date()
-      const overdueInvoices = await prisma.salesInvoice.count({
-        where: {
-          type: 'INVOICE',
-          status: { in: ['DRAFT', 'PARTIAL'] },
-          dueDate: { lt: now },
-          ...notDeleted,
-          ...notCancelled
-        }
-      })
+      const [overdue] = await db
+        .select({ count: sql<number>`count(*)` })
+        .from(schema.salesInvoice)
+        .where(and(
+          eq(schema.salesInvoice.type, 'INVOICE'),
+          inArray(schema.salesInvoice.status, ['DRAFT', 'PARTIAL']),
+          lt(schema.salesInvoice.dueDate, now),
+          notDeleted(schema.salesInvoice.deletedAt),
+          notCancelled(schema.salesInvoice.cancelledAt),
+        ))
 
       // Cash & Bank total
       let cashBankTotal = 0
       try {
-        const accounts = await prisma.bankAccount.findMany({ where: { ...notDeleted } })
+        const accounts = await db.select().from(schema.bankAccount).where(notDeleted(schema.bankAccount.deletedAt))
         cashBankTotal = accounts.reduce((sum: number, a: any) => sum + a.currentBalance, 0)
       } catch {}
 
       return {
         success: true,
         data: {
-          totalReceivables: receivables._sum.balanceDue || 0,
-          totalPayables: payables._sum.balanceDue || 0,
-          totalSales: (totalSales._sum.totalAmount || 0) + cnFy.totalAmount,
+          totalReceivables: receivables?.sum || 0,
+          totalPayables: payables?.sum || 0,
+          totalSales: (totalSales?.sum || 0) + cnFy.totalAmount,
           lowStockCount: lowStockItems,
-          overdueCount: overdueInvoices,
+          overdueCount: overdue?.count || 0,
           cashBankTotal
         }
       }
@@ -120,19 +104,19 @@ export const setupDashboardHandlers = () => {
   // Get recent invoices
   ipcMain.handle('dashboard:getRecentInvoices', async (_, limit: number = 5) => {
     try {
-      const invoices = await prisma.salesInvoice.findMany({
-        where: {
-          type: 'INVOICE',
-          ...notDeleted,
-          ...notCancelled
-        },
-        include: {
-          customer: true
-        },
-        orderBy: { invoiceDate: 'desc' },
-        take: limit
-      })
+      const rows = await db
+        .select({ invoice: schema.salesInvoice, customer: schema.customer })
+        .from(schema.salesInvoice)
+        .leftJoin(schema.customer, eq(schema.salesInvoice.customerId, schema.customer.id))
+        .where(and(
+          eq(schema.salesInvoice.type, 'INVOICE'),
+          notDeleted(schema.salesInvoice.deletedAt),
+          notCancelled(schema.salesInvoice.cancelledAt),
+        ))
+        .orderBy(desc(schema.salesInvoice.invoiceDate))
+        .limit(limit)
 
+      const invoices = rows.map((r: any) => ({ ...r.invoice, customer: r.customer }))
       return { success: true, data: invoices }
     } catch (error) {
       return {
@@ -146,60 +130,72 @@ export const setupDashboardHandlers = () => {
   ipcMain.handle('dashboard:getLatestTransactions', async (_, limit: number = 10) => {
     try {
       const [invoices, payments, challans] = await Promise.all([
-        prisma.salesInvoice.findMany({
-          where: { type: 'INVOICE', ...notDeleted, ...notCancelled },
-          include: { customer: true },
-          orderBy: { invoiceDate: 'desc' },
-          take: limit
-        }),
-        prisma.paymentTransaction.findMany({
-          where: { ...notDeleted, ...notCancelled },
-          include: {
-            customer: true,
-            supplier: true
-          },
-          orderBy: { paymentDate: 'desc' },
-          take: limit
-        }),
-        prisma.deliveryChallan.findMany({
-          where: { ...notDeleted, ...notCancelled },
-          include: { customer: true },
-          orderBy: { challanDate: 'desc' },
-          take: limit
-        }).catch(() => [])
+        db
+          .select({ row: schema.salesInvoice, customer: schema.customer })
+          .from(schema.salesInvoice)
+          .leftJoin(schema.customer, eq(schema.salesInvoice.customerId, schema.customer.id))
+          .where(and(
+            eq(schema.salesInvoice.type, 'INVOICE'),
+            notDeleted(schema.salesInvoice.deletedAt),
+            notCancelled(schema.salesInvoice.cancelledAt),
+          ))
+          .orderBy(desc(schema.salesInvoice.invoiceDate))
+          .limit(limit),
+        db
+          .select({ row: schema.paymentTransaction, customer: schema.customer, supplier: schema.supplier })
+          .from(schema.paymentTransaction)
+          .leftJoin(schema.customer, eq(schema.paymentTransaction.customerId, schema.customer.id))
+          .leftJoin(schema.supplier, eq(schema.paymentTransaction.supplierId, schema.supplier.id))
+          .where(and(
+            notDeleted(schema.paymentTransaction.deletedAt),
+            notCancelled(schema.paymentTransaction.cancelledAt),
+          ))
+          .orderBy(desc(schema.paymentTransaction.paymentDate))
+          .limit(limit),
+        db
+          .select({ row: schema.deliveryChallan, customer: schema.customer })
+          .from(schema.deliveryChallan)
+          .leftJoin(schema.customer, eq(schema.deliveryChallan.customerId, schema.customer.id))
+          .where(and(
+            notDeleted(schema.deliveryChallan.deletedAt),
+            notCancelled(schema.deliveryChallan.cancelledAt),
+          ))
+          .orderBy(desc(schema.deliveryChallan.challanDate))
+          .limit(limit)
+          .catch(() => [] as any[]),
       ])
 
       const transactions: any[] = []
 
-      invoices.forEach((inv: any) => {
+      invoices.forEach((r: any) => {
         transactions.push({
-          date: inv.invoiceDate,
+          date: r.row.invoiceDate,
           type: 'Invoice',
-          number: inv.invoiceNumber,
-          party: inv.customer?.name || '',
-          amount: inv.totalAmount
+          number: r.row.invoiceNumber,
+          party: r.customer?.name || '',
+          amount: r.row.totalAmount
         })
       })
 
-      payments.forEach((p: any) => {
+      payments.forEach((r: any) => {
         transactions.push({
-          date: p.paymentDate,
-          type: p.type === 'PAYMENT_IN' ? 'Payment In' : 'Payment Out',
-          number: p.id.slice(-8).toUpperCase(),
-          party: p.type === 'PAYMENT_OUT'
-            ? p.supplier?.name || ''
-            : p.customer?.name || '',
-          amount: p.amount
+          date: r.row.paymentDate,
+          type: r.row.type === 'PAYMENT_IN' ? 'Payment In' : 'Payment Out',
+          number: r.row.id.slice(-8).toUpperCase(),
+          party: r.row.type === 'PAYMENT_OUT'
+            ? r.supplier?.name || ''
+            : r.customer?.name || '',
+          amount: r.row.amount
         })
       })
 
-      challans.forEach((c: any) => {
+      challans.forEach((r: any) => {
         transactions.push({
-          date: c.challanDate,
+          date: r.row.challanDate,
           type: 'Challan',
-          number: c.challanNumber,
-          party: c.customer?.name || '',
-          amount: c.totalAmount
+          number: r.row.challanNumber,
+          party: r.customer?.name || '',
+          amount: r.row.totalAmount
         })
       })
 
@@ -227,11 +223,12 @@ export const setupDashboardHandlers = () => {
         startDate = new Date(today)
         startDate.setDate(startDate.getDate() - (days - 1))
       } else {
-        const earliest = await prisma.salesInvoice.findFirst({
-          where: { type: 'INVOICE', ...notDeleted },
-          orderBy: { invoiceDate: 'asc' },
-          select: { invoiceDate: true }
-        })
+        const [earliest] = await db
+          .select({ invoiceDate: schema.salesInvoice.invoiceDate })
+          .from(schema.salesInvoice)
+          .where(and(eq(schema.salesInvoice.type, 'INVOICE'), notDeleted(schema.salesInvoice.deletedAt)))
+          .orderBy(asc(schema.salesInvoice.invoiceDate))
+          .limit(1)
         if (!earliest) {
           // No invoices yet — fall back to a 30-day empty chart so the UI isn't blank
           startDate = new Date(today)
@@ -242,22 +239,27 @@ export const setupDashboardHandlers = () => {
         }
       }
 
-      const invoices = await prisma.salesInvoice.findMany({
-        where: {
-          type: 'INVOICE',
-          invoiceDate: { gte: startDate },
-          ...notDeleted,
-          ...notCancelled
-        },
-        select: { invoiceDate: true, totalAmount: true }
-      })
+      const invoices = await db
+        .select({ invoiceDate: schema.salesInvoice.invoiceDate, totalAmount: schema.salesInvoice.totalAmount })
+        .from(schema.salesInvoice)
+        .where(and(
+          eq(schema.salesInvoice.type, 'INVOICE'),
+          gte(schema.salesInvoice.invoiceDate, startDate),
+          notDeleted(schema.salesInvoice.deletedAt),
+          notCancelled(schema.salesInvoice.cancelledAt),
+        ))
 
       // Credit notes net the chart per bucket, keyed on their own noteDate (a
       // CREDIT_NOTE subtracts, a DEBIT_NOTE adds).
-      const chartNotes = await prisma.creditDebitNote.findMany({
-        where: { noteDate: { gte: startDate }, ...notDeleted, ...notCancelled, status: 'ACTIVE' },
-        select: { noteDate: true, type: true, totalAmount: true }
-      })
+      const chartNotes = await db
+        .select({ noteDate: schema.creditDebitNote.noteDate, type: schema.creditDebitNote.type, totalAmount: schema.creditDebitNote.totalAmount })
+        .from(schema.creditDebitNote)
+        .where(and(
+          gte(schema.creditDebitNote.noteDate, startDate),
+          notDeleted(schema.creditDebitNote.deletedAt),
+          notCancelled(schema.creditDebitNote.cancelledAt),
+          eq(schema.creditDebitNote.status, 'ACTIVE'),
+        ))
 
       const spanDays = Math.floor((today.getTime() - startDate.getTime()) / 86_400_000) + 1
       const bucketByMonth = spanDays > 120

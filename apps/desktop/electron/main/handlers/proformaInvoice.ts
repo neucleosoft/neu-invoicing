@@ -1,5 +1,7 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { desc, eq } from '@neu/shared'
+import { getDb, schema } from '../db'
+import { attachCustomerAndItems } from './docLoaders'
 import {
   buildSalesDocumentValues,
   convertProformaInvoiceToInvoice,
@@ -8,48 +10,31 @@ import {
 } from './salesDocumentHelpers'
 
 export const setupProformaInvoiceHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
   ipcMain.handle('proformaInvoice:getAll', async () => {
     try {
-      const proformaInvoices = await prisma.proformaInvoice.findMany({
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true
-            }
-          }
-        },
-        orderBy: { invoiceDate: 'desc' }
-      })
+      const headers = await db.select().from(schema.proformaInvoice).orderBy(desc(schema.proformaInvoice.invoiceDate))
+      const proformaInvoices = await attachCustomerAndItems(db, headers, schema.proformaInvoiceItem, 'proformaInvoiceId')
       return { success: true, data: proformaInvoices }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch proforma invoices'
+        error: error instanceof Error ? error.message : 'Failed to fetch proforma invoices',
       }
     }
   })
 
   ipcMain.handle('proformaInvoice:getById', async (_, id: string) => {
     try {
-      const proformaInvoice = await prisma.proformaInvoice.findUnique({
-        where: { id },
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true
-            }
-          }
-        }
-      })
+      const [header] = await db.select().from(schema.proformaInvoice).where(eq(schema.proformaInvoice.id, id)).limit(1)
+      if (!header) return { success: true, data: null }
+      const [proformaInvoice] = await attachCustomerAndItems(db, [header], schema.proformaInvoiceItem, 'proformaInvoiceId')
       return { success: true, data: proformaInvoice }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to fetch proforma invoice'
+        error: error instanceof Error ? error.message : 'Failed to fetch proforma invoice',
       }
     }
   })
@@ -58,15 +43,20 @@ export const setupProformaInvoiceHandlers = () => {
     try {
       data.invoiceNumber = normalizeSalesDocumentNumber(data.invoiceNumber)
 
-      const proformaInvoice = await prisma.$transaction(async (tx: any) => {
-        const existing = await tx.proformaInvoice.findUnique({ where: { invoiceNumber: data.invoiceNumber } })
+      const created = await db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({ id: schema.proformaInvoice.id })
+          .from(schema.proformaInvoice)
+          .where(eq(schema.proformaInvoice.invoiceNumber, data.invoiceNumber))
+          .limit(1)
         if (existing) throw new Error(`Proforma invoice number ${data.invoiceNumber} already exists`)
 
         const values = await buildSalesDocumentValues(tx, data)
         const status = data.status || 'DRAFT'
 
-        return tx.proformaInvoice.create({
-          data: {
+        const [proformaInvoice] = await tx
+          .insert(schema.proformaInvoice)
+          .values({
             invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
@@ -75,7 +65,7 @@ export const setupProformaInvoiceHandlers = () => {
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
             totalAmount: values.totalAmount,
-            status: status as any,
+            status,
             notes: data.notes,
             termsConditions: data.termsConditions ?? null,
             placeOfSupply: values.placeOfSupply,
@@ -89,22 +79,23 @@ export const setupProformaInvoiceHandlers = () => {
             supplyType: values.supplyType,
             ecommerceGstin: data.ecommerceGstin || null,
             deliveryTime: data.deliveryTime ? new Date(data.deliveryTime) : null,
-            items: {
-              create: values.processedItems
-            }
-          },
-          include: {
-            items: { include: { item: true } },
-            customer: true
-          }
-        })
+          })
+          .returning()
+
+        if (values.processedItems.length) {
+          await tx
+            .insert(schema.proformaInvoiceItem)
+            .values(values.processedItems.map((i: any) => ({ ...i, proformaInvoiceId: proformaInvoice.id })))
+        }
+        return proformaInvoice
       })
 
+      const [proformaInvoice] = await attachCustomerAndItems(db, [created], schema.proformaInvoiceItem, 'proformaInvoiceId')
       return { success: true, data: proformaInvoice }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to create proforma invoice'
+        error: error instanceof Error ? error.message : 'Failed to create proforma invoice',
       }
     }
   })
@@ -115,30 +106,29 @@ export const setupProformaInvoiceHandlers = () => {
         data.invoiceNumber = normalizeSalesDocumentNumber(data.invoiceNumber)
       }
 
-      const proformaInvoice = await prisma.$transaction(async (tx: any) => {
-        const existingProformaInvoice = await tx.proformaInvoice.findUnique({
-          where: { id }
-        })
-
+      const updated = await db.transaction(async (tx) => {
+        const [existingProformaInvoice] = await tx.select().from(schema.proformaInvoice).where(eq(schema.proformaInvoice.id, id)).limit(1)
         if (!existingProformaInvoice) {
           throw new Error('Proforma invoice not found')
         }
 
         if (data.invoiceNumber && data.invoiceNumber !== existingProformaInvoice.invoiceNumber) {
-          const duplicate = await tx.proformaInvoice.findUnique({ where: { invoiceNumber: data.invoiceNumber } })
+          const [duplicate] = await tx
+            .select({ id: schema.proformaInvoice.id })
+            .from(schema.proformaInvoice)
+            .where(eq(schema.proformaInvoice.invoiceNumber, data.invoiceNumber))
+            .limit(1)
           if (duplicate) throw new Error(`Proforma invoice number ${data.invoiceNumber} already exists`)
         }
 
         const values = await buildSalesDocumentValues(tx, data)
         const status = data.status || existingProformaInvoice.status
 
-        await tx.proformaInvoiceItem.deleteMany({
-          where: { proformaInvoiceId: id }
-        })
+        await tx.delete(schema.proformaInvoiceItem).where(eq(schema.proformaInvoiceItem.proformaInvoiceId, id))
 
-        return tx.proformaInvoice.update({
-          where: { id },
-          data: {
+        const [proformaInvoice] = await tx
+          .update(schema.proformaInvoice)
+          .set({
             invoiceNumber: data.invoiceNumber || existingProformaInvoice.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
@@ -147,7 +137,7 @@ export const setupProformaInvoiceHandlers = () => {
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
             totalAmount: values.totalAmount,
-            status: status as any,
+            status,
             notes: data.notes,
             termsConditions: data.termsConditions ?? null,
             placeOfSupply: values.placeOfSupply,
@@ -161,96 +151,86 @@ export const setupProformaInvoiceHandlers = () => {
             supplyType: values.supplyType,
             ecommerceGstin: data.ecommerceGstin || null,
             deliveryTime: data.deliveryTime ? new Date(data.deliveryTime) : null,
-            items: {
-              create: values.processedItems
-            }
-          },
-          include: {
-            items: { include: { item: true } },
-            customer: true
-          }
-        })
+          })
+          .where(eq(schema.proformaInvoice.id, id))
+          .returning()
+
+        if (values.processedItems.length) {
+          await tx
+            .insert(schema.proformaInvoiceItem)
+            .values(values.processedItems.map((i: any) => ({ ...i, proformaInvoiceId: id })))
+        }
+        return proformaInvoice
       })
 
+      const [proformaInvoice] = await attachCustomerAndItems(db, [updated], schema.proformaInvoiceItem, 'proformaInvoiceId')
       return { success: true, data: proformaInvoice }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to update proforma invoice'
+        error: error instanceof Error ? error.message : 'Failed to update proforma invoice',
       }
     }
   })
 
   ipcMain.handle('proformaInvoice:delete', async (_, id: string) => {
     try {
-      const proformaInvoice = await prisma.proformaInvoice.findUnique({
-        where: { id }
-      })
-
+      const [proformaInvoice] = await db.select({ id: schema.proformaInvoice.id }).from(schema.proformaInvoice).where(eq(schema.proformaInvoice.id, id)).limit(1)
       if (!proformaInvoice) {
         throw new Error('Proforma invoice not found')
       }
 
-      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row and its line
-      // items stay put so a restore brings the whole document back intact.
-      await prisma.proformaInvoice.update({
-        where: { id },
-        data: { deletedAt: new Date() }
-      })
+      // Soft-delete: stamp deletedAt (updatedAt + hlc auto-bump). The row and its
+      // line items stay put so a restore brings the whole document back intact.
+      await db.update(schema.proformaInvoice).set({ deletedAt: new Date() }).where(eq(schema.proformaInvoice.id, id))
 
       return { success: true }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to delete proforma invoice'
+        error: error instanceof Error ? error.message : 'Failed to delete proforma invoice',
       }
     }
   })
 
   ipcMain.handle('proformaInvoice:restore', async (_, id: string) => {
     try {
-      const proformaInvoice = await prisma.proformaInvoice.findUnique({
-        where: { id }
-      })
-
+      const [proformaInvoice] = await db.select({ id: schema.proformaInvoice.id }).from(schema.proformaInvoice).where(eq(schema.proformaInvoice.id, id)).limit(1)
       if (!proformaInvoice) {
         throw new Error('Proforma invoice not found')
       }
 
-      await prisma.proformaInvoice.update({
-        where: { id },
-        data: { deletedAt: null }
-      })
+      await db.update(schema.proformaInvoice).set({ deletedAt: null }).where(eq(schema.proformaInvoice.id, id))
 
       return { success: true }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to restore proforma invoice'
+        error: error instanceof Error ? error.message : 'Failed to restore proforma invoice',
       }
     }
   })
 
-  ipcMain.handle('proformaInvoice:convertToInvoice', async (_, id: string) => {
+  ipcMain.handle('proformaInvoice:convertToInvoice', async (_, proformaInvoiceId: string) => {
     try {
-      const invoice = await convertProformaInvoiceToInvoice(prisma, id)
+      const invoice = await convertProformaInvoiceToInvoice(proformaInvoiceId)
       return { success: true, data: invoice }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to convert proforma invoice'
+        error: error instanceof Error ? error.message : 'Failed to convert proforma invoice',
       }
     }
   })
 
   ipcMain.handle('proformaInvoice:generateNumber', async () => {
     try {
-      const proformaInvoiceNumber = await generateNextProformaInvoiceNumber(prisma)
+      const proformaInvoiceNumber = await generateNextProformaInvoiceNumber(db)
       return { success: true, data: proformaInvoiceNumber }
     } catch (error) {
       return {
         success: false,
-        error: error instanceof Error ? error.message : 'Failed to generate proforma invoice number'
+        error: error instanceof Error ? error.message : 'Failed to generate proforma invoice number',
       }
     }
   })

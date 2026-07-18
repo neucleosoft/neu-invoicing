@@ -1,5 +1,9 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { asc, desc, eq, or } from '@neu/shared'
+import { getDb, schema } from '../db'
+
+const asDate = (v: unknown): Date | null =>
+  v == null ? null : v instanceof Date ? v : new Date(v as string)
 
 // Idempotent migration: copy legacy `Party` rows with type='SUPPLIER' into the
 // Supplier table, then delete the originals when safe. Skips any Party row
@@ -7,75 +11,78 @@ import { getPrisma } from '../database'
 // a Party row with sales-side relations (would break FKs) — copies and leaves.
 // Called once on app start; subsequent runs are no-ops because nothing matches.
 export async function migrateLegacySuppliersFromParty(): Promise<void> {
-  const prisma = getPrisma()
+  const db = getDb()
   try {
-    const legacyRows = await prisma.customer.findMany({
-      where: { type: 'SUPPLIER' },
-      include: {
-        salesInvoices: { select: { id: true }, take: 1 },
-        quotations: { select: { id: true }, take: 1 },
-        proformaInvoices: { select: { id: true }, take: 1 },
-        payments: { select: { id: true }, take: 1 },
-        deliveryChallans: { select: { id: true }, take: 1 },
-        creditDebitNotes: { select: { id: true }, take: 1 },
-      },
-    })
+    const legacyRows = await db
+      .select()
+      .from(schema.customer)
+      .where(eq(schema.customer.type, 'SUPPLIER'))
     if (legacyRows.length === 0) return
+
+    // FK fan-in check: any sales-side row referencing the Party id means the
+    // original must be kept (copied but not deleted).
+    const hasAnyRelation = async (partyId: string): Promise<boolean> => {
+      const refs: { table: any; col: any }[] = [
+        { table: schema.salesInvoice, col: schema.salesInvoice.customerId },
+        { table: schema.quotation, col: schema.quotation.customerId },
+        { table: schema.proformaInvoice, col: schema.proformaInvoice.customerId },
+        { table: schema.paymentTransaction, col: schema.paymentTransaction.customerId },
+        { table: schema.deliveryChallan, col: schema.deliveryChallan.customerId },
+        { table: schema.creditDebitNote, col: schema.creditDebitNote.customerId },
+      ]
+      for (const { table, col } of refs) {
+        const [hit] = await db.select({ id: table.id }).from(table).where(eq(col, partyId)).limit(1)
+        if (hit) return true
+      }
+      return false
+    }
 
     let created = 0, skipped = 0, kept = 0, deleted = 0
     for (const row of legacyRows) {
       try {
-        const dupes = await prisma.supplier.findMany({
-          where: {
-            OR: [
-              { name: { equals: row.name } },
-              ...(row.taxId ? [{ taxId: row.taxId }] : []),
-            ],
-          },
-          take: 1,
-        })
+        const dupes = await db
+          .select({ id: schema.supplier.id })
+          .from(schema.supplier)
+          .where(
+            row.taxId
+              ? or(eq(schema.supplier.name, row.name), eq(schema.supplier.taxId, row.taxId))
+              : eq(schema.supplier.name, row.name),
+          )
+          .limit(1)
 
         if (dupes.length === 0) {
-          await prisma.supplier.create({
-            data: {
-              name: row.name,
-              phone: row.phone,
-              email: row.email,
-              billingAddress: row.billingAddress,
-              shippingAddress: row.shippingAddress,
-              taxId: row.taxId,
-              openingBalance: row.openingBalance,
-              currentBalance: row.currentBalance,
-              stateCode: row.stateCode,
-              stateName: row.stateName,
-              gstType: row.gstType,
-              legalName: row.legalName,
-              tradeName: row.tradeName,
-              gstStatus: row.gstStatus,
-              city: row.city,
-              district: row.district,
-              pincode: row.pincode,
-              fetchedFromGst: row.fetchedFromGst,
-              lastGstFetch: row.lastGstFetch,
-            },
+          await db.insert(schema.supplier).values({
+            name: row.name,
+            phone: row.phone,
+            email: row.email,
+            billingAddress: row.billingAddress,
+            shippingAddress: row.shippingAddress,
+            taxId: row.taxId,
+            openingBalance: row.openingBalance,
+            currentBalance: row.currentBalance,
+            stateCode: row.stateCode,
+            stateName: row.stateName,
+            gstType: row.gstType,
+            legalName: row.legalName,
+            tradeName: row.tradeName,
+            gstStatus: row.gstStatus,
+            city: row.city,
+            district: row.district,
+            pincode: row.pincode,
+            fetchedFromGst: row.fetchedFromGst,
+            lastGstFetch: row.lastGstFetch,
           })
           created++
         } else {
           skipped++
         }
 
-        const hasRelations =
-          row.salesInvoices.length +
-            row.quotations.length +
-            row.proformaInvoices.length +
-            row.payments.length +
-            row.deliveryChallans.length +
-            row.creditDebitNotes.length >
-          0
-        if (hasRelations) {
+        if (await hasAnyRelation(row.id)) {
           kept++
         } else {
-          await prisma.customer.delete({ where: { id: row.id } })
+          // Hard delete on purpose: this is the one-time legacy cleanup, not a
+          // user-facing archive.
+          await db.delete(schema.customer).where(eq(schema.customer.id, row.id))
           deleted++
         }
       } catch (err) {
@@ -94,14 +101,12 @@ export async function migrateLegacySuppliersFromParty(): Promise<void> {
 }
 
 export const setupSupplierHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
   // Get all suppliers
   ipcMain.handle('supplier:getAll', async () => {
     try {
-      const suppliers = await prisma.supplier.findMany({
-        orderBy: { name: 'asc' }
-      })
+      const suppliers = await db.select().from(schema.supplier).orderBy(asc(schema.supplier.name))
       return { success: true, data: suppliers }
     } catch (error) {
       return {
@@ -114,19 +119,22 @@ export const setupSupplierHandlers = () => {
   // Get supplier by ID (with recent purchase bills + supplier item catalog)
   ipcMain.handle('supplier:getById', async (_, id: string) => {
     try {
-      const supplier = await prisma.supplier.findUnique({
-        where: { id },
-        include: {
-          purchaseBills: {
-            orderBy: { billDate: 'desc' },
-            take: 10
-          },
-          supplierItems: {
-            orderBy: { name: 'asc' }
-          }
-        }
-      })
-      return { success: true, data: supplier }
+      const [supplier] = await db.select().from(schema.supplier).where(eq(schema.supplier.id, id)).limit(1)
+      if (!supplier) return { success: true, data: null }
+      const [purchaseBills, supplierItems] = await Promise.all([
+        db
+          .select()
+          .from(schema.purchaseBill)
+          .where(eq(schema.purchaseBill.supplierId, id))
+          .orderBy(desc(schema.purchaseBill.billDate))
+          .limit(10),
+        db
+          .select()
+          .from(schema.supplierItem)
+          .where(eq(schema.supplierItem.supplierId, id))
+          .orderBy(asc(schema.supplierItem.name)),
+      ])
+      return { success: true, data: { ...supplier, purchaseBills, supplierItems } }
     } catch (error) {
       return {
         success: false,
@@ -138,8 +146,9 @@ export const setupSupplierHandlers = () => {
   // Create supplier
   ipcMain.handle('supplier:create', async (_, data) => {
     try {
-      const supplier = await prisma.supplier.create({
-        data: {
+      const [supplier] = await db
+        .insert(schema.supplier)
+        .values({
           name: data.name,
           phone: data.phone,
           email: data.email,
@@ -158,9 +167,9 @@ export const setupSupplierHandlers = () => {
           district: data.district,
           pincode: data.pincode,
           fetchedFromGst: data.fetchedFromGst || false,
-          lastGstFetch: data.lastGstFetch
-        }
-      })
+          lastGstFetch: asDate(data.lastGstFetch),
+        })
+        .returning()
 
       return { success: true, data: supplier }
     } catch (error) {
@@ -174,9 +183,9 @@ export const setupSupplierHandlers = () => {
   // Update supplier
   ipcMain.handle('supplier:update', async (_, id: string, data) => {
     try {
-      const supplier = await prisma.supplier.update({
-        where: { id },
-        data: {
+      const [supplier] = await db
+        .update(schema.supplier)
+        .set({
           name: data.name,
           phone: data.phone,
           email: data.email,
@@ -193,9 +202,10 @@ export const setupSupplierHandlers = () => {
           district: data.district,
           pincode: data.pincode,
           fetchedFromGst: data.fetchedFromGst,
-          lastGstFetch: data.lastGstFetch
-        }
-      })
+          lastGstFetch: asDate(data.lastGstFetch),
+        })
+        .where(eq(schema.supplier.id, id))
+        .returning()
 
       return { success: true, data: supplier }
     } catch (error) {
@@ -209,20 +219,14 @@ export const setupSupplierHandlers = () => {
   // Delete supplier
   ipcMain.handle('supplier:delete', async (_, id: string) => {
     try {
-      const supplier = await prisma.supplier.findUnique({
-        where: { id }
-      })
-
+      const [supplier] = await db.select({ id: schema.supplier.id }).from(schema.supplier).where(eq(schema.supplier.id, id)).limit(1)
       if (!supplier) {
         return { success: false, error: 'Supplier not found' }
       }
 
-      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row stays put so
-      // a restore brings the supplier back intact.
-      await prisma.supplier.update({
-        where: { id },
-        data: { deletedAt: new Date() }
-      })
+      // Soft-delete: stamp deletedAt (updatedAt + hlc auto-bump). The row stays
+      // put so a restore brings the supplier back intact.
+      await db.update(schema.supplier).set({ deletedAt: new Date() }).where(eq(schema.supplier.id, id))
 
       return { success: true }
     } catch (error) {
@@ -236,18 +240,12 @@ export const setupSupplierHandlers = () => {
   // Restore supplier
   ipcMain.handle('supplier:restore', async (_, id: string) => {
     try {
-      const supplier = await prisma.supplier.findUnique({
-        where: { id }
-      })
-
+      const [supplier] = await db.select({ id: schema.supplier.id }).from(schema.supplier).where(eq(schema.supplier.id, id)).limit(1)
       if (!supplier) {
         return { success: false, error: 'Supplier not found' }
       }
 
-      await prisma.supplier.update({
-        where: { id },
-        data: { deletedAt: null }
-      })
+      await db.update(schema.supplier).set({ deletedAt: null }).where(eq(schema.supplier.id, id))
 
       return { success: true }
     } catch (error) {

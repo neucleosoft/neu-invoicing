@@ -1,5 +1,6 @@
 import { ipcMain, dialog } from "electron";
-import { getPrisma } from "../database";
+import { eq } from "@neu/shared";
+import { getDb, schema } from "../db";
 import fs from "fs";
 import path from "path";
 
@@ -8,9 +9,9 @@ import path from "path";
 // backup (a path under userData was never backed up, and dies on any other
 // machine). Idempotent: data: values and missing files are left alone.
 export async function backfillInlineImages(): Promise<void> {
-  const prisma = getPrisma();
+  const db = getDb();
   try {
-    const company = await prisma.company.findFirst();
+    const [company] = await db.select().from(schema.company).limit(1);
     if (!company) return;
 
     const inline = (p: string | null): string | null => {
@@ -24,13 +25,13 @@ export async function backfillInlineImages(): Promise<void> {
     const sign = inline(company.signaturePath);
     if (!logo && !sign) return;
 
-    await prisma.company.update({
-      where: { id: company.id },
-      data: {
+    await db
+      .update(schema.company)
+      .set({
         ...(logo ? { logoPath: logo } : {}),
         ...(sign ? { signaturePath: sign } : {}),
-      },
-    });
+      })
+      .where(eq(schema.company.id, company.id));
     console.log("[inlineImageBackfill] converted stored image path(s) to inline data URLs");
   } catch (e) {
     console.error("[inlineImageBackfill] failed, app continues:", e);
@@ -38,13 +39,13 @@ export async function backfillInlineImages(): Promise<void> {
 }
 
 export const setupCompanyHandlers = () => {
-  const prisma = getPrisma();
+  const db = getDb();
 
   // Get company information
   ipcMain.handle("company:get", async () => {
     try {
-      const company = await prisma.company.findFirst();
-      return { success: true, data: company };
+      const [company] = await db.select().from(schema.company).limit(1);
+      return { success: true, data: company ?? null };
     } catch (error) {
       return {
         success: false,
@@ -57,8 +58,9 @@ export const setupCompanyHandlers = () => {
   // Create company
   ipcMain.handle("company:create", async (_, data) => {
     try {
-      const company = await prisma.company.create({
-        data: {
+      const [company] = await db
+        .insert(schema.company)
+        .values({
           name: data.name,
           address: data.address,
           phone: data.phone,
@@ -71,8 +73,8 @@ export const setupCompanyHandlers = () => {
           termsConditions: data.termsConditions,
           bankDetails: data.bankDetails,
           signaturePath: data.signaturePath,
-        },
-      });
+        })
+        .returning();
 
       return { success: true, data: company };
     } catch (error) {
@@ -87,9 +89,9 @@ export const setupCompanyHandlers = () => {
   // Update company
   ipcMain.handle("company:update", async (_, id, data) => {
     try {
-      const company = await prisma.company.update({
-        where: { id },
-        data: {
+      const [company] = await db
+        .update(schema.company)
+        .set({
           name: data.name,
           address: data.address,
           phone: data.phone,
@@ -102,8 +104,9 @@ export const setupCompanyHandlers = () => {
           termsConditions: data.termsConditions,
           bankDetails: data.bankDetails,
           signaturePath: data.signaturePath,
-        },
-      });
+        })
+        .where(eq(schema.company.id, id))
+        .returning();
 
       return { success: true, data: company };
     } catch (error) {

@@ -21,12 +21,17 @@ import { google } from 'googleapis'
 import Store from 'electron-store'
 import { Readable } from 'stream'
 import {
+  and,
   billImageFileName,
   buildLocalIndexDb,
   collectDiaryDb,
   diaryFileName,
+  eq,
   executePlanDb,
   hlcPhysicalMs,
+  inArray,
+  isNotNull,
+  lte,
   parseDiary,
   planApply,
   previousInvoiceFileName,
@@ -37,8 +42,7 @@ import {
 } from '@neu/shared'
 import { getAppHlcClock } from './hlcStamp'
 import { getOAuth2Client, isAuthError } from './auth'
-import { getPrisma } from './database'
-import { getDb } from './db'
+import { getDb, schema, type DesktopDb } from './db'
 import { withDbFileLock } from './dbLock'
 import { recomputeAll } from './recompute'
 import { getDeviceId } from './sync'
@@ -187,15 +191,20 @@ async function listDriveImages(drive: any): Promise<Map<string, DriveImageMeta>>
 
 async function pushBillImages(
   drive: any,
-  prisma: any,
+  db: DesktopDb,
   billIds: string[],
   images: Map<string, DriveImageMeta>,
 ): Promise<number> {
   if (billIds.length === 0) return 0
-  const bills = await prisma.purchaseBill.findMany({
-    where: { id: { in: billIds }, attachmentData: { not: null } },
-    select: { id: true, updatedAt: true, attachmentData: true, attachmentMimeType: true },
-  })
+  const bills = await db
+    .select({
+      id: schema.purchaseBill.id,
+      updatedAt: schema.purchaseBill.updatedAt,
+      attachmentData: schema.purchaseBill.attachmentData,
+      attachmentMimeType: schema.purchaseBill.attachmentMimeType,
+    })
+    .from(schema.purchaseBill)
+    .where(and(inArray(schema.purchaseBill.id, billIds), isNotNull(schema.purchaseBill.attachmentData)))
 
   let pushed = 0
   for (const bill of bills) {
@@ -237,18 +246,18 @@ async function pushBillImages(
 const PHOTO_SWEEP_THROTTLE_MS = 3 * 24 * 60 * 60 * 1000
 const LAST_PHOTO_SWEEP_KEY = 'last_photo_sweep_at'
 
-async function sweepMissingPhotosIfDue(drive: any, prisma: any): Promise<number> {
+async function sweepMissingPhotosIfDue(drive: any, db: DesktopDb): Promise<number> {
   try {
     const last = store.get(LAST_PHOTO_SWEEP_KEY) as number | undefined
     const now = Date.now()
     if (last && now - last < PHOTO_SWEEP_THROTTLE_MS) return 0
     store.set(LAST_PHOTO_SWEEP_KEY, now)
 
-    const bills = await prisma.purchaseBill.findMany({
-      where: { attachmentData: { not: null } },
-      select: { id: true },
-    })
-    const prevs = await prisma.previousInvoice.findMany({ select: { id: true } })
+    const bills = await db
+      .select({ id: schema.purchaseBill.id })
+      .from(schema.purchaseBill)
+      .where(isNotNull(schema.purchaseBill.attachmentData))
+    const prevs = await db.select({ id: schema.previousInvoice.id }).from(schema.previousInvoice)
     if (bills.length === 0 && prevs.length === 0) return 0
 
     const images = await listDriveImages(drive)
@@ -265,10 +274,10 @@ async function sweepMissingPhotosIfDue(drive: any, prisma: any): Promise<number>
     // hundreds of files).
     let pushed = 0
     for (let i = 0; i < billIds.length; i += 20) {
-      pushed += await pushBillImages(drive, prisma, billIds.slice(i, i + 20), images)
+      pushed += await pushBillImages(drive, db, billIds.slice(i, i + 20), images)
     }
     for (let i = 0; i < prevIds.length; i += 20) {
-      pushed += await pushPreviousInvoiceFiles(drive, prisma, prevIds.slice(i, i + 20), images)
+      pushed += await pushPreviousInvoiceFiles(drive, db, prevIds.slice(i, i + 20), images)
     }
     return pushed
   } catch (e) {
@@ -279,15 +288,19 @@ async function sweepMissingPhotosIfDue(drive: any, prisma: any): Promise<number>
 
 async function pushPreviousInvoiceFiles(
   drive: any,
-  prisma: any,
+  db: DesktopDb,
   ids: string[],
   images: Map<string, DriveImageMeta>,
 ): Promise<number> {
   if (ids.length === 0) return 0
-  const rows = await prisma.previousInvoice.findMany({
-    where: { id: { in: ids } },
-    select: { id: true, fileData: true, fileMimeType: true },
-  })
+  const rows = await db
+    .select({
+      id: schema.previousInvoice.id,
+      fileData: schema.previousInvoice.fileData,
+      fileMimeType: schema.previousInvoice.fileMimeType,
+    })
+    .from(schema.previousInvoice)
+    .where(inArray(schema.previousInvoice.id, ids))
   let pushed = 0
   for (const row of rows) {
     // Empty blob = the sentinel (this device never had the file) — nothing to push.
@@ -315,17 +328,24 @@ async function pushPreviousInvoiceFiles(
 }
 
 // Lazy pull for a synced-in archive row holding the empty-blob sentinel.
-// Machine write: updatedAt preserved (F5 rule).
+// Machine write: updatedAt AND hlc preserved (F5 rule).
 export async function fetchPreviousInvoiceFile(id: string): Promise<{ success: boolean; error?: string }> {
   if (!store.get('google_tokens')) return { success: false, error: 'Connect your Google account first.' }
   try {
-    const prisma = getPrisma()
-    const row = await prisma.previousInvoice.findUnique({
-      where: { id },
-      select: { id: true, updatedAt: true, fileData: true },
-    })
+    const db = getDb()
+    const [row] = await db
+      .select({
+        id: schema.previousInvoice.id,
+        updatedAt: schema.previousInvoice.updatedAt,
+        hlc: schema.previousInvoice.hlc,
+        fileData: schema.previousInvoice.fileData,
+      })
+      .from(schema.previousInvoice)
+      .where(eq(schema.previousInvoice.id, id))
+      .limit(1)
     if (!row) return { success: false, error: 'Not found' }
-    if (row.fileData && row.fileData.length > 0) return { success: true }
+    const local = row.fileData as unknown as Uint8Array | null
+    if (local && local.length > 0) return { success: true }
 
     const auth = getOAuth2Client()
     const drive = google.drive({ version: 'v3', auth })
@@ -336,10 +356,10 @@ export async function fetchPreviousInvoiceFile(id: string): Promise<{ success: b
     const res = await drive.files.get({ fileId: found.id, alt: 'media' }, { responseType: 'arraybuffer' })
     const bytes = Buffer.from(res.data as ArrayBuffer)
     if (bytes.length === 0) return { success: false, error: 'File download came back empty — try again.' }
-    await prisma.previousInvoice.update({
-      where: { id },
-      data: { fileData: bytes, updatedAt: row.updatedAt },
-    })
+    await db
+      .update(schema.previousInvoice)
+      .set({ fileData: bytes, updatedAt: row.updatedAt, hlc: row.hlc })
+      .where(eq(schema.previousInvoice.id, id))
     return { success: true }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'File download failed' }
@@ -347,16 +367,23 @@ export async function fetchPreviousInvoiceFile(id: string): Promise<{ success: b
 }
 
 // Lazy pull: a synced-in bill has attachmentMimeType but no blob — download it
-// once and keep it. Machine write: updatedAt preserved (F5 rule), so filling
-// in the photo can never win a sync conflict.
+// once and keep it. Machine write: updatedAt AND hlc preserved (F5 rule), so
+// filling in the photo can never win a sync conflict.
 async function fetchBillImage(billId: string): Promise<{ success: boolean; error?: string }> {
   if (!store.get('google_tokens')) return { success: false, error: 'Connect your Google account first.' }
   try {
-    const prisma = getPrisma()
-    const bill = await prisma.purchaseBill.findUnique({
-      where: { id: billId },
-      select: { id: true, updatedAt: true, attachmentData: true, attachmentMimeType: true },
-    })
+    const db = getDb()
+    const [bill] = await db
+      .select({
+        id: schema.purchaseBill.id,
+        updatedAt: schema.purchaseBill.updatedAt,
+        hlc: schema.purchaseBill.hlc,
+        attachmentData: schema.purchaseBill.attachmentData,
+        attachmentMimeType: schema.purchaseBill.attachmentMimeType,
+      })
+      .from(schema.purchaseBill)
+      .where(eq(schema.purchaseBill.id, billId))
+      .limit(1)
     if (!bill?.attachmentMimeType) return { success: false, error: 'This bill has no photo.' }
     if (bill.attachmentData) return { success: true }
 
@@ -371,10 +398,10 @@ async function fetchBillImage(billId: string): Promise<{ success: boolean; error
     const bytes = Buffer.from(res.data as ArrayBuffer)
     // Never cache an empty download — the bill would look "fetched" forever.
     if (bytes.length === 0) return { success: false, error: 'Photo download came back empty — try again.' }
-    await prisma.purchaseBill.update({
-      where: { id: billId },
-      data: { attachmentData: bytes, updatedAt: bill.updatedAt },
-    })
+    await db
+      .update(schema.purchaseBill)
+      .set({ attachmentData: bytes, updatedAt: bill.updatedAt, hlc: bill.hlc })
+      .where(eq(schema.purchaseBill.id, billId))
     return { success: true }
   } catch (e) {
     return { success: false, error: e instanceof Error ? e.message : 'Photo download failed' }
@@ -401,64 +428,66 @@ async function purgeArchivedDocs(drive: any): Promise<void> {
     if (last && now - last < PURGE_THROTTLE_MS) return
     store.set(LAST_PURGE_KEY, now)
 
-    const prisma = getPrisma()
+    const db = getDb()
     const cutoff = new Date(now - PURGE_AFTER_MS)
     let purged = 0
 
-    const quotes = await prisma.quotation.findMany({
-      where: { deletedAt: { not: null, lte: cutoff } },
-      select: { id: true },
-    })
+    const archivedBefore = (table: any) => and(isNotNull(table.deletedAt), lte(table.deletedAt, cutoff))
+
+    const quotes = await db.select({ id: schema.quotation.id }).from(schema.quotation).where(archivedBefore(schema.quotation))
     for (const q of quotes) {
-      const ref = await prisma.salesInvoice.count({ where: { convertedFromQuotationId: q.id } })
-      if (ref > 0) continue
-      await prisma.$transaction([
-        prisma.quotationItem.deleteMany({ where: { quotationId: q.id } }),
-        prisma.quotation.delete({ where: { id: q.id } }),
-      ])
+      const [ref] = await db
+        .select({ id: schema.salesInvoice.id })
+        .from(schema.salesInvoice)
+        .where(eq(schema.salesInvoice.convertedFromQuotationId, q.id))
+        .limit(1)
+      if (ref) continue
+      await db.transaction(async (tx) => {
+        await tx.delete(schema.quotationItem).where(eq(schema.quotationItem.quotationId, q.id))
+        await tx.delete(schema.quotation).where(eq(schema.quotation.id, q.id))
+      })
       purged++
     }
 
-    const proformas = await prisma.proformaInvoice.findMany({
-      where: { deletedAt: { not: null, lte: cutoff } },
-      select: { id: true },
-    })
+    const proformas = await db.select({ id: schema.proformaInvoice.id }).from(schema.proformaInvoice).where(archivedBefore(schema.proformaInvoice))
     for (const p of proformas) {
-      const ref = await prisma.salesInvoice.count({ where: { convertedFromProformaId: p.id } })
-      if (ref > 0) continue
-      await prisma.$transaction([
-        prisma.proformaInvoiceItem.deleteMany({ where: { proformaInvoiceId: p.id } }),
-        prisma.proformaInvoice.delete({ where: { id: p.id } }),
-      ])
+      const [ref] = await db
+        .select({ id: schema.salesInvoice.id })
+        .from(schema.salesInvoice)
+        .where(eq(schema.salesInvoice.convertedFromProformaId, p.id))
+        .limit(1)
+      if (ref) continue
+      await db.transaction(async (tx) => {
+        await tx.delete(schema.proformaInvoiceItem).where(eq(schema.proformaInvoiceItem.proformaInvoiceId, p.id))
+        await tx.delete(schema.proformaInvoice).where(eq(schema.proformaInvoice.id, p.id))
+      })
       purged++
     }
 
-    const pos = await prisma.purchaseOrder.findMany({
-      where: { deletedAt: { not: null, lte: cutoff } },
-      select: { id: true },
-    })
+    const pos = await db.select({ id: schema.purchaseOrder.id }).from(schema.purchaseOrder).where(archivedBefore(schema.purchaseOrder))
     for (const po of pos) {
-      const ref = await prisma.purchaseBill.count({ where: { purchaseOrderId: po.id } })
-      if (ref > 0) continue
-      await prisma.$transaction([
-        prisma.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: po.id } }),
-        prisma.purchaseOrder.delete({ where: { id: po.id } }),
-      ])
+      const [ref] = await db
+        .select({ id: schema.purchaseBill.id })
+        .from(schema.purchaseBill)
+        .where(eq(schema.purchaseBill.purchaseOrderId, po.id))
+        .limit(1)
+      if (ref) continue
+      await db.transaction(async (tx) => {
+        await tx.delete(schema.purchaseOrderItem).where(eq(schema.purchaseOrderItem.purchaseOrderId, po.id))
+        await tx.delete(schema.purchaseOrder).where(eq(schema.purchaseOrder.id, po.id))
+      })
       purged++
     }
 
-    const prevs = await prisma.previousInvoice.findMany({
-      where: { deletedAt: { not: null, lte: cutoff } },
-      select: { id: true },
-    })
+    const prevs = await db.select({ id: schema.previousInvoice.id }).from(schema.previousInvoice).where(archivedBefore(schema.previousInvoice))
     // One img-* listing for the whole purge run instead of one Drive lookup
     // per archived file.
     const images = prevs.length > 0 ? await listDriveImages(drive) : new Map()
     for (const pi of prevs) {
-      await prisma.$transaction([
-        prisma.previousInvoiceItem.deleteMany({ where: { previousInvoiceId: pi.id } }),
-        prisma.previousInvoice.delete({ where: { id: pi.id } }),
-      ])
+      await db.transaction(async (tx) => {
+        await tx.delete(schema.previousInvoiceItem).where(eq(schema.previousInvoiceItem.previousInvoiceId, pi.id))
+        await tx.delete(schema.previousInvoice).where(eq(schema.previousInvoice.id, pi.id))
+      })
       purged++
       // Free the archived file's Drive object — best-effort.
       try {
@@ -491,7 +520,6 @@ export const rowSyncNow = async (
   rowSyncInFlight = true
 
   try {
-    const prisma = getPrisma() // photo push/fetch below — converts in phase 2
     const db = getDb()
     const auth = getOAuth2Client()
     const drive = google.drive({ version: 'v3', auth })
@@ -581,10 +609,10 @@ export const rowSyncNow = async (
     if (changedBillIds.length > 0 || changedPrevInvIds.length > 0) {
       const images = await listDriveImages(drive)
       photosPushed =
-        (await pushBillImages(drive, prisma, changedBillIds, images)) +
-        (await pushPreviousInvoiceFiles(drive, prisma, changedPrevInvIds, images))
+        (await pushBillImages(drive, db, changedBillIds, images)) +
+        (await pushPreviousInvoiceFiles(drive, db, changedPrevInvIds, images))
     }
-    photosPushed += await sweepMissingPhotosIfDue(drive, prisma)
+    photosPushed += await sweepMissingPhotosIfDue(drive, db)
 
     store.set(LAST_ROW_SYNC_KEY, Date.now())
     store.delete(PENDING_REMOVALS_KEY)

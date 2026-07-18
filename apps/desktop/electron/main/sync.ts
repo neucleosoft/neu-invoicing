@@ -2,7 +2,9 @@ import { ipcMain, BrowserWindow } from 'electron'
 import { google } from 'googleapis'
 import { PrismaClient } from '@prisma/client'
 import { getOAuth2Client, isAuthError, clearStoredCredentials } from './auth'
+import { eq, syncMetadata } from '@neu/shared'
 import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
+import { closeDrizzle, getDb } from './db'
 import { snapshotDatabaseTo, withDbFileLock } from './dbLock'
 import fs from 'fs'
 import path from 'path'
@@ -392,13 +394,14 @@ export const syncUpload = async (): Promise<{ success: boolean; error?: string }
     // shared "Last cloud backup" stamp in SyncMetadata.
     store.set(LAST_UPLOAD_TIMESTAMP_KEY, new Date().toISOString())
 
-    const prisma = getPrisma()
     const deviceId = getDeviceId()
-    await prisma.syncMetadata.upsert({
-      where: { id: 'main' },
-      update: { lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
-      create: { id: 'main', lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
-    })
+    await getDb()
+      .insert(syncMetadata)
+      .values({ id: 'main', lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId })
+      .onConflictDoUpdate({
+        target: syncMetadata.id,
+        set: { lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
+      })
 
     // Capture local mtime AFTER our own writes so the next syncState's
     // localChanged check excludes this bookkeeping bump.
@@ -461,6 +464,7 @@ const replaceLocalDbFromDrive = async (
   // finish instead of killing it mid-transaction via $disconnect.
   await withDbFileLock(async () => {
     await getPrisma().$disconnect()
+    closeDrizzle() // the libsql handle would block the rename on Windows
     for (const suffix of ['-wal', '-shm', '-journal']) {
       const sidecar = `${dbPath}${suffix}`
       if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar)
@@ -545,13 +549,14 @@ export const syncDownload = async (): Promise<{ success: boolean; error?: string
       setLastKnownCloudMtime(cloudFile.modifiedTime)
     }
 
-    const prisma = getPrisma()
     const deviceId = getDeviceId()
-    await prisma.syncMetadata.upsert({
-      where: { id: 'main' },
-      update: { lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
-      create: { id: 'main', lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
-    })
+    await getDb()
+      .insert(syncMetadata)
+      .values({ id: 'main', lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId })
+      .onConflictDoUpdate({
+        target: syncMetadata.id,
+        set: { lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
+      })
 
     // Same baseline-capture as syncUpload — the just-downloaded file's mtime
     // is "now" (when the local write finished), plus syncMetadata bumped it
@@ -577,8 +582,7 @@ export const getBackupInfo = async (): Promise<{
 }> => {
   let cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null = null
   try {
-    const prisma = getPrisma()
-    const metadata = await prisma.syncMetadata.findUnique({ where: { id: 'main' } })
+    const [metadata] = await getDb().select().from(syncMetadata).where(eq(syncMetadata.id, 'main')).limit(1)
     if (metadata) {
       cloudBackup = {
         lastSyncTimestamp: metadata.lastSyncTimestamp.toISOString(),
