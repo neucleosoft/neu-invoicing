@@ -6,9 +6,17 @@ import {
   blob,
   customType,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 import cuid from "cuid";
+import { stampHlc } from "./hlc";
 
 const now = () => new Date();
+
+// hlc is stamped by the app's HLC clock once it is seeded at DB init
+// (setGlobalHlcStamper); before that — early one-time repairs — SQL NULL
+// keeps the row in the legacy "no stamp" state the sync comparator already
+// falls back from. ($defaultFn/$onUpdate may not return a plain null.)
+const hlcStamp = () => stampHlc() ?? sql`null`;
 
 // Stores Date values as Unix-epoch MILLISECOND integers — the format Prisma
 // actually writes for SQLite DateTime columns. (An earlier version wrote
@@ -95,6 +103,7 @@ export const customer = sqliteTable("Party", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -131,6 +140,7 @@ export const supplier = sqliteTable("Supplier", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -163,6 +173,7 @@ export const item = sqliteTable("Item", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -187,6 +198,7 @@ export const supplierItem = sqliteTable("SupplierItem", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -243,6 +255,7 @@ export const salesInvoice = sqliteTable("SalesInvoice", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -316,6 +329,7 @@ export const quotation = sqliteTable("Quotation", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -389,6 +403,7 @@ export const proformaInvoice = sqliteTable("ProformaInvoice", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -459,6 +474,7 @@ export const purchaseOrder = sqliteTable("PurchaseOrder", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -538,6 +554,7 @@ export const purchaseBill = sqliteTable("PurchaseBill", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -598,6 +615,7 @@ export const paymentTransaction = sqliteTable("PaymentTransaction", {
     .$defaultFn(now),
   // Nullable to mirror Prisma (SQLite ADD COLUMN can't take now()); legacy rows
   // are backfilled to createdAt. Needed so payment edits can sync newest-wins.
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt").$defaultFn(now).$onUpdate(now),
 });
 
@@ -696,6 +714,7 @@ export const deliveryChallan = sqliteTable("DeliveryChallan", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -765,6 +784,7 @@ export const creditDebitNote = sqliteTable("CreditDebitNote", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -812,6 +832,7 @@ export const bankAccount = sqliteTable("BankAccount", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -842,6 +863,7 @@ export const bankTransaction = sqliteTable("BankTransaction", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -899,6 +921,7 @@ export const previousInvoice = sqliteTable("PreviousInvoice", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)

@@ -10,6 +10,8 @@
 import { and, eq, gt, inArray, isNull, or } from 'drizzle-orm'
 import {
   buildDiary,
+  hlcLowerBound,
+  hlcPhysicalMs,
   parseDiary,
   planApply,
   reviveRowDates,
@@ -29,6 +31,7 @@ import { recomputeAll } from '@/utils/recompute'
 import { appendSyncActivity } from './activityLog'
 import { withDbFileLock } from './dbFileLock'
 import { getDeviceId } from './deviceId'
+import { getMobileHlcClock } from './hlc'
 import {
   listDriveImages,
   pushBillImages,
@@ -65,26 +68,34 @@ export interface RowSyncResult {
 
 const tableOf = (name: string): any => (schema as Record<string, any>)[name]
 
-// Rows changed inside the window. The isNull branch only matters for legacy
-// payment rows minted before the updatedAt column existed.
-const changedSince = (table: any, cutoff: Date) =>
-  or(gt(table.updatedAt, cutoff), and(isNull(table.updatedAt), gt(table.createdAt, cutoff)))
+// Rows changed inside the window. Stamped rows key the window on hlc — the
+// ratchet's physical part can never jump backwards, so a wall-clock reset
+// can't strand edits outside the diary forever. Legacy rows (hlc null: never
+// written since the column landed) keep the wall-clock branch; its isNull
+// sub-branch only matters for payment rows minted before updatedAt existed.
+const changedSince = (table: any, cutoff: Date, hlcCutoff: string) =>
+  or(
+    gt(table.hlc, hlcCutoff),
+    and(isNull(table.hlc), gt(table.updatedAt, cutoff)),
+    and(isNull(table.hlc), isNull(table.updatedAt), gt(table.createdAt, cutoff)),
+  )
 
 // ── Collect (push side) ──────────────────────────────────────────────────────
 
 async function collectDiary(db: Db, deviceId: string, now: number) {
   const cutoff = new Date(now - DIARY_WINDOW_MS)
+  const hlcCutoff = hlcLowerBound(now - DIARY_WINDOW_MS)
 
   const singles: Record<string, Record<string, unknown>[]> = {}
   for (const name of SYNC_SINGLE_TABLES) {
     const table = tableOf(name)
-    singles[name] = await db.select().from(table).where(changedSince(table, cutoff))
+    singles[name] = await db.select().from(table).where(changedSince(table, cutoff, hlcCutoff))
   }
 
   const documents: Record<string, DocumentBundle[]> = {}
   for (const spec of SYNC_DOCUMENT_TABLES) {
     const table = tableOf(spec.table)
-    const headers: any[] = await db.select().from(table).where(changedSince(table, cutoff))
+    const headers: any[] = await db.select().from(table).where(changedSince(table, cutoff, hlcCutoff))
     if (headers.length === 0) continue
     const ids = headers.map((h) => h.id)
     const childTable = tableOf(spec.childTable)
@@ -120,6 +131,7 @@ async function buildLocalIndex(db: Db): Promise<LocalIndex> {
             .select({
               id: schema.purchaseBill.id,
               billNumber: schema.purchaseBill.billNumber,
+              hlc: schema.purchaseBill.hlc,
               updatedAt: schema.purchaseBill.updatedAt,
               createdAt: schema.purchaseBill.createdAt,
               deletedAt: schema.purchaseBill.deletedAt,
@@ -132,6 +144,7 @@ async function buildLocalIndex(db: Db): Promise<LocalIndex> {
               .select({
                 id: schema.previousInvoice.id,
                 serialNumber: schema.previousInvoice.serialNumber,
+                hlc: schema.previousInvoice.hlc,
                 updatedAt: schema.previousInvoice.updatedAt,
                 createdAt: schema.previousInvoice.createdAt,
                 deletedAt: schema.previousInvoice.deletedAt,
@@ -146,6 +159,7 @@ async function buildLocalIndex(db: Db): Promise<LocalIndex> {
         // null updatedAt compares as createdAt, so an unchanged row is
         // NOT_NEWER instead of re-applying on every sync.
         updatedAt: toEpochMs(r.updatedAt) ?? toEpochMs(r.createdAt),
+        hlc: r.hlc ?? null,
         createdAt: toEpochMs(r.createdAt),
         deletedAt: toEpochMs(r.deletedAt),
         cancelledAt: toEpochMs(r.cancelledAt),
@@ -171,7 +185,7 @@ async function executePlan(db: Db, plan: ApplyPlan): Promise<void> {
   await db.transaction(async (tx) => {
     // Local renumbers FIRST: the incoming doc that keeps the number cannot be
     // inserted while the local later-created doc still holds it (UNIQUE fires
-    // at statement time). $onUpdate(now) auto-bumps updatedAt here, so the
+    // at statement time). $onUpdate auto-bumps updatedAt AND hlc here, so the
     // renumber propagates on the next push.
     for (const r of plan.localRenumbers) {
       const table = tableOf(r.table)
@@ -181,6 +195,10 @@ async function executePlan(db: Db, plan: ApplyPlan): Promise<void> {
     for (const u of plan.upserts) {
       const table = tableOf(u.table)
       const data = reviveRowDates(u.row)
+      // Apply must land the row EXACTLY as the packet says: a legacy packet
+      // without hlc lands with hlc null — explicit, so the schema's
+      // $defaultFn/$onUpdate can't mint a local stamp for a peer's row.
+      if (!('hlc' in data)) data.hlc = null
       let createData = data
       let updateData = data
       // previousInvoice's NOT-NULL fileData is stripped from packets: inserts
@@ -312,6 +330,25 @@ export async function rowSyncNow(
       return { success: false, error: 'The other device runs a newer app version — update this one to keep syncing.' }
     }
 
+    // P1: feed every peer HLC stamp into the ratchet BEFORE planning or
+    // stamping anything, so edits made after this pull order above everything
+    // just seen. A peer whose clock reads far in the future gets a receipt —
+    // ordering stays safe (that's the point of HLC) but the user should know.
+    const clock = getMobileHlcClock()
+    const nextHlc = clock ? () => clock.next() : undefined
+    let maxPeerPt = 0
+    for (const p of packets) {
+      clock?.observe(p.row?.hlc)
+      const pt = hlcPhysicalMs(p.row?.hlc)
+      if (pt != null && pt > maxPeerPt) maxPeerPt = pt
+    }
+    if (maxPeerPt > now + 60 * 60 * 1000) {
+      await appendSyncActivity([{
+        kind: 'CLOCK_SKEW',
+        detail: `Another device's clock looks ~${Math.round((maxPeerPt - now) / 3_600_000)}h ahead of this one — sync stays ordered (HLC), but check that device's date & time.`,
+      }])
+    }
+
     let applied = 0
     let skipped = 0
     let localRenumbers = 0
@@ -320,7 +357,7 @@ export async function rowSyncNow(
     let log: RowSyncResult['log'] = []
     if (packets.length > 0) {
       const local = await buildLocalIndex(db)
-      const plan = planApply(packets, local, now)
+      const plan = planApply(packets, local, now, nextHlc)
 
       // D6 tripwire: a pull that wants to remove many live rows pauses for a
       // human before ANYTHING is applied or pushed.

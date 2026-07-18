@@ -64,6 +64,7 @@ model Customer {
   fetchedFromGst  Boolean   @default(false)
   lastGstFetch    DateTime?
   createdAt       DateTime  @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt       DateTime  @updatedAt
 
   // Relations (sales-side documents only — purchases use Supplier)
@@ -103,6 +104,7 @@ model Supplier {
   fetchedFromGst  Boolean   @default(false)
   lastGstFetch    DateTime?
   createdAt       DateTime  @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt       DateTime  @updatedAt
 
   // Relations
@@ -128,6 +130,7 @@ model SupplierItem {
   linkedItemId      String?
   linkedItem        Item?     @relation(fields: [linkedItemId], references: [id])
   createdAt         DateTime  @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt         DateTime  @updatedAt
 
   // Relations
@@ -154,6 +157,7 @@ model Item {
   openingStock    Float     @default(0) // stock before any recorded movement — lets recompute rebuild currentStock = openingStock + Σ(stockMovements), mirroring party openingBalance
   lowStockWarning Float     @default(10)
   createdAt       DateTime  @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt       DateTime  @updatedAt
 
   // Relations
@@ -205,6 +209,7 @@ model SalesInvoice {
   supplyType               String           @default("B2B") // B2B, B2C_LARGE, B2C_SMALL, EXPORT, NIL_EXEMPT
   ecommerceGstin           String? // E-commerce operator GSTIN if applicable
   createdAt                DateTime         @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt                DateTime         @updatedAt
 
   // Additional fields (all optional)
@@ -272,6 +277,7 @@ model Quotation {
   supplyType        String    @default("B2B")
   ecommerceGstin    String?
   createdAt         DateTime  @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt         DateTime  @updatedAt
   deliveryTime      DateTime?
 
@@ -330,6 +336,7 @@ model ProformaInvoice {
   supplyType        String    @default("B2B")
   ecommerceGstin    String?
   createdAt         DateTime  @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt         DateTime  @updatedAt
   deliveryTime      DateTime?
 
@@ -400,6 +407,7 @@ model PurchaseBill {
   purchaseOrderId       String?
   purchaseOrder         PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
   createdAt             DateTime       @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt             DateTime       @updatedAt
 
   // Relations
@@ -442,6 +450,7 @@ model PurchaseOrder {
   igstAmount         Float     @default(0)
   cessAmount         Float     @default(0)
   createdAt          DateTime  @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt          DateTime  @updatedAt
 
   items PurchaseOrderItem[]
@@ -523,6 +532,7 @@ model PaymentTransaction {
   purchaseBill   PurchaseBill? @relation(fields: [purchaseBillId], references: [id])
   notes          String?
   createdAt      DateTime      @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt      DateTime?     @updatedAt // nullable: SQLite ADD COLUMN can't take now(); legacy rows backfilled to createdAt. Needed so payment edits can sync newest-wins.
 }
 
@@ -579,6 +589,7 @@ model DeliveryChallan {
   status               String                @default("NON_RETURNABLE") // RETURNABLE, NON_RETURNABLE, CONVERTED
   convertedToInvoiceId String?
   createdAt            DateTime              @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt            DateTime              @updatedAt
   // Additional fields (all optional)
   poNumber             String?
@@ -646,6 +657,7 @@ model CreditDebitNote {
   notes              String?
   termsConditions    String?
   createdAt          DateTime              @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt          DateTime              @updatedAt
   items              CreditDebitNoteItem[]
 }
@@ -683,6 +695,7 @@ model BankAccount {
   ifscCode       String?
   currentBalance Float     @default(0)
   createdAt      DateTime  @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt      DateTime  @updatedAt
   transactions   BankTransaction[]
 }
@@ -702,6 +715,7 @@ model BankTransaction {
   description     String?
   transactionDate DateTime    @default(now())
   createdAt       DateTime    @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt       DateTime    @updatedAt
 }
 
@@ -755,6 +769,7 @@ model PreviousInvoice {
   fileName      String
   items         PreviousInvoiceItem[]
   createdAt     DateTime              @default(now())
+  hlc             String?   // sync HLC ordering stamp (P1) — written by the hlc client extension, preserved on machine writes
   updatedAt     DateTime              @updatedAt
 }
 

@@ -272,6 +272,7 @@ export async function ensurePreviousInvoiceFile(
       .select({
         fileData: schema.previousInvoice.fileData,
         updatedAt: schema.previousInvoice.updatedAt,
+        hlc: schema.previousInvoice.hlc,
       })
       .from(schema.previousInvoice)
       .where(eq(schema.previousInvoice.id, id))
@@ -291,7 +292,7 @@ export async function ensurePreviousInvoiceFile(
 
     await db
       .update(schema.previousInvoice)
-      .set({ fileData: bytes, updatedAt: row.updatedAt })
+      .set({ fileData: bytes, updatedAt: row.updatedAt, hlc: row.hlc })
       .where(eq(schema.previousInvoice.id, id))
     return true
   } catch {
@@ -315,6 +316,7 @@ export async function ensureBillAttachment(
         attachmentData: schema.purchaseBill.attachmentData,
         attachmentMimeType: schema.purchaseBill.attachmentMimeType,
         updatedAt: schema.purchaseBill.updatedAt,
+        hlc: schema.purchaseBill.hlc,
       })
       .from(schema.purchaseBill)
       .where(eq(schema.purchaseBill.id, billId))
@@ -333,10 +335,10 @@ export async function ensureBillAttachment(
     if (bytes.length === 0) return false
 
     // Machine write: filling in the blob is not a content edit — preserve
-    // updatedAt so this download can never win a sync conflict (F5 rule).
+    // updatedAt AND hlc so this download can never win a sync conflict (F5).
     await db
       .update(schema.purchaseBill)
-      .set({ attachmentData: bytes, updatedAt: bill.updatedAt })
+      .set({ attachmentData: bytes, updatedAt: bill.updatedAt, hlc: bill.hlc })
       .where(eq(schema.purchaseBill.id, billId))
     return true
   } catch {

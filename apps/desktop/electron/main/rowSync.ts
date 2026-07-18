@@ -20,7 +20,8 @@ import { ipcMain } from 'electron'
 import { google } from 'googleapis'
 import Store from 'electron-store'
 import { Readable } from 'stream'
-import { billImageFileName, parseDiary, planApply, previousInvoiceFileName, toEpochMs, TRIPWIRE_THRESHOLD, type SyncPacket } from '@neu/shared'
+import { billImageFileName, hlcPhysicalMs, parseDiary, planApply, previousInvoiceFileName, toEpochMs, TRIPWIRE_THRESHOLD, type SyncPacket } from '@neu/shared'
+import { getAppHlcClock } from './hlcStamp'
 import { getOAuth2Client, isAuthError } from './auth'
 import { getPrisma } from './database'
 import { withDbFileLock } from './dbLock'
@@ -494,6 +495,25 @@ export const rowSyncNow = async (
       return { success: false, error: 'The other device runs a newer app version — update this one to keep syncing.' }
     }
 
+    // P1: feed every peer HLC stamp into the ratchet BEFORE planning or
+    // stamping anything, so edits made after this pull order above everything
+    // just seen. A peer whose clock reads far in the future gets a receipt —
+    // ordering stays safe (that's the point of HLC) but the user should know.
+    const clock = getAppHlcClock()
+    const nextHlc = clock ? () => clock.next() : undefined
+    let maxPeerPt = 0
+    for (const p of packets) {
+      clock?.observe(p.row?.hlc)
+      const pt = hlcPhysicalMs(p.row?.hlc)
+      if (pt != null && pt > maxPeerPt) maxPeerPt = pt
+    }
+    if (maxPeerPt > now + 60 * 60 * 1000) {
+      appendActivity([{
+        kind: 'CLOCK_SKEW',
+        detail: `Another device's clock looks ~${Math.round((maxPeerPt - now) / 3_600_000)}h ahead of this one — sync stays ordered (HLC), but check that device's date & time.`,
+      }])
+    }
+
     let applied = 0
     let skipped = 0
     let localRenumbers = 0
@@ -502,7 +522,7 @@ export const rowSyncNow = async (
     let log: RowSyncResult['log'] = []
     if (packets.length > 0) {
       const local = await buildLocalIndex(prisma)
-      const plan = planApply(packets, local, now)
+      const plan = planApply(packets, local, now, nextHlc)
 
       // D6 tripwire: a pull that wants to remove many live rows pauses for a
       // human before ANYTHING is applied or pushed.
@@ -515,7 +535,7 @@ export const rowSyncNow = async (
       // Merge + recompute hold the DB-file lock as ONE unit — a concurrent
       // backup/ladder snapshot must never capture a half-merged ledger.
       await withDbFileLock(async () => {
-        await executePlan(prisma, plan)
+        await executePlan(prisma, plan, nextHlc)
 
         // Recompute ONLY when the merge changed rows. A no-op sync must not
         // silently rewrite numbers that pre-date sync — legacy drift is surfaced

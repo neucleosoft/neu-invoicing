@@ -3,6 +3,8 @@ import path from 'path'
 import { app } from 'electron'
 import fs from 'fs'
 import { execSync } from 'child_process'
+import { appHlcExtensionArgs, initAppHlcClock, reobserveDbMaxHlc } from './hlcStamp'
+import { getDeviceId } from './sync'
 
 let prisma: PrismaClient
 
@@ -172,6 +174,13 @@ export const setupDatabase = async () => {
     throw error
   }
 
+  // P1: seed the HLC ratchet from MAX(hlc) BEFORE any write can happen, then
+  // wrap the client so every user edit of a synced row gets stamped. The
+  // extension returns a new wrapper around the same engine — handlers keep
+  // using getPrisma() unchanged.
+  await initAppHlcClock(prisma, getDeviceId())
+  prisma = prisma.$extends(appHlcExtensionArgs()) as unknown as PrismaClient
+
   await backfillPreviousInvoiceSerialNumbers()
 }
 
@@ -187,6 +196,9 @@ export const getPrisma = () => {
 export const reconnectDatabase = async () => {
   await prisma.$disconnect()
   await prisma.$connect()
+  // The replaced file may carry HLC stamps above anything this device has
+  // seen — the ratchet must never issue below them.
+  await reobserveDbMaxHlc(prisma)
   console.log('Database reconnected successfully')
 }
 

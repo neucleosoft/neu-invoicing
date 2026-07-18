@@ -13,6 +13,7 @@ import os from 'os'
 import path from 'path'
 import { PrismaClient } from '@prisma/client'
 import {
+  createHlcClock,
   parseDiary,
   planApply,
 } from '../../../packages/shared/src/index'
@@ -21,7 +22,10 @@ import {
   collectDiary,
   executePlan,
 } from '../electron/main/rowSyncCore'
+import { buildHlcExtensionArgs } from '../electron/main/hlcStamp'
 import { recomputeAll } from '../electron/main/recompute'
+
+const MONTH_MS = 30 * 24 * 60 * 60 * 1000
 
 const APPDATA = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming')
 const REAL_DB = path.join(APPDATA, 'neu-invoicing', 'neuinvoicing.db')
@@ -47,8 +51,15 @@ async function main() {
   fs.copyFileSync(REAL_DB, DB_A)
   fs.copyFileSync(REAL_DB, DB_B)
 
+  // P1: each simulated device gets its own HLC ratchet + the REAL stamping
+  // extension. Device B's wall clock runs a MONTH BEHIND — the exact skew the
+  // HLC upgrade exists to survive.
+  const clockA = createHlcClock('sandbox-A')
+  const clockB = createHlcClock('sandbox-B', { now: () => Date.now() - MONTH_MS })
   const prismaA = new PrismaClient({ datasources: { db: { url: `file:${DB_A}` } } })
+    .$extends(buildHlcExtensionArgs(() => clockA.next())) as unknown as PrismaClient
   const prismaB = new PrismaClient({ datasources: { db: { url: `file:${DB_B}` } } })
+    .$extends(buildHlcExtensionArgs(() => clockB.next())) as unknown as PrismaClient
   await prismaA.$connect()
   await prismaB.$connect()
 
@@ -71,6 +82,12 @@ async function main() {
       "updatedAt" DATETIME NOT NULL,
       CONSTRAINT "BankTransaction_bankAccountId_fkey" FOREIGN KEY ("bankAccountId") REFERENCES "BankAccount" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
     )`)
+    // P1: the hlc column (migration 20260718102539) — the live DB may predate it.
+    for (const t of ['Party', 'Supplier', 'SupplierItem', 'Item', 'SalesInvoice', 'Quotation', 'ProformaInvoice', 'PurchaseBill', 'PurchaseOrder', 'PaymentTransaction', 'DeliveryChallan', 'CreditDebitNote', 'BankAccount', 'BankTransaction', 'PreviousInvoice']) {
+      try {
+        await p.$executeRawUnsafe(`ALTER TABLE "${t}" ADD COLUMN "hlc" TEXT`)
+      } catch { /* already applied */ }
+    }
   }
 
   // ── stage edits ─────────────────────────────────────────────────────────
@@ -188,8 +205,11 @@ async function main() {
   check('diary survives JSON round-trip', parsed.ok)
   if (!parsed.ok) throw new Error('diary parse failed')
 
+  // Mirror rowSyncNow: the puller feeds every peer stamp into its ratchet
+  // BEFORE planning, so its own next stamps order above everything seen.
+  for (const p of parsed.diary.packets) clockB.observe(p.row?.hlc)
   const localB = await buildLocalIndex(prismaB)
-  const plan = planApply(parsed.diary.packets, localB, Date.now())
+  const plan = planApply(parsed.diary.packets, localB, Date.now(), () => clockB.next())
   check('plan renumbers the later-created incoming invoice',
     plan.log.some((l) => l.kind === 'RENUMBER_INCOMING'))
   check('plan renumbers the later-created LOCAL invoice (F2)',
@@ -199,7 +219,7 @@ async function main() {
     tables.indexOf('supplier') < tables.indexOf('purchaseBill') &&
     tables.indexOf('purchaseBill') < tables.indexOf('paymentTransaction'),
     tables.join(','))
-  await executePlan(prismaB, plan)
+  await executePlan(prismaB, plan, () => clockB.next())
 
   // ── assertions on B ─────────────────────────────────────────────────────
   console.log('\nAssertions on device B')
@@ -257,10 +277,78 @@ async function main() {
   // ── idempotency: sync the SAME diary again ──────────────────────────────
   console.log('\nIdempotency: applying the same diary again')
   const localB2 = await buildLocalIndex(prismaB)
-  const plan2 = planApply(parsed.diary.packets, localB2, Date.now())
+  const plan2 = planApply(parsed.diary.packets, localB2, Date.now(), () => clockB.next())
   check('second apply is a no-op (everything skips)', plan2.upserts.length === 0,
     `upserts=${plan2.upserts.length} sample=${JSON.stringify(plan2.upserts.slice(0, 2).map((u) => [u.table, u.rowId]))}`)
   check('no repeat renumbering', plan2.localRenumbers.length === 0 && !plan2.log.some((l) => l.kind.startsWith('RENUMBER')))
+
+  // ── P1: HLC stamps through the real pipeline ────────────────────────────
+  console.log('\nP1 HLC: stamping, preservation, and the backdated-clock story')
+
+  // The extension stamped A's user edits at write time.
+  const custOnA = await prismaA.customer.findUnique({ where: { id: custA.id } })
+  check('extension stamped the new customer with a device-A hlc',
+    typeof custOnA?.hlc === 'string' && custOnA.hlc.endsWith('sandbox-A'), `got ${custOnA?.hlc}`)
+
+  // Apply + recompute both PRESERVED the stamp bit-for-bit on B (executor
+  // writes the packet's hlc; recompute passes updatedAt+hlc explicitly).
+  const custPreserved = await prismaB.customer.findUnique({ where: { id: custA.id } })
+  check("apply + recompute preserved A's stamp on B bit-for-bit", custPreserved?.hlc === custOnA?.hlc,
+    `A=${custOnA?.hlc} B=${custPreserved?.hlc}`)
+
+  // The F2 renumber on B re-stamped the renumbered LOCAL doc ABOVE its
+  // creation stamp, so the renumber outranks the original everywhere.
+  const invB2Restamped = await prismaB.salesInvoice.findUnique({ where: { id: invB2.id } })
+  check('local renumber minted a fresh, higher device-B stamp',
+    typeof invB2Restamped?.hlc === 'string' &&
+    invB2Restamped.hlc.endsWith('sandbox-B') &&
+    (invB2.hlc == null || invB2Restamped.hlc > invB2.hlc),
+    `created=${invB2.hlc} renumbered=${invB2Restamped?.hlc}`)
+
+  // User edits inside interactive transactions get stamped too — most doc
+  // handlers write inside prisma.$transaction(async tx => …).
+  await prismaA.$transaction(async (tx) => {
+    await tx.customer.update({ where: { id: custA.id }, data: { city: 'SBX-ITX' } })
+  })
+  const custAfterItx = await prismaA.customer.findUnique({ where: { id: custA.id } })
+  check('extension stamps inside interactive transactions',
+    typeof custAfterItx?.hlc === 'string' && custAfterItx.hlc !== custOnA?.hlc, `got ${custAfterItx?.hlc}`)
+
+  // ── the headline story: a month-backdated clock still wins ──────────────
+  // A's itx edit above is the customer's latest state. Ship it to B, then B —
+  // wall clock a MONTH BEHIND — edits the same customer. Under pure
+  // updatedAt ordering, B's edit is "a month older" than what A already has
+  // and would be silently discarded. The hlc (ratcheted past A's stamps at
+  // pull time) must carry it back and WIN on A.
+  const diaryA2 = await collectDiary(prismaA, 'sandbox-A', Date.now())
+  for (const p of diaryA2.packets) clockB.observe(p.row?.hlc)
+  const planB2 = planApply(diaryA2.packets, await buildLocalIndex(prismaB), Date.now(), () => clockB.next())
+  await executePlan(prismaB, planB2, () => clockB.next())
+
+  await prismaB.customer.update({
+    where: { id: custA.id },
+    data: { billingAddress: 'edited on the backdated device' },
+  })
+  // Prisma's @updatedAt stamped the REAL process clock — rewrite it to what a
+  // month-behind wall clock would have written. (The hlc came from B's
+  // ratchet, exactly as it would on the skewed device.)
+  await prismaB.$executeRawUnsafe(
+    `UPDATE "Party" SET "updatedAt" = ${Date.now() - 40 * 24 * 60 * 60 * 1000} WHERE "id" = '${custA.id}'`,
+  )
+
+  // 40 days puts the edit OUTSIDE the 30-day updatedAt window — under the old
+  // filter this edit would never even be PUSHED. The hlc window must carry it.
+  const diaryB = await collectDiary(prismaB, 'sandbox-B', Date.now())
+  check('hlc window keeps a 40-day-backdated edit in the diary',
+    diaryB.packets.some((p) => p.table === 'customer' && p.rowId === custA.id))
+
+  for (const p of diaryB.packets) clockA.observe(p.row?.hlc)
+  const planA = planApply(diaryB.packets, await buildLocalIndex(prismaA), Date.now(), () => clockA.next())
+  await executePlan(prismaA, planA, () => clockA.next())
+  const custBackOnA = await prismaA.customer.findUnique({ where: { id: custA.id } })
+  check('backdated-clock edit WON on A — hlc beat a month-newer updatedAt',
+    custBackOnA?.billingAddress === 'edited on the backdated device',
+    `got ${custBackOnA?.billingAddress}`)
 
   await prismaA.$disconnect()
   await prismaB.$disconnect()

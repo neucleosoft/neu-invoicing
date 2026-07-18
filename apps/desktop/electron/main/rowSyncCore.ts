@@ -6,6 +6,7 @@
 
 import {
   buildDiary,
+  hlcLowerBound,
   reviveRowDates,
   toEpochMs,
   SYNC_DOCUMENT_TABLES,
@@ -37,30 +38,43 @@ export interface RowSyncResult {
   log?: { kind: string; table: string; rowId: string; detail: string }[]
 }
 
-// Rows changed inside the window. The `updatedAt: null` branch exists only for
-// paymentTransaction (its updatedAt is nullable for legacy rows) — Prisma
-// REJECTS a null filter on non-nullable columns, so every other table gets the
-// plain comparison. (Caught by the two-device sandbox, 2026-07-11.)
-const changedSince = (cutoff: Date, nullableUpdatedAt: boolean) =>
-  nullableUpdatedAt
-    ? { OR: [{ updatedAt: { gt: cutoff } }, { updatedAt: null, createdAt: { gt: cutoff } }] }
-    : { updatedAt: { gt: cutoff } }
+// Rows changed inside the window. Stamped rows key the window on hlc — the
+// ratchet's physical part can never jump backwards, so a wall-clock reset
+// can't strand edits outside the diary (with updatedAt alone, a clock fixed
+// after a >30-day-backwards reset left those edits stamped out of the window
+// FOREVER — never pushed). Legacy rows (hlc null: never written since the
+// column landed) keep the wall-clock branch. The `updatedAt: null` sub-branch
+// exists only for paymentTransaction (nullable for legacy rows) — Prisma
+// REJECTS a null filter on non-nullable columns, so every other table gets
+// the plain comparison. (Caught by the two-device sandbox, 2026-07-11.)
+const changedSince = (cutoff: Date, nullableUpdatedAt: boolean, hlcCutoff: string) => ({
+  OR: [
+    { hlc: { gt: hlcCutoff } },
+    ...(nullableUpdatedAt
+      ? [
+          { hlc: null, updatedAt: { gt: cutoff } },
+          { hlc: null, updatedAt: null, createdAt: { gt: cutoff } },
+        ]
+      : [{ hlc: null, updatedAt: { gt: cutoff } }]),
+  ],
+})
 
 // ── Collect (push side) ──────────────────────────────────────────────────────
 
 export async function collectDiary(prisma: any, deviceId: string, now: number) {
   const cutoff = new Date(now - DIARY_WINDOW_MS)
+  const hlcCutoff = hlcLowerBound(now - DIARY_WINDOW_MS)
 
   const singles: Record<string, Record<string, unknown>[]> = {}
   for (const table of SYNC_SINGLE_TABLES) {
     singles[table] = await prisma[table].findMany({
-      where: changedSince(cutoff, table === 'paymentTransaction'),
+      where: changedSince(cutoff, table === 'paymentTransaction', hlcCutoff),
     })
   }
 
   const documents: Record<string, DocumentBundle[]> = {}
   for (const spec of SYNC_DOCUMENT_TABLES) {
-    const headers = await prisma[spec.table].findMany({ where: changedSince(cutoff, false) })
+    const headers = await prisma[spec.table].findMany({ where: changedSince(cutoff, false, hlcCutoff) })
     if (headers.length === 0) continue
     const ids = headers.map((h: any) => h.id)
     const children = await prisma[spec.childTable].findMany({ where: { [spec.childFk]: { in: ids } } })
@@ -91,11 +105,11 @@ export async function buildLocalIndex(prisma: any): Promise<LocalIndex> {
     const rows =
       table === 'purchaseBill'
         ? await prisma.purchaseBill.findMany({
-            select: { id: true, billNumber: true, updatedAt: true, createdAt: true, deletedAt: true, cancelledAt: true, status: true },
+            select: { id: true, billNumber: true, hlc: true, updatedAt: true, createdAt: true, deletedAt: true, cancelledAt: true, status: true },
           })
         : table === 'previousInvoice'
           ? await prisma.previousInvoice.findMany({
-              select: { id: true, serialNumber: true, updatedAt: true, createdAt: true, deletedAt: true },
+              select: { id: true, serialNumber: true, hlc: true, updatedAt: true, createdAt: true, deletedAt: true },
             })
           : await prisma[table].findMany()
     headers[table] = {}
@@ -106,6 +120,7 @@ export async function buildLocalIndex(prisma: any): Promise<LocalIndex> {
         // null updatedAt compares as createdAt, so an unchanged row is
         // NOT_NEWER instead of re-applying on every sync.
         updatedAt: toEpochMs(r.updatedAt) ?? toEpochMs(r.createdAt),
+        hlc: r.hlc ?? null,
         createdAt: toEpochMs(r.createdAt),
         deletedAt: toEpochMs(r.deletedAt),
         cancelledAt: toEpochMs(r.cancelledAt),
@@ -126,15 +141,19 @@ export async function buildLocalIndex(prisma: any): Promise<LocalIndex> {
 
 // ── Execute (pull side output) ───────────────────────────────────────────────
 
-export async function executePlan(prisma: any, plan: ApplyPlan): Promise<void> {
+export async function executePlan(prisma: any, plan: ApplyPlan, nextHlc?: () => string | null): Promise<void> {
   if (plan.upserts.length === 0 && plan.localRenumbers.length === 0) return
   await prisma.$transaction(async (tx: any) => {
     // Local renumbers FIRST: the incoming doc that keeps the number cannot be
     // inserted while the local later-created doc still holds it (UNIQUE fires
-    // at statement time). @updatedAt auto-bumps here, so the renumber
-    // propagates on the next push.
+    // at statement time). @updatedAt auto-bumps here, and the hlc stamp is
+    // explicit (not left to the client extension) so the renumber propagates
+    // on the next push even when this runs without the extension (sandbox).
     for (const r of plan.localRenumbers) {
-      await tx[r.table].update({ where: { id: r.rowId }, data: { [r.column]: r.to } })
+      const data: Record<string, unknown> = { [r.column]: r.to }
+      const stamp = nextHlc?.()
+      if (stamp) data.hlc = stamp
+      await tx[r.table].update({ where: { id: r.rowId }, data })
     }
 
     for (const u of plan.upserts) {

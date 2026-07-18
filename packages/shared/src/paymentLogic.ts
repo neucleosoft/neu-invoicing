@@ -72,6 +72,7 @@ async function adjustInvoicePaid(tx: DrizzleTx, invoiceId: string, delta: number
       amountPaid: salesInvoice.amountPaid,
       totalAmount: salesInvoice.totalAmount,
       updatedAt: salesInvoice.updatedAt,
+      hlc: salesInvoice.hlc,
     })
     .from(salesInvoice)
     .where(eq(salesInvoice.id, invoiceId))
@@ -79,9 +80,9 @@ async function adjustInvoicePaid(tx: DrizzleTx, invoiceId: string, delta: number
   const inv = rows[0]
   if (!inv) return
   const paid = inv.amountPaid + delta
-  // updatedAt preserved: posting money against a doc is a derived-column
-  // write, not a content edit — auto-bumping it would let this machine write
-  // beat a real human edit in sync's newest-edit-wins.
+  // updatedAt AND hlc preserved: posting money against a doc is a derived-
+  // column write, not a content edit — auto-bumping either would let this
+  // machine write beat a real human edit in sync's newest-edit-wins.
   await tx
     .update(salesInvoice)
     .set({
@@ -89,6 +90,7 @@ async function adjustInvoicePaid(tx: DrizzleTx, invoiceId: string, delta: number
       balanceDue: inv.totalAmount - paid,
       status: computePaymentStatus(inv.totalAmount, paid),
       updatedAt: inv.updatedAt,
+      hlc: inv.hlc,
     })
     .where(eq(salesInvoice.id, invoiceId))
 }
@@ -100,6 +102,7 @@ async function adjustBillPaid(tx: DrizzleTx, billId: string, delta: number) {
       amountPaid: purchaseBill.amountPaid,
       totalAmount: purchaseBill.totalAmount,
       updatedAt: purchaseBill.updatedAt,
+      hlc: purchaseBill.hlc,
     })
     .from(purchaseBill)
     .where(eq(purchaseBill.id, billId))
@@ -107,7 +110,7 @@ async function adjustBillPaid(tx: DrizzleTx, billId: string, delta: number) {
   const bill = rows[0]
   if (!bill) return
   const paid = bill.amountPaid + delta
-  // Same rule as adjustInvoicePaid: machine write, updatedAt preserved.
+  // Same rule as adjustInvoicePaid: machine write, updatedAt + hlc preserved.
   await tx
     .update(purchaseBill)
     .set({
@@ -115,6 +118,7 @@ async function adjustBillPaid(tx: DrizzleTx, billId: string, delta: number) {
       balanceDue: bill.totalAmount - paid,
       status: computePaymentStatus(bill.totalAmount, paid),
       updatedAt: bill.updatedAt,
+      hlc: bill.hlc,
     })
     .where(eq(purchaseBill.id, billId))
 }

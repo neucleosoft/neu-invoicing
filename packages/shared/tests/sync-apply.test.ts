@@ -6,6 +6,7 @@ import {
   nextFreeNumber,
   type LocalIndex,
 } from '../src/syncApply'
+import { encodeHlc } from '../src/hlc'
 import type { SyncPacket } from '../src/syncPackets'
 
 let failures = 0
@@ -260,6 +261,80 @@ console.log('\n6. nextFreeNumber edge cases')
   check('width growth ok', nextFreeNumber('INV-99', () => false) === 'INV-100')
   check('no digits → suffix', nextFreeNumber('ADHOC', (n) => n === 'ADHOC-2') === 'ADHOC-3')
   check('numeric', nextFreeNumber(7, (n) => n === 8) === 9)
+}
+
+console.log('\n7. HLC comparator (P1: clock-skew-proof newest-wins)')
+{
+  // THE bug this exists for: device B's wall clock is a month BEHIND. B pulled
+  // A's edit (so B's ratchet moved past A's stamp), then B edited the row.
+  // B's packet: updatedAt = backdated wall clock (OLDER than local), but hlc
+  // ABOVE local's. Wall-clock compare would silently discard B's real edit;
+  // hlc compare must apply it.
+  const T = 1_700_000_000_000
+  const MONTH = 30 * 24 * 60 * 60 * 1000
+  const hlcA = encodeHlc(T, 0, 'desktop-a')
+  const hlcB = encodeHlc(T, 1, 'phone-b') // B stamped after observing hlcA
+
+  const skewWin = run(
+    [pkt({ table: 'customer', rowId: 'C1', updatedAt: T - MONTH, row: { id: 'C1', hlc: hlcB, name: 'edited on backdated phone' } })],
+    { headers: { customer: { C1: { updatedAt: T, hlc: hlcA } } } },
+  )
+  check('backdated-clock edit with newer hlc WINS', skewWin.upserts.length === 1 && skewWin.skipped.length === 0)
+
+  // Mirror image: clock a month AHEAD stamps a huge updatedAt, but its hlc is
+  // older than local's (local edited after seeing it) → must lose.
+  const aheadLose = run(
+    [pkt({ table: 'customer', rowId: 'C2', updatedAt: T + MONTH, row: { id: 'C2', hlc: hlcA } })],
+    { headers: { customer: { C2: { updatedAt: T, hlc: hlcB } } } },
+  )
+  check('future-clock edit with older hlc LOSES', aheadLose.skipped[0]?.reason === 'NOT_NEWER')
+
+  // Legacy fallbacks: either side missing hlc → wall-clock updatedAt decides.
+  const incNoHlc = run(
+    [pkt({ table: 'customer', rowId: 'C3', updatedAt: T + 5, row: { id: 'C3' } })],
+    { headers: { customer: { C3: { updatedAt: T, hlc: hlcA } } } },
+  )
+  check('incoming without hlc falls back to updatedAt (newer applies)', incNoHlc.upserts.length === 1)
+
+  const locNoHlc = run(
+    [pkt({ table: 'customer', rowId: 'C4', updatedAt: T - 5, row: { id: 'C4', hlc: hlcB } })],
+    { headers: { customer: { C4: { updatedAt: T } } } },
+  )
+  check('local without hlc falls back to updatedAt (older skips)', locNoHlc.skipped[0]?.reason === 'NOT_NEWER')
+
+  // Sticky rules stay timestamp-free: a cancel wins even against a newer hlc.
+  const stickyStill = run(
+    [pkt({ table: 'salesInvoice', rowId: 'I1', updatedAt: T - MONTH, row: { id: 'I1', cancelledAt: T - MONTH, hlc: hlcA } })],
+    { headers: { salesInvoice: { I1: { updatedAt: T, hlc: hlcB, cancelledAt: null } } } },
+  )
+  check('incoming cancel still beats a newer local hlc (sticky > clocks)', stickyStill.upserts.length === 1)
+
+  // Dedupe across diaries prefers the bigger hlc even when updatedAt lies.
+  const kept = dedupePackets([
+    pkt({ table: 'customer', rowId: 'D1', updatedAt: T + MONTH, row: { id: 'D1', hlc: hlcA, from: 'ahead-clock' } }),
+    pkt({ table: 'customer', rowId: 'D1', updatedAt: T - MONTH, row: { id: 'D1', hlc: hlcB, from: 'behind-clock' } }),
+  ])
+  check('dedupe keeps the bigger hlc, not the bigger updatedAt', kept.length === 1 && kept[0].row.from === 'behind-clock')
+
+  // Renumbered incoming docs get a FRESH hlc from the injected ratchet, so the
+  // renumber outranks the original doc everywhere.
+  let minted = 0
+  const freshHlc = encodeHlc(T + 10, 0, 'this-device')
+  const renum = planApply(
+    [pkt({ table: 'salesInvoice', rowId: 'NEW', updatedAt: 500, row: { id: 'NEW', invoiceNumber: 'INV-01', createdAt: 400, hlc: hlcA } })],
+    { headers: { salesInvoice: {} }, numbers: { salesInvoice: { 'INV-01': { rowId: 'OLD', createdAt: 100 } } } },
+    NOW_TS,
+    () => { minted++; return freshHlc },
+  )
+  check('collision renumber stamps a fresh hlc via nextHlc', minted === 1 && renum.upserts[0]?.row.hlc === freshHlc)
+
+  // Without a generator the stamp is derived (now + packet device) — never stale.
+  const renumFallback = planApply(
+    [pkt({ table: 'salesInvoice', rowId: 'NEW2', updatedAt: 500, row: { id: 'NEW2', invoiceNumber: 'INV-02', createdAt: 400, hlc: hlcA } })],
+    { headers: { salesInvoice: {} }, numbers: { salesInvoice: { 'INV-02': { rowId: 'OLD2', createdAt: 100 } } } },
+    NOW_TS,
+  )
+  check('renumber without generator still refreshes hlc', renumFallback.upserts[0]?.row.hlc === encodeHlc(NOW_TS, 0, 'phone-abc'))
 }
 
 console.log(`\n=== ${passes} passed, ${failures} failed ===`)
