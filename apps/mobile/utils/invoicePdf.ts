@@ -8,6 +8,7 @@ import { eq } from 'drizzle-orm'
 
 import { buildInvoiceFilename, type InvoiceData } from '@neu/shared'
 import { schema, useDb } from '@/db'
+import { getSetting } from '@/utils/appSettings'
 
 type Db = ReturnType<typeof useDb>
 
@@ -38,7 +39,12 @@ export async function buildInvoicePdfPayload(db: Db, invoiceId: string): Promise
     .leftJoin(schema.item, eq(schema.salesInvoiceItem.itemId, schema.item.id))
     .where(eq(schema.salesInvoiceItem.salesInvoiceId, invoiceId))
 
+  // The user's chosen visual template ('classic' when unset) — same
+  // Settings-table key desktop uses, so the choice follows the synced DB.
+  const template = (await getSetting(db, 'invoiceTemplate')) ?? 'classic'
+
   const data: InvoiceData = {
+    template,
     invoiceNumber: inv.invoiceNumber,
     invoiceDate: inv.invoiceDate.toISOString(),
     dueDate: inv.dueDate ? inv.dueDate.toISOString() : undefined,

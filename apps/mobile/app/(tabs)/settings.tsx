@@ -23,6 +23,7 @@ import { rowSyncNow } from '@/sync/rowSync';
 import { getBackupFrequency, setBackupFrequency, type BackupFrequency } from '@/sync/scheduledBackup';
 import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
 import { getSetting, setSetting } from '@/utils/appSettings';
+import { INVOICE_TEMPLATE_INFO, type InvoiceTemplate } from '@neu/shared';
 import {
   PO_GENERAL_TERMS_DEFAULT,
   PO_SETTINGS_KEYS,
@@ -60,10 +61,21 @@ export default function SettingsScreen() {
   const [poSpecial, setPoSpecial] = useState('');
   const [poTerms, setPoTerms] = useState('');
   const [poSaving, setPoSaving] = useState(false);
+
+  // Invoice template choice — same Settings-table key desktop uses
+  // ('invoiceTemplate'), so the pick follows the synced database.
+  const [invTemplate, setInvTemplate] = useState<InvoiceTemplate>('classic');
+  async function handleTemplateChange(t: InvoiceTemplate) {
+    setInvTemplate(t);
+    await setSetting(db, 'invoiceTemplate', t);
+  }
+
   useEffect(() => {
     (async () => {
       setPoSpecial((await getSetting(db, PO_SETTINGS_KEYS.specialInstructions)) ?? PO_SPECIAL_INSTRUCTIONS_DEFAULT);
       setPoTerms((await getSetting(db, PO_SETTINGS_KEYS.generalTerms)) ?? PO_GENERAL_TERMS_DEFAULT);
+      const t = await getSetting(db, 'invoiceTemplate');
+      if (t && t in INVOICE_TEMPLATE_INFO) setInvTemplate(t as InvoiceTemplate);
     })();
   }, [db]);
   async function handleSavePoDefaults() {
@@ -702,6 +714,30 @@ export default function SettingsScreen() {
       </ThemedView>
 
       <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Invoice Template</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Used when you share or save an invoice PDF. Quotations and proforma
+          invoices always use the classic GST layout.
+        </ThemedText>
+        {(Object.keys(INVOICE_TEMPLATE_INFO) as InvoiceTemplate[]).map((t) => (
+          <Pressable
+            key={t}
+            onPress={() => handleTemplateChange(t)}
+            style={[styles.templateRow, invTemplate === t && styles.templateRowActive]}
+          >
+            <ThemedText style={styles.templateEmoji}>{INVOICE_TEMPLATE_INFO[t].preview}</ThemedText>
+            <View style={styles.templateText}>
+              <ThemedText type={invTemplate === t ? 'defaultSemiBold' : undefined}>
+                {INVOICE_TEMPLATE_INFO[t].name}
+                {invTemplate === t ? '  ✓' : ''}
+              </ThemedText>
+              <ThemedText style={styles.businessHint}>{INVOICE_TEMPLATE_INFO[t].description}</ThemedText>
+            </View>
+          </Pressable>
+        ))}
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Tax Settings</ThemedText>
         <ThemedText style={styles.businessHint}>
           Tax rates are configured per item — open an item to set its GST rate.
@@ -866,6 +902,18 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   poInputTall: { minHeight: 180 },
+  templateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  templateRowActive: { borderColor: '#007AFF', backgroundColor: '#eff6ff' },
+  templateEmoji: { fontSize: 20 },
+  templateText: { flex: 1, gap: 2 },
   poActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   poReset: { paddingVertical: 10 },
   keyButton: {

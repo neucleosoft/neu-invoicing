@@ -84,6 +84,10 @@ export interface InvoiceData extends PDFDocumentData {
   warrantyPeriod?: string
   dispatchedThrough?: string
   deliveryTime?: string
+  // Which visual template to render ('classic' when absent). Rides inside the
+  // data so the mobile WebView bridge — which passes a single plain-JSON
+  // argument — can select the template too.
+  template?: string
 }
 
 // pdfmake ships no type definitions; its content/cell nodes are plain objects.
