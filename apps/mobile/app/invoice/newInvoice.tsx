@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Screen } from '@/components/ui/Screen'
 import { SectionHeader } from '@/components/ui/SectionHeader'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { useColors } from '@/hooks/use-colors'
 import { Radius, Spacing, Type } from '@/constants/tokens'
 import { schema, useDb } from '@/db'
@@ -648,8 +649,10 @@ export default function NewInvoiceScreen() {
             <Text style={[Type.title, styles.modalTitle, { color: c.text }]}>
               Select Customer
             </Text>
-            <FlatList
+            <PickerSearchList
               data={customers}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.phone]}
               keyExtractor={(c) => c.id}
               ListEmptyComponent={
                 <Text style={[styles.modalEmpty, { color: c.muted }]}>
@@ -685,8 +688,10 @@ export default function NewInvoiceScreen() {
             <Text style={[Type.title, styles.modalTitle, { color: c.text }]}>
               Select Item
             </Text>
-            <FlatList
+            <PickerSearchList
               data={items}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.hsnCode, x.skuHsn]}
               keyExtractor={(it) => it.id}
               ListEmptyComponent={
                 <Text style={[styles.modalEmpty, { color: c.muted }]}>

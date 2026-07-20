@@ -17,6 +17,7 @@ import { computeGstValues, computePaymentStatus } from '@neu/shared'
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 
@@ -758,8 +759,10 @@ export default function EditInvoiceScreen() {
             <ThemedText type="title" style={styles.modalTitle}>
               Select Customer
             </ThemedText>
-            <FlatList
+            <PickerSearchList
               data={customers}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.phone]}
               keyExtractor={(c) => c.id}
               ListEmptyComponent={
                 <ThemedText style={styles.modalEmpty}>
@@ -792,8 +795,10 @@ export default function EditInvoiceScreen() {
             <ThemedText type="title" style={styles.modalTitle}>
               Select Item
             </ThemedText>
-            <FlatList
+            <PickerSearchList
               data={items}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.hsnCode, x.skuHsn]}
               keyExtractor={(it) => it.id}
               ListEmptyComponent={
                 <ThemedText style={styles.modalEmpty}>

@@ -1466,27 +1466,22 @@ const Purchase = () => {
                         <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                           <div className="flex-1">
                             <label className="label text-xs">Item</label>
-                            <select
-                              className="input"
+                            <SearchableSelect
                               value={item.itemId}
-                              onChange={(e) => updateBillItem(index, 'itemId', e.target.value)}
-                              // Required only when this row has no extracted name. Extraction-driven
-                              // lines may keep itemId empty — backend auto-creates a SupplierItem
-                              // row from _extractedName on save.
+                              onChange={(id) => updateBillItem(index, 'itemId', id)}
+                              // The empty-id pseudo-option keeps the old select's revert path:
+                              // picking it clears itemId so save auto-creates the SupplierItem
+                              // from the extracted name. Required only when no extracted name.
+                              options={[
+                                ...(item._extractedName
+                                  ? [{ id: '', name: `+ Add "${item._extractedName}" to catalog` }]
+                                  : []),
+                                ...items.map((i) => ({ id: i.id, name: i.name, subtitle: i.hsnCode || undefined })),
+                              ]}
+                              placeholder={formData.supplierId ? 'Select Item' : 'Pick a supplier first'}
                               required={!item._extractedName}
                               disabled={!formData.supplierId}
-                            >
-                              <option value="">
-                                {item._extractedName
-                                  ? `+ Add "${item._extractedName}" to catalog`
-                                  : formData.supplierId
-                                  ? 'Select Item'
-                                  : 'Pick a supplier first'}
-                              </option>
-                              {items.map((i) => (
-                                <option key={i.id} value={i.id}>{i.name}</option>
-                              ))}
-                            </select>
+                            />
                             {item._extractedName && (
                               item.itemId ? (
                                 <p className="text-xs mt-1 truncate text-blue-600 dark:text-blue-400" title={item._extractedName}>

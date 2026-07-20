@@ -17,6 +17,7 @@ import { computeGstValues } from '@neu/shared'
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 
@@ -246,7 +247,7 @@ export default function EditProformaScreen() {
       <Modal visible={showItemPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}><ThemedView style={styles.modalContent}>
           <ThemedText type="title" style={styles.modalTitle}>Select Item</ThemedText>
-          <FlatList data={items} keyExtractor={(it) => it.id} renderItem={({ item }) => (
+          <PickerSearchList data={items} getName={(x) => x.name} getExtra={(x) => [x.hsnCode, x.skuHsn]} keyExtractor={(it) => it.id} renderItem={({ item }) => (
             <Pressable style={styles.modalRow} onPress={() => pickItem(item)}><ThemedText type="defaultSemiBold">{item.name}</ThemedText><ThemedText style={styles.modalRowSub}>₹{item.salePrice.toFixed(2)} / {item.unit} · {item.taxRate}% GST</ThemedText></Pressable>
           )} />
           <Pressable style={styles.modalClose} onPress={() => setShowItemPicker(false)}><ThemedText style={styles.modalCloseText}>Cancel</ThemedText></Pressable>

@@ -990,18 +990,14 @@ const PurchaseOrders = () => {
                         <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                           <div className="flex-1">
                             <label className="label text-xs">Item</label>
-                            <select
-                              className="input"
+                            <SearchableSelect
                               value={line.itemId}
-                              onChange={(e) => updateLine(index, 'itemId', e.target.value)}
+                              onChange={(id) => updateLine(index, 'itemId', id)}
+                              options={catalog.map((c) => ({ id: c.id, name: c.name, subtitle: c.hsnCode || undefined }))}
+                              placeholder={formData.supplierId ? 'Select Item' : 'Pick a supplier first'}
                               required
                               disabled={!formData.supplierId}
-                            >
-                              <option value="">{formData.supplierId ? 'Select Item' : 'Pick a supplier first'}</option>
-                              {catalog.map((c) => (
-                                <option key={c.id} value={c.id}>{c.name}</option>
-                              ))}
-                            </select>
+                            />
                           </div>
 
                           <div className="w-32">

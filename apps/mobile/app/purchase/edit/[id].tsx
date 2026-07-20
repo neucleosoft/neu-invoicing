@@ -15,6 +15,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { formatCurrency } from '@/utils/currency'
@@ -502,8 +503,10 @@ export default function EditPurchaseScreen() {
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.modalContent}>
             <ThemedText type="title" style={styles.modalTitle}>Select Supplier</ThemedText>
-            <FlatList
+            <PickerSearchList
               data={suppliers}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.phone]}
               keyExtractor={(s) => s.id}
               renderItem={({ item }) => (
                 <Pressable style={styles.modalRow} onPress={() => pickSupplier(item.id)}>
@@ -529,8 +532,10 @@ export default function EditPurchaseScreen() {
                 This supplier has no catalog items yet. Close this and use “+ New item”.
               </ThemedText>
             ) : (
-              <FlatList
+              <PickerSearchList
                 data={catalog}
+                getName={(x) => x.name}
+                getExtra={(x) => [x.hsnCode]}
                 keyExtractor={(c) => c.id}
                 renderItem={({ item }) => (
                   <Pressable style={styles.modalRow} onPress={() => addFromCatalog(item)}>

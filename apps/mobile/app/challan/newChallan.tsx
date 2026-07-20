@@ -3,7 +3,6 @@ import { router } from 'expo-router'
 import { useEffect, useState } from 'react'
 import {
   Alert,
-  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -17,6 +16,8 @@ import { computeGstValues } from '@neu/shared'
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
+import { PickerModal } from '@/components/PickerModal'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { generateChallanNumber } from '@/utils/docNumber'
@@ -307,7 +308,7 @@ export default function NewChallanScreen() {
         <ThemedText style={styles.saveButtonText}>{saving ? 'Saving…' : 'Save Challan'}</ThemedText>
       </Pressable>
 
-      <PickerModal visible={showCustomerPicker} title="Select Customer" data={customers.map((c) => ({ key: c.id, label: c.name }))} selectedKey={customerId ?? ''} onSelect={setCustomerId} onClose={() => setShowCustomerPicker(false)} />
+      <PickerModal visible={showCustomerPicker} title="Select Customer" data={customers.map((c) => ({ key: c.id, label: c.name, sublabel: c.phone ?? undefined }))} selectedKey={customerId ?? ''} onSelect={setCustomerId} onClose={() => setShowCustomerPicker(false)} />
       <PickerModal visible={showStatusPicker} title="Status" data={STATUS_OPTIONS.map((s) => ({ key: s, label: s }))} selectedKey={status} onSelect={(k) => setStatus(k as StatusOption)} onClose={() => setShowStatusPicker(false)} />
       <PickerModal visible={showTransportPicker} title="Transport Mode" data={TRANSPORT_MODES.map((m) => ({ key: m, label: m }))} selectedKey={transportMode} onSelect={setTransportMode} onClose={() => setShowTransportPicker(false)} />
 
@@ -315,8 +316,10 @@ export default function NewChallanScreen() {
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.modalContent}>
             <ThemedText type="title" style={styles.modalTitle}>Select Item</ThemedText>
-            <FlatList
+            <PickerSearchList
               data={items}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.hsnCode, x.skuHsn]}
               keyExtractor={(it) => it.id}
               ListEmptyComponent={<ThemedText style={styles.modalEmpty}>No items yet.</ThemedText>}
               renderItem={({ item }) => (
@@ -361,32 +364,6 @@ function TotalRow({ label, value, bold }: { label: string; value: number; bold?:
       <ThemedText type={bold ? 'defaultSemiBold' : undefined}>{label}</ThemedText>
       <ThemedText type={bold ? 'defaultSemiBold' : undefined}>₹{value.toFixed(2)}</ThemedText>
     </View>
-  )
-}
-function PickerModal({ visible, title, data, selectedKey, onSelect, onClose }: { visible: boolean; title: string; data: { key: string; label: string }[]; selectedKey: string; onSelect: (k: string) => void; onClose: () => void }) {
-  return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.modalOverlay}>
-        <ThemedView style={styles.modalContent}>
-          <ThemedText type="title" style={styles.modalTitle}>{title}</ThemedText>
-          <FlatList
-            data={data}
-            keyExtractor={(o) => o.key}
-            ListEmptyComponent={<ThemedText style={styles.modalEmpty}>Nothing here yet.</ThemedText>}
-            renderItem={({ item }) => (
-              <Pressable style={styles.modalRow} onPress={() => { onSelect(item.key); onClose() }}>
-                <ThemedText type={item.key === selectedKey ? 'defaultSemiBold' : undefined}>
-                  {item.key === selectedKey ? `✓ ${item.label}` : item.label}
-                </ThemedText>
-              </Pressable>
-            )}
-          />
-          <Pressable style={styles.modalClose} onPress={onClose}>
-            <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
-          </Pressable>
-        </ThemedView>
-      </View>
-    </Modal>
   )
 }
 

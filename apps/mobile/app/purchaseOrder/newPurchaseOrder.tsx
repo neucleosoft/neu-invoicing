@@ -3,7 +3,6 @@ import { router } from 'expo-router'
 import { useEffect, useState } from 'react'
 import {
   Alert,
-  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -15,6 +14,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { formatCurrency } from '@/utils/currency'
@@ -187,7 +187,7 @@ export default function NewPurchaseOrderScreen() {
       <Modal visible={showSupplierPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}><ThemedView style={styles.modalContent}>
           <ThemedText type="title" style={styles.modalTitle}>Select Supplier</ThemedText>
-          <FlatList data={suppliers} keyExtractor={(s) => s.id} renderItem={({ item }) => (
+          <PickerSearchList data={suppliers} getName={(x) => x.name} getExtra={(x) => [x.phone]} keyExtractor={(s) => s.id} renderItem={({ item }) => (
             <Pressable style={styles.modalRow} onPress={() => pickSupplier(item.id)}><ThemedText type={item.id === supplierId ? 'defaultSemiBold' : undefined}>{item.id === supplierId ? `✓ ${item.name}` : item.name}</ThemedText></Pressable>
           )} />
           <Pressable style={styles.modalClose} onPress={() => setShowSupplierPicker(false)}><ThemedText style={styles.modalCloseText}>Cancel</ThemedText></Pressable>
@@ -200,7 +200,7 @@ export default function NewPurchaseOrderScreen() {
           {catalog.length === 0 ? (
             <ThemedText style={styles.emptyCatalog}>This supplier has no catalog items yet. Close this and use “+ New item”.</ThemedText>
           ) : (
-            <FlatList data={catalog} keyExtractor={(c) => c.id} renderItem={({ item }) => (
+            <PickerSearchList data={catalog} getName={(x) => x.name} getExtra={(x) => [x.hsnCode]} keyExtractor={(c) => c.id} renderItem={({ item }) => (
               <Pressable style={styles.modalRow} onPress={() => addFromCatalog(item)}>
                 <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
                 <ThemedText style={styles.catalogMeta}>{formatCurrency(item.lastPurchasePrice)} · {item.defaultTaxRate}% · {item.unit}</ThemedText>
