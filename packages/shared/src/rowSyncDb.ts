@@ -38,6 +38,28 @@ export const DIARY_WINDOW_MS = 30 * 24 * 60 * 60 * 1000
 
 export const diaryFileName = (deviceId: string) => `changes-${deviceId}.json`
 
+/**
+ * Change-detection fingerprint of a diary's CONTENT. Hashes only the packets
+ * — the envelope's generatedAt changes on every collection, so hashing the
+ * whole file would report "changed" every tick. Lets the 1-minute auto-sync
+ * skip re-uploading an identical diary (a quiet shop day would otherwise
+ * rewrite the same Drive file ~1,440 times). FNV-1a run twice with different
+ * seeds (~64 bits) — change detection, not cryptography; a collision merely
+ * delays a push until the next edit.
+ */
+export function diaryFingerprint(diary: SyncDiary): string {
+  const s = JSON.stringify(diary.packets)
+  const fnv = (seed: number): number => {
+    let h = seed >>> 0
+    for (let i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i)
+      h = Math.imul(h, 0x01000193) >>> 0
+    }
+    return h >>> 0
+  }
+  return `${fnv(0x811c9dc5).toString(36)}-${fnv(0x1234abcd).toString(36)}-${s.length.toString(36)}`
+}
+
 export interface RowSyncResult {
   success: boolean
   error?: string

@@ -26,6 +26,7 @@ import {
   buildLocalIndexDb,
   collectDiaryDb,
   diaryFileName,
+  diaryFingerprint,
   eq,
   executePlanDb,
   hlcPhysicalMs,
@@ -90,6 +91,9 @@ const LAST_ROW_SYNC_KEY = 'last_row_sync_at'
 // button (which owns the confirm dialog) to resolve it. Cleared on any
 // successful completed sync.
 const PENDING_REMOVALS_KEY = 'row_sync_pending_removals'
+// Fingerprint of the last diary this device pushed — an identical diary is
+// not re-uploaded (see rowSyncNow). Cleared by resetSyncBaseline in sync.ts.
+const LAST_PUSHED_DIARY_HASH_KEY = 'last_pushed_diary_hash'
 
 export const getRowSyncStatus = (): { lastSyncAt: number | null; pendingRemovals: number | null } => ({
   lastSyncAt: (store.get(LAST_ROW_SYNC_KEY) as number | undefined) ?? null,
@@ -595,22 +599,33 @@ export const rowSyncNow = async (
 
     // PUSH: rewrite this device's whole 30-day diary (stateless, idempotent).
     const diary = await collectDiaryDb(db, deviceId, now)
-    await uploadOwnDiary(drive, deviceId, JSON.stringify(diary))
-
-    // S4 image split: photos of the changed bills ride as their own Drive
-    // files, once each — best-effort, never fails the sync.
-    const changedBillIds = diary.packets
-      .filter((p) => p.table === 'purchaseBill')
-      .map((p) => p.rowId)
-    const changedPrevInvIds = diary.packets
-      .filter((p) => p.table === 'previousInvoice')
-      .map((p) => p.rowId)
+    // Skip the upload (and the windowed photo push) when the diary's CONTENT
+    // is identical to what this device last pushed — at a 1-minute tick a
+    // quiet day would otherwise rewrite the same Drive file ~1,440 times and
+    // re-list img-* for every in-window bill each minute. A photo whose
+    // upload failed inside an otherwise-unchanged window is retried by the
+    // 3-day backstop sweep below (its designed job) or on the next real edit.
+    const fingerprint = diaryFingerprint(diary)
+    const diaryUnchanged = store.get(LAST_PUSHED_DIARY_HASH_KEY) === fingerprint
     let photosPushed = 0
-    if (changedBillIds.length > 0 || changedPrevInvIds.length > 0) {
-      const images = await listDriveImages(drive)
-      photosPushed =
-        (await pushBillImages(drive, db, changedBillIds, images)) +
-        (await pushPreviousInvoiceFiles(drive, db, changedPrevInvIds, images))
+    if (!diaryUnchanged) {
+      await uploadOwnDiary(drive, deviceId, JSON.stringify(diary))
+
+      // S4 image split: photos of the changed bills ride as their own Drive
+      // files, once each — best-effort, never fails the sync.
+      const changedBillIds = diary.packets
+        .filter((p) => p.table === 'purchaseBill')
+        .map((p) => p.rowId)
+      const changedPrevInvIds = diary.packets
+        .filter((p) => p.table === 'previousInvoice')
+        .map((p) => p.rowId)
+      if (changedBillIds.length > 0 || changedPrevInvIds.length > 0) {
+        const images = await listDriveImages(drive)
+        photosPushed =
+          (await pushBillImages(drive, db, changedBillIds, images)) +
+          (await pushPreviousInvoiceFiles(drive, db, changedPrevInvIds, images))
+      }
+      store.set(LAST_PUSHED_DIARY_HASH_KEY, fingerprint)
     }
     photosPushed += await sweepMissingPhotosIfDue(drive, db)
 
@@ -640,12 +655,15 @@ export const rowSyncNow = async (
 }
 
 // ── Auto-sync scheduler (S3) ─────────────────────────────────────────────────
-// Foreground-only by nature (the app is open), fires every 5 minutes plus one
+// Foreground-only by nature (the app is open), fires every MINUTE (matching
+// mobile's ticker, so phone→desktop latency stays ~2 min worst case) plus one
 // delayed run at startup — delayed so the boot backfills (openingStock, inline
 // payments) always finish before the first recompute-after-merge can run.
+// Cheap by design: an unchanged diary skips its upload (fingerprint check
+// above), so a quiet tick is one diary listing + tiny peer reads.
 // Auto ticks NEVER confirm the tripwire; a pause waits for the manual button.
 
-const ROW_SYNC_TICK_MS = 5 * 60 * 1000
+const ROW_SYNC_TICK_MS = 60 * 1000
 const ROW_SYNC_FIRST_RUN_DELAY_MS = 20_000
 
 let rowSyncTimer: NodeJS.Timeout | null = null

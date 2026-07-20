@@ -96,6 +96,10 @@ export const resetSyncBaseline = () => {
   // restore it would show a stale "removals pending" banner until the next
   // successful sync. (Key literal matches rowSync.ts's PENDING_REMOVALS_KEY.)
   store.delete('row_sync_pending_removals')
+  // The pushed-diary fingerprint also describes the pre-restore database —
+  // clearing it forces the next sync to re-upload unconditionally. (Key
+  // literal matches rowSync.ts's LAST_PUSHED_DIARY_HASH_KEY.)
+  store.delete('last_pushed_diary_hash')
 }
 
 // Scheduled-backup configuration. Per-device (electron-store, not synced).

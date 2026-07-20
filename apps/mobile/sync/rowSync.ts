@@ -8,10 +8,12 @@
 // diary; pull reads the peers' diaries in full and planApply skips the rest.
 // Re-running Sync now is always harmless.
 
+import * as SecureStore from 'expo-secure-store'
 import {
   buildLocalIndexDb,
   collectDiaryDb,
   diaryFileName,
+  diaryFingerprint,
   executePlanDb,
   hlcPhysicalMs,
   parseDiary,
@@ -39,6 +41,10 @@ type Db = ReturnType<typeof useDb>
 
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
 const DRIVE_UPLOAD_URL = 'https://www.googleapis.com/upload/drive/v3/files'
+
+// Fingerprint of the last diary this device pushed — an identical diary is
+// not re-uploaded (see rowSyncNow).
+const LAST_PUSHED_DIARY_HASH_KEY = 'neu.sync.lastPushedDiaryHash'
 
 // ── Drive diary IO ───────────────────────────────────────────────────────────
 
@@ -194,23 +200,35 @@ export async function rowSyncNow(
     }
 
     // PUSH: rewrite this device's whole 30-day diary (stateless, idempotent).
+    // Skip the upload (and the windowed photo push) when the diary's CONTENT
+    // is identical to what this device last pushed — the 60-second ticker
+    // would otherwise rewrite the same Drive file all day and burn battery/
+    // data re-listing img-* every minute. A photo whose upload failed inside
+    // an otherwise-unchanged window is retried by the 3-day backstop sweep
+    // below (its designed job) or on the next real edit.
     const diary = await collectDiaryDb(db, deviceId, now)
-    await uploadOwnDiary(accessToken, deviceId, JSON.stringify(diary))
-
-    // S4 image split: photos of the changed bills ride as their own Drive
-    // files, once each — best-effort, never fails the sync.
-    const changedBillIds = diary.packets
-      .filter((p) => p.table === 'purchaseBill')
-      .map((p) => p.rowId)
-    const changedPrevInvIds = diary.packets
-      .filter((p) => p.table === 'previousInvoice')
-      .map((p) => p.rowId)
+    const fingerprint = diaryFingerprint(diary)
+    const diaryUnchanged =
+      (await SecureStore.getItemAsync(LAST_PUSHED_DIARY_HASH_KEY)) === fingerprint
     let photosPushed = 0
-    if (changedBillIds.length > 0 || changedPrevInvIds.length > 0) {
-      const images = await listDriveImages(accessToken)
-      photosPushed =
-        (await pushBillImages(db, accessToken, changedBillIds, images)) +
-        (await pushPreviousInvoiceFiles(db, accessToken, changedPrevInvIds, images))
+    if (!diaryUnchanged) {
+      await uploadOwnDiary(accessToken, deviceId, JSON.stringify(diary))
+
+      // S4 image split: photos of the changed bills ride as their own Drive
+      // files, once each — best-effort, never fails the sync.
+      const changedBillIds = diary.packets
+        .filter((p) => p.table === 'purchaseBill')
+        .map((p) => p.rowId)
+      const changedPrevInvIds = diary.packets
+        .filter((p) => p.table === 'previousInvoice')
+        .map((p) => p.rowId)
+      if (changedBillIds.length > 0 || changedPrevInvIds.length > 0) {
+        const images = await listDriveImages(accessToken)
+        photosPushed =
+          (await pushBillImages(db, accessToken, changedBillIds, images)) +
+          (await pushPreviousInvoiceFiles(db, accessToken, changedPrevInvIds, images))
+      }
+      await SecureStore.setItemAsync(LAST_PUSHED_DIARY_HASH_KEY, fingerprint)
     }
     photosPushed += await sweepMissingPhotosIfDue(db, accessToken)
 
