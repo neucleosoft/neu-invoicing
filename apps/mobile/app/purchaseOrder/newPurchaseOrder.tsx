@@ -20,6 +20,7 @@ import { notDeleted } from '@/db/softDelete'
 import { formatCurrency } from '@/utils/currency'
 import { generatePoNumber } from '@/utils/poNumber'
 import { createPurchaseOrder, type PoLineInput } from '@/utils/poSave'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Supplier = typeof schema.supplier.$inferSelect
 type SupplierItem = typeof schema.supplierItem.$inferSelect
@@ -52,6 +53,11 @@ export default function NewPurchaseOrderScreen() {
   const [shippingAddress, setShippingAddress] = useState('')
   const [termsConditions, setTermsConditions] = useState('')
   const [lines, setLines] = useState<OrderLine[]>([])
+
+  // Rage-guard: Android back / swipe must never silently eat a half-typed
+  // document (see hooks/use-unsaved-guard.ts).
+  const dirty = lines.length > 0 || supplierId !== '' || notes.trim() !== ''
+  const { markClean } = useUnsavedGuard(dirty)
 
   const [saving, setSaving] = useState(false)
   const [showSupplierPicker, setShowSupplierPicker] = useState(false)
@@ -102,6 +108,7 @@ export default function NewPurchaseOrderScreen() {
       }
       const lineInputs: PoLineInput[] = lines.map((l) => ({ supplierItemId: l.supplierItemId, name: l.name.trim(), hsnCode: l.hsnCode.trim(), quantity: l.qty, rate: l.rate, discount: l.discount, taxRate: l.taxRate }))
       await createPurchaseOrder(db, header, lineInputs)
+      markClean()
       router.back()
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save order')

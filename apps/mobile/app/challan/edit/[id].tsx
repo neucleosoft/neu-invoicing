@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   FlatList,
@@ -20,6 +20,7 @@ import { ThemedView } from '@/components/themed-view'
 import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Item = typeof schema.item.$inferSelect
 type Customer = typeof schema.customer.$inferSelect
@@ -70,6 +71,17 @@ export default function EditChallanScreen() {
   const [dispatchedThrough, setDispatchedThrough] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
   const [notes, setNotes] = useState('')
+
+  // Rage-guard: Android back / swipe must never silently eat unsaved edits.
+  // The baseline snapshots the loaded document once; any drift = dirty
+  // (see hooks/use-unsaved-guard.ts).
+  const editSnapshot = JSON.stringify([lines, notes])
+  const baselineRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loading && baselineRef.current === null) baselineRef.current = editSnapshot
+  }, [loading, editSnapshot])
+  const dirty = !loading && baselineRef.current !== null && editSnapshot !== baselineRef.current
+  const { markClean } = useUnsavedGuard(dirty)
   const [termsConditions, setTermsConditions] = useState('')
 
   const [saving, setSaving] = useState(false)
@@ -223,6 +235,7 @@ export default function EditChallanScreen() {
           })
           .where(eq(schema.deliveryChallan.id, id))
       })
+      markClean()
       router.back()
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to update challan')

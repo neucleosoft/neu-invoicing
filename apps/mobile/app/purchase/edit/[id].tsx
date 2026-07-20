@@ -1,6 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   FlatList,
@@ -27,6 +27,7 @@ import {
   type OpenPoSummary,
 } from '@/utils/poSave'
 import { updatePurchaseBill, type PurchaseLineInput } from '@/utils/purchaseSave'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Supplier = typeof schema.supplier.$inferSelect
 type SupplierItem = typeof schema.supplierItem.$inferSelect
@@ -58,6 +59,17 @@ export default function EditPurchaseScreen() {
   const [billDate, setBillDate] = useState('')
   const [notes, setNotes] = useState('')
   const [lines, setLines] = useState<BillLine[]>([])
+
+  // Rage-guard: Android back / swipe must never silently eat unsaved edits.
+  // The baseline snapshots the loaded document once; any drift = dirty
+  // (see hooks/use-unsaved-guard.ts).
+  const editSnapshot = JSON.stringify([supplierId, lines, notes])
+  const baselineRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loading && baselineRef.current === null) baselineRef.current = editSnapshot
+  }, [loading, editSnapshot])
+  const dirty = !loading && baselineRef.current !== null && editSnapshot !== baselineRef.current
+  const { markClean } = useUnsavedGuard(dirty)
 
   const [saving, setSaving] = useState(false)
   const [showSupplierPicker, setShowSupplierPicker] = useState(false)
@@ -305,6 +317,7 @@ export default function EditPurchaseScreen() {
         taxRate: l.taxRate,
       }))
       await updatePurchaseBill(db, id, header, lineInputs)
+      markClean()
       router.back()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to update bill'

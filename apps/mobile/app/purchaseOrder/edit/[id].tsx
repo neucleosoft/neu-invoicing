@@ -1,6 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   Modal,
@@ -19,6 +19,7 @@ import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { formatCurrency } from '@/utils/currency'
 import { updatePurchaseOrder, type PoLineInput } from '@/utils/poSave'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Supplier = typeof schema.supplier.$inferSelect
 type SupplierItem = typeof schema.supplierItem.$inferSelect
@@ -45,6 +46,17 @@ export default function EditPurchaseOrderScreen() {
   const [shippingAddress, setShippingAddress] = useState('')
   const [termsConditions, setTermsConditions] = useState('')
   const [lines, setLines] = useState<OrderLine[]>([])
+
+  // Rage-guard: Android back / swipe must never silently eat unsaved edits.
+  // The baseline snapshots the loaded document once; any drift = dirty
+  // (see hooks/use-unsaved-guard.ts).
+  const editSnapshot = JSON.stringify([supplierId, lines, notes])
+  const baselineRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loading && baselineRef.current === null) baselineRef.current = editSnapshot
+  }, [loading, editSnapshot])
+  const dirty = !loading && baselineRef.current !== null && editSnapshot !== baselineRef.current
+  const { markClean } = useUnsavedGuard(dirty)
 
   const [saving, setSaving] = useState(false)
   const [showSupplierPicker, setShowSupplierPicker] = useState(false)
@@ -114,6 +126,7 @@ export default function EditPurchaseOrderScreen() {
       }
       const lineInputs: PoLineInput[] = lines.map((l) => ({ supplierItemId: l.supplierItemId, name: l.name.trim(), hsnCode: l.hsnCode.trim(), quantity: l.qty, rate: l.rate, discount: l.discount, taxRate: l.taxRate }))
       await updatePurchaseOrder(db, id, header, lineInputs)
+      markClean()
       router.back()
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to update order')

@@ -21,6 +21,7 @@ import { Screen } from '@/components/ui/Screen'
 import { SectionHeader } from '@/components/ui/SectionHeader'
 import { PickerSearchList } from '@/components/PickerSearchList'
 import { useColors } from '@/hooks/use-colors'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 import { Radius, Spacing, Type } from '@/constants/tokens'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
@@ -102,6 +103,11 @@ export default function NewInvoiceScreen() {
   const [amountPaid, setAmountPaid] = useState('0')
   const [paymentMode, setPaymentMode] = useState<PaymentModeOption>('CASH')
   const [notes, setNotes] = useState('')
+
+  // Rage-guard: Android back / swipe must never silently eat a half-typed
+  // document (see hooks/use-unsaved-guard.ts).
+  const dirty = lines.length > 0 || customerId != null || notes.trim() !== ''
+  const { markClean } = useUnsavedGuard(dirty)
   const [termsConditions, setTermsConditions] = useState('')
 
   const [showAdditional, setShowAdditional] = useState(false)
@@ -365,6 +371,8 @@ export default function NewInvoiceScreen() {
           })
         }
       })
+
+      markClean()
 
       router.back()
     } catch (e) {

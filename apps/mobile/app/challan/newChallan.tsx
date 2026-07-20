@@ -21,6 +21,7 @@ import { PickerModal } from '@/components/PickerModal'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { generateChallanNumber } from '@/utils/docNumber'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
@@ -77,6 +78,11 @@ export default function NewChallanScreen() {
   const [dispatchedThrough, setDispatchedThrough] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
   const [notes, setNotes] = useState('')
+
+  // Rage-guard: Android back / swipe must never silently eat a half-typed
+  // document (see hooks/use-unsaved-guard.ts).
+  const dirty = lines.length > 0 || customerId != null || notes.trim() !== ''
+  const { markClean } = useUnsavedGuard(dirty)
   const [termsConditions, setTermsConditions] = useState('')
 
   const [saving, setSaving] = useState(false)
@@ -227,6 +233,7 @@ export default function NewChallanScreen() {
           })
         }
       })
+      markClean()
       router.back()
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save challan')

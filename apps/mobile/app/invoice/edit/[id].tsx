@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   FlatList,
@@ -20,6 +20,7 @@ import { ThemedView } from '@/components/themed-view'
 import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
@@ -95,6 +96,17 @@ export default function EditInvoiceScreen() {
   // discount that was applied on the other device.
   const [docDiscount, setDocDiscount] = useState('0')
   const [notes, setNotes] = useState('')
+
+  // Rage-guard: Android back / swipe must never silently eat unsaved edits.
+  // The baseline snapshots the loaded document once; any drift = dirty
+  // (see hooks/use-unsaved-guard.ts).
+  const editSnapshot = JSON.stringify([customerId, lines, notes])
+  const baselineRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loading && baselineRef.current === null) baselineRef.current = editSnapshot
+  }, [loading, editSnapshot])
+  const dirty = !loading && baselineRef.current !== null && editSnapshot !== baselineRef.current
+  const { markClean } = useUnsavedGuard(dirty)
   const [termsConditions, setTermsConditions] = useState('')
 
   const [showAdditional, setShowAdditional] = useState(false)
@@ -472,6 +484,8 @@ export default function EditInvoiceScreen() {
             .where(eq(schema.paymentTransaction.id, inline.id))
         }
       })
+
+      markClean()
 
       router.back()
     } catch (e) {

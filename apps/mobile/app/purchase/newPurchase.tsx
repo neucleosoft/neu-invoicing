@@ -26,6 +26,7 @@ import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { extractBillFromImage } from '@/utils/billOcr'
 import { formatCurrency } from '@/utils/currency'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 import type { PurchaseTaxOverride } from '@neu/shared'
 
 import {
@@ -69,6 +70,11 @@ export default function NewPurchaseScreen() {
   const [billDate, setBillDate] = useState(todayStr())
   const [notes, setNotes] = useState('')
   const [lines, setLines] = useState<BillLine[]>([])
+
+  // Rage-guard: Android back / swipe must never silently eat a half-typed
+  // document (see hooks/use-unsaved-guard.ts).
+  const dirty = lines.length > 0 || supplierId !== '' || notes.trim() !== ''
+  const { markClean } = useUnsavedGuard(dirty)
   // Up-front payment typed on the form — becomes a real tagged PAYMENT_OUT row
   // on save (mirrors desktop's create form). Kept as text for free typing.
   const [amountPaidStr, setAmountPaidStr] = useState('')
@@ -414,6 +420,7 @@ export default function NewPurchaseScreen() {
         taxRate: l.taxRate,
       }))
       await createPurchaseBill(db, header, lineInputs)
+      markClean()
       router.back()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to save bill'
