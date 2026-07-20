@@ -1,13 +1,17 @@
-// App-icon generator — the single source of truth for every icon both apps
-// ship. Renders the inline SVG below (a white "N" monogram on the brand
-// sky-blue gradient, tailwind `primary` 500→600) to every required PNG via
-// puppeteer (already a devDependency), then scripts/.ico assembly is done by
-// png-to-ico (run through pnpm dlx by the caller).
+// App-icon generator — renders every icon both apps ship from ONE source
+// image: resources/logo-source.png (the tricolor mark, transparent RGBA).
+// Puppeteer (already a devDependency) composes each target on a canvas:
+//
+//   tiles     white rounded/square backgrounds with the logo centered
+//             (the mark's silver arc needs a light backdrop)
+//   adaptive  Android foreground = logo on transparency inside the safe
+//             zone; background = white; monochrome = a white silhouette
+//             cut from the logo's own alpha channel
 //
 //   node scripts/make-icons.mjs
-//   pnpm dlx png-to-ico resources/ico-256.png ... > resources/icon.ico
+//   pnpm dlx png-to-ico resources/ico-256.png resources/ico-128.png resources/ico-64.png resources/ico-48.png resources/ico-32.png resources/ico-24.png resources/ico-16.png > resources/icon.ico
 //
-// Re-run whenever the logo changes; commit the regenerated assets.
+// To change the logo: replace resources/logo-source.png, re-run, rebuild.
 
 import fs from 'node:fs'
 import path from 'node:path'
@@ -19,73 +23,108 @@ const desktopRes = path.join(here, '..', 'resources')
 const mobileAssets = path.join(here, '..', '..', 'mobile', 'assets', 'images')
 fs.mkdirSync(desktopRes, { recursive: true })
 
-// ── The mark ────────────────────────────────────────────────────────────────
-// Geometry only (no fonts — rendering must be deterministic everywhere).
-// N monogram: two uprights + a diagonal band, drawn in a 1024 box.
-const N_PATHS = `
-  <rect x="312" y="292" width="80" height="440" rx="14" fill="#fff"/>
-  <rect x="632" y="292" width="80" height="440" rx="14" fill="#fff"/>
-  <polygon points="392,292 392,442 632,732 632,582" fill="#fff"/>
-`
+const SOURCE = path.join(desktopRes, 'logo-source.png')
+const sourceB64 = fs.readFileSync(SOURCE).toString('base64')
 
-const GRADIENT = `
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#0ea5e9"/>
-      <stop offset="1" stop-color="#0369a1"/>
-    </linearGradient>
-  </defs>
-`
-
-// Full-bleed square (iOS masks its own corners; also the adaptive background).
-const svgFull = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  ${GRADIENT}
-  <rect width="1024" height="1024" fill="url(#bg)"/>
-  <polygon points="0,0 1024,0 0,1024" fill="#ffffff" opacity="0.06"/>
-  ${N_PATHS}
-</svg>`
-
-// Rounded tile (Windows .ico, linux png, splash mark, favicon).
-const svgRounded = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  ${GRADIENT}
-  <rect width="1024" height="1024" rx="224" fill="url(#bg)"/>
-  <polygon points="0,0 1024,0 0,1024" fill="#ffffff" opacity="0.06" clip-path="inset(0 round 224px)"/>
-  ${N_PATHS}
-</svg>`
-
-// White mark on transparency, scaled into the adaptive-icon safe zone
-// (Android masks everything outside the middle ~66% circle).
-const svgMark = (scale) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
-  <g transform="translate(512 512) scale(${scale}) translate(-512 -512)">${N_PATHS}</g>
-</svg>`
-
-// ── Rendering ───────────────────────────────────────────────────────────────
-
+// kind: 'tile-rounded' | 'tile-square' | 'mark' | 'mono' | 'solid-white'
 const TARGETS = [
   // Desktop
-  { svg: svgRounded, size: 512, out: path.join(desktopRes, 'icon.png') },
+  { kind: 'tile-rounded', size: 512, out: path.join(desktopRes, 'icon.png') },
   ...[256, 128, 64, 48, 32, 24, 16].map((s) => ({
-    svg: svgRounded, size: s, out: path.join(desktopRes, `ico-${s}.png`),
+    kind: 'tile-rounded', size: s, out: path.join(desktopRes, `ico-${s}.png`),
   })),
   // Mobile
-  { svg: svgFull, size: 1024, out: path.join(mobileAssets, 'icon.png') },
-  { svg: svgFull, size: 1024, out: path.join(mobileAssets, 'android-icon-background.png') },
-  { svg: svgMark(0.62), size: 1024, out: path.join(mobileAssets, 'android-icon-foreground.png') },
-  { svg: svgMark(0.62), size: 1024, out: path.join(mobileAssets, 'android-icon-monochrome.png') },
-  { svg: svgRounded, size: 1024, out: path.join(mobileAssets, 'splash-icon.png') },
-  { svg: svgRounded, size: 64, out: path.join(mobileAssets, 'favicon.png') },
+  { kind: 'tile-square', size: 1024, out: path.join(mobileAssets, 'icon.png') },
+  { kind: 'solid-white', size: 1024, out: path.join(mobileAssets, 'android-icon-background.png') },
+  { kind: 'mark', size: 1024, scale: 0.58, out: path.join(mobileAssets, 'android-icon-foreground.png') },
+  { kind: 'mono', size: 1024, scale: 0.58, out: path.join(mobileAssets, 'android-icon-monochrome.png') },
+  { kind: 'tile-rounded', size: 1024, out: path.join(mobileAssets, 'splash-icon.png') },
+  { kind: 'tile-rounded', size: 64, out: path.join(mobileAssets, 'favicon.png') },
 ]
 
 const browser = await puppeteer.launch()
 const page = await browser.newPage()
+await page.setContent('<canvas id="c"></canvas>')
+
+// Load the source once, measure its content bounding box (transparent-cropped).
+await page.evaluate(async (b64) => {
+  const img = new Image()
+  img.src = 'data:image/png;base64,' + b64
+  await img.decode()
+  const c = document.createElement('canvas')
+  c.width = img.width
+  c.height = img.height
+  const x = c.getContext('2d')
+  x.drawImage(img, 0, 0)
+  const d = x.getImageData(0, 0, c.width, c.height).data
+  let minX = c.width, minY = c.height, maxX = 0, maxY = 0
+  for (let y = 0; y < c.height; y += 2) {
+    for (let xx = 0; xx < c.width; xx += 2) {
+      if (d[(y * c.width + xx) * 4 + 3] > 8) {
+        if (xx < minX) minX = xx
+        if (xx > maxX) maxX = xx
+        if (y < minY) minY = y
+        if (y > maxY) maxY = y
+      }
+    }
+  }
+  window.__logo = { img, box: { x: minX, y: minY, w: maxX - minX, h: maxY - minY } }
+}, sourceB64)
+
 for (const t of TARGETS) {
-  await page.setViewport({ width: t.size, height: t.size, deviceScaleFactor: 1 })
-  await page.setContent(
-    `<!doctype html><style>*{margin:0;padding:0}body{background:transparent}svg{display:block;width:${t.size}px;height:${t.size}px}</style>${t.svg}`,
-  )
-  await page.screenshot({ path: t.out, omitBackground: true })
+  const dataUrl = await page.evaluate(({ kind, size, scale }) => {
+    const { img, box } = window.__logo
+    const c = document.getElementById('c')
+    c.width = size
+    c.height = size
+    const x = c.getContext('2d')
+    x.clearRect(0, 0, size, size)
+    x.imageSmoothingQuality = 'high'
+
+    const drawLogo = (frac) => {
+      const s = (size * frac) / Math.max(box.w, box.h)
+      const w = box.w * s
+      const h = box.h * s
+      x.drawImage(img, box.x, box.y, box.w, box.h, (size - w) / 2, (size - h) / 2, w, h)
+    }
+
+    if (kind === 'solid-white') {
+      x.fillStyle = '#ffffff'
+      x.fillRect(0, 0, size, size)
+    } else if (kind === 'tile-square') {
+      x.fillStyle = '#ffffff'
+      x.fillRect(0, 0, size, size)
+      drawLogo(0.76)
+    } else if (kind === 'tile-rounded') {
+      const r = size * 0.22
+      x.beginPath()
+      x.roundRect(0.5, 0.5, size - 1, size - 1, r)
+      x.fillStyle = '#ffffff'
+      x.fill()
+      // hairline so a white tile keeps its edge on white surfaces
+      x.strokeStyle = 'rgba(0,0,0,0.10)'
+      x.lineWidth = Math.max(1, size / 256)
+      x.stroke()
+      x.save()
+      x.clip()
+      drawLogo(0.74)
+      x.restore()
+    } else if (kind === 'mark') {
+      drawLogo(scale)
+    } else if (kind === 'mono') {
+      drawLogo(scale)
+      // White silhouette cut from the logo's own alpha channel.
+      x.globalCompositeOperation = 'source-in'
+      x.fillStyle = '#ffffff'
+      x.fillRect(0, 0, size, size)
+      x.globalCompositeOperation = 'source-over'
+    }
+    return c.toDataURL('image/png')
+  }, t)
+  fs.writeFileSync(t.out, Buffer.from(dataUrl.split(',')[1], 'base64'))
   console.log('wrote', path.relative(path.join(here, '..', '..', '..'), t.out), `${t.size}px`)
 }
+
 await browser.close()
 console.log('\nNow assemble the Windows .ico:')
 console.log('  pnpm dlx png-to-ico resources/ico-256.png resources/ico-128.png resources/ico-64.png resources/ico-48.png resources/ico-32.png resources/ico-24.png resources/ico-16.png > resources/icon.ico')
