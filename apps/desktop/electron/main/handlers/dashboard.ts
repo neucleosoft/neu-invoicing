@@ -1,96 +1,44 @@
 import { ipcMain } from 'electron'
-import { and, asc, desc, eq, gte, inArray, lt, sql } from '@neu/shared'
+import {
+  and, asc, desc, eq, gte,
+  getCashBankTotalsDb,
+  getFiscalYearStartMonthDb,
+  getLowStockCountDb,
+  getOverdueCountDb,
+  getTotalPayablesDb,
+  getTotalReceivablesDb,
+  getTotalSalesThisFYDb,
+} from '@neu/shared'
 import { getDb, schema } from '../db'
-import { creditNoteNet, notCancelled, notDeleted } from './softDelete'
+import { notCancelled, notDeleted } from './softDelete'
 
 export const setupDashboardHandlers = () => {
   const db = getDb()
 
-  // Get dashboard metrics
+  // Get dashboard metrics — the math lives in @neu/shared (dashboardDb.ts)
+  // so mobile's dashboard shows the exact same numbers.
   ipcMain.handle('dashboard:getMetrics', async () => {
     try {
-      // Total Receivables (Outstanding from customers)
-      const [receivables] = await db
-        .select({ sum: sql<number | null>`sum(${schema.salesInvoice.balanceDue})` })
-        .from(schema.salesInvoice)
-        .where(and(
-          eq(schema.salesInvoice.type, 'INVOICE'),
-          inArray(schema.salesInvoice.status, ['DRAFT', 'PARTIAL', 'OVERDUE']),
-          notDeleted(schema.salesInvoice.deletedAt),
-          notCancelled(schema.salesInvoice.cancelledAt),
-        ))
-
-      // Total Payables (Outstanding to suppliers)
-      const [payables] = await db
-        .select({ sum: sql<number | null>`sum(${schema.purchaseBill.balanceDue})` })
-        .from(schema.purchaseBill)
-        .where(and(
-          inArray(schema.purchaseBill.status, ['DRAFT', 'PARTIAL', 'OVERDUE']),
-          notDeleted(schema.purchaseBill.deletedAt),
-          notCancelled(schema.purchaseBill.cancelledAt),
-        ))
-
-      // Total Sales (Current fiscal year)
-      const currentYear = new Date().getFullYear()
-      const [company] = await db.select().from(schema.company).limit(1)
-      const fiscalYearStart = company?.fiscalYearStart || 4
-
-      let fiscalYearStartDate: Date
-      if (new Date().getMonth() + 1 >= fiscalYearStart) {
-        fiscalYearStartDate = new Date(currentYear, fiscalYearStart - 1, 1)
-      } else {
-        fiscalYearStartDate = new Date(currentYear - 1, fiscalYearStart - 1, 1)
-      }
-
-      const [totalSales] = await db
-        .select({ sum: sql<number | null>`sum(${schema.salesInvoice.totalAmount})` })
-        .from(schema.salesInvoice)
-        .where(and(
-          eq(schema.salesInvoice.type, 'INVOICE'),
-          gte(schema.salesInvoice.invoiceDate, fiscalYearStartDate),
-          notDeleted(schema.salesInvoice.deletedAt),
-          notCancelled(schema.salesInvoice.cancelledAt),
-        ))
-
-      // Net out credit notes issued this FY so returns/reversals don't inflate sales.
-      const cnFy = await creditNoteNet(db, { gte: fiscalYearStartDate })
-
-      // Low Stock Items Count - fetch items and compare fields
-      const stockItems = await db
-        .select({ currentStock: schema.item.currentStock, lowStockWarning: schema.item.lowStockWarning })
-        .from(schema.item)
-        .where(and(eq(schema.item.trackStock, true), notDeleted(schema.item.deletedAt)))
-      const lowStockItems = stockItems.filter(item => item.currentStock <= item.lowStockWarning).length
-
-      // Overdue invoices count
-      const now = new Date()
-      const [overdue] = await db
-        .select({ count: sql<number>`count(*)` })
-        .from(schema.salesInvoice)
-        .where(and(
-          eq(schema.salesInvoice.type, 'INVOICE'),
-          inArray(schema.salesInvoice.status, ['DRAFT', 'PARTIAL']),
-          lt(schema.salesInvoice.dueDate, now),
-          notDeleted(schema.salesInvoice.deletedAt),
-          notCancelled(schema.salesInvoice.cancelledAt),
-        ))
-
-      // Cash & Bank total
-      let cashBankTotal = 0
-      try {
-        const accounts = await db.select().from(schema.bankAccount).where(notDeleted(schema.bankAccount.deletedAt))
-        cashBankTotal = accounts.reduce((sum: number, a: any) => sum + a.currentBalance, 0)
-      } catch {}
+      const fyStartMonth = await getFiscalYearStartMonthDb(db)
+      const [totalReceivables, totalPayables, totalSales, lowStockCount, overdueCount, cashBank] =
+        await Promise.all([
+          getTotalReceivablesDb(db),
+          getTotalPayablesDb(db),
+          getTotalSalesThisFYDb(db, fyStartMonth),
+          getLowStockCountDb(db),
+          getOverdueCountDb(db),
+          getCashBankTotalsDb(db),
+        ])
 
       return {
         success: true,
         data: {
-          totalReceivables: receivables?.sum || 0,
-          totalPayables: payables?.sum || 0,
-          totalSales: (totalSales?.sum || 0) + cnFy.totalAmount,
-          lowStockCount: lowStockItems,
-          overdueCount: overdue?.count || 0,
-          cashBankTotal
+          totalReceivables,
+          totalPayables,
+          totalSales,
+          lowStockCount,
+          overdueCount,
+          cashBankTotal: cashBank.total
         }
       }
     } catch (error) {
