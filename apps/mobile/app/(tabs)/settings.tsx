@@ -659,15 +659,15 @@ export default function SettingsScreen() {
               .filter((l) => l.modifiedTime)
               .map((rung) => (
                 <View key={rung.name} style={styles.statusBox}>
-                  <View style={styles.statusRow}>
-                    <ThemedText style={styles.statusLabel}>
-                      {LADDER_LABELS[rung.name] ?? rung.name}
-                    </ThemedText>
-                    <ThemedText style={styles.statusValue}>
-                      {rung.modifiedTime ? formatBackupDate(rung.modifiedTime) : '—'}
-                      {rung.size ? ` · ${(rung.size / 1048576).toFixed(1)} MB` : ''}
-                    </ThemedText>
-                  </View>
+                  {/* Stacked, not side-by-side: the long rung label would squeeze
+                      the date into a one-word-per-line vertical column. */}
+                  <ThemedText style={styles.statusLabel}>
+                    {LADDER_LABELS[rung.name] ?? rung.name}
+                  </ThemedText>
+                  <ThemedText style={styles.ladderWhen}>
+                    {rung.modifiedTime ? formatBackupDate(rung.modifiedTime) : '—'}
+                    {rung.size ? ` · ${(rung.size / 1048576).toFixed(1)} MB` : ''}
+                  </ThemedText>
                   <Pressable
                     onPress={() => handleLadderRestore(rung)}
                     disabled={restoring || backingUp || rowSyncing || ladderRestoring != null}
@@ -961,6 +961,7 @@ const styles = StyleSheet.create({
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   statusLabel: { opacity: 0.7 },
   statusValue: { fontWeight: '500', textAlign: 'right', flexShrink: 1 },
+  ladderWhen: { fontWeight: '500' },
   warningBox: {
     backgroundColor: '#fef2f2',
     borderLeftWidth: 3,
