@@ -1021,8 +1021,10 @@ const styles = StyleSheet.create({
     borderColor: '#d1d5db',
   },
   freqChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  freqChipText: { fontSize: 13 },
-  freqChipTextActive: { color: 'white', fontWeight: '600' },
+  // Same trap as ListControls: override lineHeight along with fontSize or the
+  // 21px body line box bloats the chip vertically.
+  freqChipText: { fontSize: 13, lineHeight: 17 },
+  freqChipTextActive: { fontSize: 13, lineHeight: 17, color: 'white', fontWeight: '600' },
   poInput: {
     borderWidth: 1,
     borderColor: '#d1d5db',

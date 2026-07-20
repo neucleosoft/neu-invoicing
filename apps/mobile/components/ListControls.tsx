@@ -122,7 +122,10 @@ const styles = StyleSheet.create({
     borderColor: '#d1d5db',
   },
   chipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
-  chipText: { fontSize: 12 },
-  chipTextActive: { fontSize: 12, color: 'white', fontWeight: '600' },
+  // lineHeight must shrink with fontSize: ThemedText's body ramp is 15/21, and
+  // a 12px label inside a 21px line box makes the chip tall and the text sit
+  // off-center — the "weird chip padding" was really leftover line height.
+  chipText: { fontSize: 12, lineHeight: 16 },
+  chipTextActive: { fontSize: 12, lineHeight: 16, color: 'white', fontWeight: '600' },
   divider: { opacity: 0.4, paddingHorizontal: 2 },
 })
