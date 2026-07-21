@@ -305,6 +305,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("cashBank:adjustBalance", id, amount, notes),
   },
 
+  // Daily Expenses
+  expense: {
+    getAll: () => ipcRenderer.invoke("expense:getAll"),
+    getById: (id: string) => ipcRenderer.invoke("expense:getById", id),
+    getReceipt: (id: string) => ipcRenderer.invoke("expense:getReceipt", id),
+    create: (data: any) => ipcRenderer.invoke("expense:create", data),
+    update: (id: string, data: any) =>
+      ipcRenderer.invoke("expense:update", id, data),
+    delete: (id: string) => ipcRenderer.invoke("expense:delete", id),
+    getTotals: (args?: { fromDate?: string; toDate?: string }) =>
+      ipcRenderer.invoke("expense:getTotals", args),
+  },
+
   // GST Lookup
   gst: {
     validate: (gstin: string) => ipcRenderer.invoke("gst:validate", gstin),

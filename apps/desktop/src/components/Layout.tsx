@@ -57,6 +57,7 @@ const navigationGroups: { label?: string; items: { name: string; path: string; i
       { name: 'Credit/Debit Notes', path: '/credit-notes', icon: FileText },
       { name: 'Payments', path: '/payments', icon: CreditCard },
       { name: 'Cash & Bank', path: '/cash-bank', icon: Landmark },
+      { name: 'Daily Expenses', path: '/expenses', icon: Receipt },
     ],
   },
   {

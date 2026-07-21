@@ -873,6 +873,26 @@ export const bankTransaction = sqliteTable("BankTransaction", {
 // =============================================================
 // GST Lookup Cache
 // =============================================================
+// Daily business expenses — non-inventory money out (rent, utilities,
+// salaries, travel…). Standalone records: no supplier/bill linkage, no
+// bank-balance side-effect. Desktop-only UI for now and NOT row-synced —
+// no hlc column on purpose (adding sync later means adding hlc + packets).
+// Optional receipt attachment stored as BLOB (same pattern as PreviousInvoice).
+export const expense = sqliteTable("Expense", {
+  id: text("id").primaryKey().$defaultFn(cuid),
+  date: prismaDate("date").notNull().$defaultFn(now),
+  category: text("category").notNull(),
+  description: text("description").notNull(),
+  amount: real("amount").notNull(),
+  paymentMode: text("paymentMode").notNull().default("CASH"),
+  notes: text("notes"),
+  receiptData: blob("receiptData", { mode: "buffer" }),
+  receiptMimeType: text("receiptMimeType"),
+  receiptFileName: text("receiptFileName"),
+  createdAt: prismaDate("createdAt").notNull().$defaultFn(now),
+  updatedAt: prismaDate("updatedAt").notNull().$defaultFn(now).$onUpdate(now),
+});
+
 export const gstCache = sqliteTable("GstCache", {
   id: text("id").primaryKey().$defaultFn(cuid),
   gstin: text("gstin").notNull().unique(),

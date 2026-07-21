@@ -23,6 +23,7 @@ import GSTReports from './pages/GSTReports'
 import DeliveryChallan from './pages/DeliveryChallan'
 import CreditNotes from './pages/CreditNotes'
 import CashBank from './pages/CashBank'
+import Expenses from './pages/Expenses'
 import CustomerStatement from './pages/CustomerStatement'
 import CustomerLedger from './pages/CustomerLedger'
 import SupplierLedger from './pages/SupplierLedger'
@@ -235,6 +236,7 @@ function App() {
             <Route path="delivery-challan" element={<DeliveryChallan />} />
             <Route path="credit-notes" element={<CreditNotes />} />
             <Route path="cash-bank" element={<CashBank />} />
+            <Route path="expenses" element={<Expenses />} />
             <Route path="statement" element={<CustomerStatement />} />
             <Route path="ledger" element={<Navigate to="/customers" replace />} />
             <Route path="customer-ledger" element={<CustomerLedger />} />
