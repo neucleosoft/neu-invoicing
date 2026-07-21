@@ -48,6 +48,10 @@ export interface PDFDocumentData {
     logoPath?: string
     logoBase64?: string
     signaturePath?: string
+    // Signature image as a data-URI, drawn in the Authorised Signatory box.
+    // Mobile passes signaturePath through (it stores data-URIs); desktop's
+    // loadCompanyForPDF inlines a file path into this field.
+    signatureBase64?: string
   }
   totalAmount: number
   subtotal?: number

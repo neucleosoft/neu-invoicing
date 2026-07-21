@@ -8,7 +8,6 @@ import {
   extractPAN,
   getTaxGroups,
   getHSNGroups,
-  LOGO_BASE64,
 } from './pdfHelpers'
 
 type Content = any
@@ -92,7 +91,12 @@ function buildPurchaseBillDefinition(bill: PurchaseBillPDFData): any {
   }))
   const taxGroups = getTaxGroups(itemsForGroups as any, isInter)
   const hsnGroups = getHSNGroups(itemsForGroups as any, isInter)
-  const logo = bill.company?.logoBase64 || LOGO_BASE64
+  // Logo & signature are OPTIONAL - only valid data: URIs embed (the old
+  // LOGO_BASE64 placeholder was corrupt and crashed pdfmake for logo-less companies).
+  const logoSrc = bill.company?.logoBase64
+  const logo = logoSrc && logoSrc.startsWith('data:') ? logoSrc : undefined
+  const sigSrc = bill.company?.signatureBase64
+  const signature = sigSrc && sigSrc.startsWith('data:') ? sigSrc : undefined
 
   return {
     pageSize: 'A4',
@@ -104,7 +108,7 @@ function buildPurchaseBillDefinition(bill: PurchaseBillPDFData): any {
       buildItemsSection(bill, isInter, taxGroups),
       buildHSNSection(hsnGroups, isInter),
       buildAmountInWords(bill.totalAmount),
-      buildFooter(bill, logo),
+      buildFooter(bill, logo, signature),
     ],
     defaultStyle: { fontSize: 9 },
   }
@@ -135,7 +139,7 @@ function buildTitle(): Content {
   }
 }
 
-function buildCompanySection(bill: PurchaseBillPDFData, logo: string): Content {
+function buildCompanySection(bill: PurchaseBillPDFData, logo: string | undefined): Content {
   const company = bill.company
   const companyStack: Content[] = [
     { text: (company?.name || 'Company').toUpperCase(), bold: true, fontSize: 16, color: '#2E7D32', margin: [0, 0, 0, 3] },
@@ -184,7 +188,7 @@ function buildCompanySection(bill: PurchaseBillPDFData, logo: string): Content {
         [
           {
             columns: [
-              { image: logo, width: 60, height: 60, margin: [0, 0, 8, 0] },
+              ...(logo ? [{ image: logo, width: 60, height: 60, margin: [0, 0, 8, 0] }] : [{ text: '', width: 0 }]),
               { stack: companyStack, width: '*' },
             ],
           },
@@ -493,7 +497,7 @@ function buildAmountInWords(totalAmount: number): Content {
   }
 }
 
-function buildFooter(bill: PurchaseBillPDFData, logo: string): Content {
+function buildFooter(bill: PurchaseBillPDFData, logo: string | undefined, signature: string | undefined): Content {
   const company = bill.company
   const hasNotes = !!(bill.notes && bill.notes.trim())
 
@@ -531,7 +535,11 @@ function buildFooter(bill: PurchaseBillPDFData, logo: string): Content {
 
   const sigStack: Content[] = [
     { text: '', fontSize: 1 },
-    { image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] },
+    ...(signature
+      ? [{ image: signature, width: 90, height: 32, alignment: 'center' as const, margin: [0, 12, 0, 4] as [number, number, number, number] }]
+      : logo
+        ? [{ image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] }]
+        : []),
     { text: 'Authorised Signatory For', fontSize: 9, alignment: 'center' as const },
     { text: (company?.name || '').toUpperCase(), bold: true, fontSize: 9, alignment: 'center' as const },
   ]

@@ -16,6 +16,11 @@ import {
 
 type SettingsTab = 'company' | 'templates' | 'tax' | 'po' | 'backup'
 
+// Company images are stored either inline as data-URIs (the one-shot DB
+// conversion) or as legacy file paths served via local-resource://.
+const imageSrc = (path?: string | null) =>
+  !path ? undefined : path.startsWith('data:') ? path : `local-resource://${path.replace(/\\/g, '/')}`
+
 const Settings = () => {
   const { company, setCompany, authStatus } = useStore()
   const { triggerBackup, isWorking: isBackingUp, conflictDialogProps } = useManualBackup()
@@ -146,6 +151,7 @@ const Settings = () => {
   const [templateLoading, setTemplateLoading] = useState(true)
   const [logoMissing, setLogoMissing] = useState(false)
   const [logoLoading, setLogoLoading] = useState(false)
+  const [signatureLoading, setSignatureLoading] = useState(false)
   // PO boilerplate — printed on every Purchase Order PDF. Defaults seeded from a real PO
   // we received; users edit to match their business.
   const [poSpecialInstructions, setPoSpecialInstructions] = useState('')
@@ -166,10 +172,11 @@ const Settings = () => {
   }, [])
 
   // Check whether the logo file exists on disk (Drive syncs DB but not upload folders,
-  // so on a new device the logoPath may point nowhere)
+  // so on a new device the logoPath may point nowhere). Data-URI logos (the
+  // one-shot inline conversion stores images IN the DB) are never "missing".
   useEffect(() => {
     const checkLogo = async () => {
-      if (!company?.logoPath) { setLogoMissing(false); return }
+      if (!company?.logoPath || company.logoPath.startsWith('data:')) { setLogoMissing(false); return }
       try {
         const res = await fetch(`local-resource://${company.logoPath.replace(/\\/g, '/')}`)
         setLogoMissing(!res.ok)
@@ -311,6 +318,38 @@ const Settings = () => {
     }
   }
 
+  const handleChangeSignature = async () => {
+    if (!company?.id) return
+    setSignatureLoading(true)
+    try {
+      const img = await window.electronAPI.company.selectImage()
+      if (img.success && img.path) {
+        const upd = await window.electronAPI.company.update(company.id, { signaturePath: img.path })
+        if (upd.success && upd.data) {
+          setCompany(upd.data)
+          toast.success('Signature updated')
+        }
+      }
+    } catch {
+      toast.error('Failed to update signature')
+    } finally {
+      setSignatureLoading(false)
+    }
+  }
+
+  const handleRemoveSignature = async () => {
+    if (!company?.id) return
+    try {
+      const upd = await window.electronAPI.company.update(company.id, { signaturePath: null })
+      if (upd.success && upd.data) {
+        setCompany(upd.data)
+        toast.success('Signature removed')
+      }
+    } catch {
+      toast.error('Failed to remove signature')
+    }
+  }
+
   // Load saved PO boilerplate, falling back to the seeded defaults if the user has
   // never touched the settings (so the textareas always show something useful).
   const loadPoBoilerplate = async () => {
@@ -413,12 +452,12 @@ const Settings = () => {
               <h2 className="text-2xl font-bold mb-6">Company Profile</h2>
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
-                  <label className="label">Company Logo</label>
+                  <label className="label">Company Logo (optional)</label>
                   <div className="flex items-start gap-4">
                     <div className="w-32 h-32 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 overflow-hidden">
                       {company?.logoPath && !logoMissing ? (
                         <img
-                          src={`local-resource://${company.logoPath.replace(/\\/g, '/')}`}
+                          src={imageSrc(company.logoPath)}
                           alt="Logo"
                           className="max-w-full max-h-full object-contain"
                         />
@@ -447,6 +486,46 @@ const Settings = () => {
                           </button>
                         )}
                       </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Shown on invoices when present — documents print fine without one.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="label">Signature (optional)</label>
+                  <div className="flex items-start gap-4">
+                    <div className="w-48 h-24 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 overflow-hidden">
+                      {company?.signaturePath ? (
+                        <img
+                          src={imageSrc(company.signaturePath)}
+                          alt="Signature"
+                          className="max-w-full max-h-full object-contain"
+                        />
+                      ) : (
+                        <span className="text-xs text-gray-400">No signature</span>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleChangeSignature}
+                          disabled={signatureLoading}
+                          className="btn btn-secondary"
+                        >
+                          {signatureLoading ? 'Uploading...' : company?.signaturePath ? 'Change Signature' : 'Upload Signature'}
+                        </button>
+                        {company?.signaturePath && (
+                          <button type="button" onClick={handleRemoveSignature} className="btn btn-danger">
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Printed in the Authorised Signatory box on every document.
+                      </p>
                     </div>
                   </div>
                 </div>

@@ -11,7 +11,6 @@ import {
   extractPAN,
   getTaxGroups,
   getHSNGroups,
-  LOGO_BASE64,
 } from './pdfHelpers'
 import type { ChallanData } from './pdfHelpers'
 
@@ -53,7 +52,12 @@ function buildDocDefinition(ch: ChallanData): any {
   const isInter = ch.isInterState !== false
   const taxGroups = getTaxGroups(ch.items, isInter)
   const hsnGroups = getHSNGroups(ch.items, isInter)
-  const logo = ch.company?.logoBase64 || LOGO_BASE64
+  // Logo & signature are OPTIONAL - only valid data: URIs embed (the old
+  // LOGO_BASE64 placeholder was corrupt and crashed pdfmake for logo-less companies).
+  const logoSrc = ch.company?.logoBase64
+  const logo = logoSrc && logoSrc.startsWith('data:') ? logoSrc : undefined
+  const sigSrc = ch.company?.signatureBase64
+  const signature = sigSrc && sigSrc.startsWith('data:') ? sigSrc : undefined
 
   return {
     pageSize: 'A4',
@@ -67,7 +71,7 @@ function buildDocDefinition(ch: ChallanData): any {
       buildItemsSection(ch, isInter, taxGroups),
       buildHSNSection(hsnGroups, isInter),
       buildAmountInWords(ch.totalAmount),
-      buildFooter(ch, logo),
+      buildFooter(ch, logo, signature),
     ],
 
     defaultStyle: {
@@ -90,7 +94,7 @@ function buildTitle(): Content {
 
 // ─── Company Section ─────────────────────────────────────────────────────────
 
-function buildCompanySection(ch: ChallanData, logo: string): Content {
+function buildCompanySection(ch: ChallanData, logo: string | undefined): Content {
   const company = ch.company
 
   const companyStack: Content[] = [
@@ -144,7 +148,7 @@ function buildCompanySection(ch: ChallanData, logo: string): Content {
           // Left: logo + company info
           {
             columns: [
-              { image: logo, width: 60, height: 60, margin: [0, 0, 8, 0] },
+              ...(logo ? [{ image: logo, width: 60, height: 60, margin: [0, 0, 8, 0] }] : [{ text: '', width: 0 }]),
               { stack: companyStack, width: '*' },
             ]
           },
@@ -580,7 +584,7 @@ function buildAmountInWords(totalAmount: number): Content {
 
 // ─── Footer: Bank Details | Terms & Conditions | Authorised Signatory ────────
 
-function buildFooter(ch: ChallanData, logo: string): Content {
+function buildFooter(ch: ChallanData, logo: string | undefined, signature: string | undefined): Content {
   const company = ch.company
 
   // Bank Details
@@ -617,7 +621,11 @@ function buildFooter(ch: ChallanData, logo: string): Content {
   // Authorised Signatory
   const sigStack: Content[] = [
     { text: '', fontSize: 1 },
-    { image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] },
+    ...(signature
+      ? [{ image: signature, width: 90, height: 32, alignment: 'center' as const, margin: [0, 12, 0, 4] as [number, number, number, number] }]
+      : logo
+        ? [{ image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] }]
+        : []),
     { text: 'Authorised Signatory For', fontSize: 9, alignment: 'center' as const },
     { text: (company?.name || '').toUpperCase(), bold: true, fontSize: 9, alignment: 'center' as const },
   ]

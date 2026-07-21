@@ -8,7 +8,6 @@ import {
   extractPAN,
   getTaxGroups,
   getHSNGroups,
-  LOGO_BASE64,
 } from './pdfHelpers'
 
 type Content = any
@@ -99,7 +98,12 @@ function buildPurchaseOrderDefinition(po: PurchaseOrderPDFData): any {
   }))
   const taxGroups = getTaxGroups(itemsForGroups as any, isInter)
   const hsnGroups = getHSNGroups(itemsForGroups as any, isInter)
-  const logo = po.company?.logoBase64 || LOGO_BASE64
+  // Logo & signature are OPTIONAL - only valid data: URIs embed (the old
+  // LOGO_BASE64 placeholder was corrupt and crashed pdfmake for logo-less companies).
+  const logoSrc = po.company?.logoBase64
+  const logo = logoSrc && logoSrc.startsWith('data:') ? logoSrc : undefined
+  const sigSrc = po.company?.signatureBase64
+  const signature = sigSrc && sigSrc.startsWith('data:') ? sigSrc : undefined
 
   // Sections are conditionally added so a PO without (e.g.) a shipping address
   // doesn't render an empty box. Order: header → items → totals → quote ref →
@@ -127,7 +131,7 @@ function buildPurchaseOrderDefinition(po: PurchaseOrderPDFData): any {
   if (po.generalTerms && po.generalTerms.trim()) {
     content.push(buildGeneralTerms(po))
   }
-  content.push(buildFooter(po, logo))
+  content.push(buildFooter(po, logo, signature))
 
   return {
     pageSize: 'A4',
@@ -247,7 +251,7 @@ function buildTitle(): Content {
   }
 }
 
-function buildCompanySection(po: PurchaseOrderPDFData, logo: string): Content {
+function buildCompanySection(po: PurchaseOrderPDFData, logo: string | undefined): Content {
   const company = po.company
   const companyStack: Content[] = [
     { text: (company?.name || 'Company').toUpperCase(), bold: true, fontSize: 16, color: '#2E7D32', margin: [0, 0, 0, 3] },
@@ -293,7 +297,7 @@ function buildCompanySection(po: PurchaseOrderPDFData, logo: string): Content {
         [
           {
             columns: [
-              { image: logo, width: 60, height: 60, margin: [0, 0, 8, 0] },
+              ...(logo ? [{ image: logo, width: 60, height: 60, margin: [0, 0, 8, 0] }] : [{ text: '', width: 0 }]),
               { stack: companyStack, width: '*' },
             ],
           },
@@ -607,7 +611,7 @@ function buildAmountInWords(totalAmount: number): Content {
   }
 }
 
-function buildFooter(po: PurchaseOrderPDFData, logo: string): Content {
+function buildFooter(po: PurchaseOrderPDFData, logo: string | undefined, signature: string | undefined): Content {
   const company = po.company
   const hasNotes = !!(po.notes && po.notes.trim())
 
@@ -641,7 +645,11 @@ function buildFooter(po: PurchaseOrderPDFData, logo: string): Content {
   // which already cover this content. Keeping a third T&C box would just duplicate.
   const sigStack: Content[] = [
     { text: '', fontSize: 1 },
-    { image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] },
+    ...(signature
+      ? [{ image: signature, width: 90, height: 32, alignment: 'center' as const, margin: [0, 12, 0, 4] as [number, number, number, number] }]
+      : logo
+        ? [{ image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] }]
+        : []),
     { text: 'Authorised Signatory For', fontSize: 9, alignment: 'center' as const },
     { text: (company?.name || '').toUpperCase(), bold: true, fontSize: 9, alignment: 'center' as const },
   ]

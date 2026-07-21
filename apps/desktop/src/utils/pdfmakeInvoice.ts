@@ -11,7 +11,6 @@ import {
   extractPAN,
   getTaxGroups,
   getHSNGroups,
-  LOGO_BASE64,
 } from './pdfHelpers'
 import type { InvoiceData } from './pdfHelpers'
 
@@ -59,7 +58,12 @@ export function buildClassicPDFDefinition(inv: InvoiceData): any {
   const isInter = inv.isInterState !== false
   const taxGroups = getTaxGroups(inv.items, isInter)
   const hsnGroups = getHSNGroups(inv.items, isInter)
-  const logo = inv.company?.logoBase64 || LOGO_BASE64
+  // Logo & signature are OPTIONAL - only valid data: URIs embed (the old
+  // LOGO_BASE64 placeholder was corrupt and crashed pdfmake for logo-less companies).
+  const logoSrc = inv.company?.logoBase64
+  const logo = logoSrc && logoSrc.startsWith('data:') ? logoSrc : undefined
+  const sigSrc = inv.company?.signatureBase64
+  const signature = sigSrc && sigSrc.startsWith('data:') ? sigSrc : undefined
 
   return {
     pageSize: 'A4',
@@ -76,7 +80,7 @@ export function buildClassicPDFDefinition(inv: InvoiceData): any {
       buildItemsSection(inv, isInter, taxGroups),
       buildHSNSection(hsnGroups, isInter),
       buildAmountInWords(inv.totalAmount),
-      buildFooter(inv, logo),
+      buildFooter(inv, logo, signature),
     ],
 
     defaultStyle: {
@@ -124,7 +128,7 @@ function buildTitle(type: string): Content {
 
 // ─── Company Section ─────────────────────────────────────────────────────────
 
-function buildCompanySection(inv: InvoiceData, logo: string): Content {
+function buildCompanySection(inv: InvoiceData, logo: string | undefined): Content {
   const company = inv.company
   const isQuotation = inv.type === 'QUOTATION'
   const isProformaInvoice = inv.type === 'PROFORMA_INVOICE'
@@ -211,7 +215,7 @@ function buildCompanySection(inv: InvoiceData, logo: string): Content {
           // Left: logo + company info
           {
             columns: [
-              { image: logo, width: 60, height: 60, margin: [0, 0, 8, 0] },
+              ...(logo ? [{ image: logo, width: 60, height: 60, margin: [0, 0, 8, 0] }] : [{ text: '', width: 0 }]),
               { stack: companyStack, width: '*' },
             ]
           },
@@ -649,7 +653,7 @@ function buildAmountInWords(totalAmount: number): Content {
 
 // ─── Footer: Notes (if any) | Bank Details, Terms | Authorised Signatory ─────
 
-function buildFooter(inv: InvoiceData, logo: string): Content {
+function buildFooter(inv: InvoiceData, logo: string | undefined, signature: string | undefined): Content {
   const company = inv.company
   const hasNotes = !!(inv.notes && inv.notes.trim())
 
@@ -693,7 +697,11 @@ function buildFooter(inv: InvoiceData, logo: string): Content {
   // Authorised Signatory
   const sigStack: Content[] = [
     { text: '', fontSize: 1 },
-    { image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] },
+    ...(signature
+      ? [{ image: signature, width: 90, height: 32, alignment: 'center' as const, margin: [0, 12, 0, 4] as [number, number, number, number] }]
+      : logo
+        ? [{ image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] }]
+        : []),
     { text: 'Authorised Signatory For', fontSize: 9, alignment: 'center' as const },
     { text: (company?.name || '').toUpperCase(), bold: true, fontSize: 9, alignment: 'center' as const },
   ]

@@ -141,3 +141,11 @@ export function getHSNGroups(items: PDFDocumentData['items'], isInterState: bool
   }
   return Object.values(map)
 }
+
+/** Signature image for the Authorised Signatory box. Only a data: URI is
+ *  usable by pdfmake — anything else (a stale file path carried over from an
+ *  old desktop DB) is treated as "no signature". */
+export function getSignatureImage(company?: { signatureBase64?: string }): string | undefined {
+  const sig = company?.signatureBase64
+  return sig && sig.startsWith('data:') ? sig : undefined
+}
