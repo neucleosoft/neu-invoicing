@@ -1,8 +1,8 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { SQLiteProvider } from 'expo-sqlite';
+import { SQLiteProvider, type SQLiteDatabase } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 
@@ -28,8 +28,21 @@ if (typeof (globalThis as { Buffer?: unknown }).Buffer === 'undefined') {
 }
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { loadThemePreference } from '@/hooks/theme-preference';
+import { initAppLog } from '@/utils/appLog';
 import { runMigrations, schema, useDb } from '@/db';
+import { registerDbReload } from '@/db/reload';
 import { AuthProvider, useAuth } from '@/auth';
+import { AppLockGate } from '@/components/AppLockGate';
+import { AutoSync } from '@/sync/AutoSync';
+
+// Field logging first — a crash during boot must still leave a trace.
+initAppLog()
+
+// Load the persisted theme override before first render settles — a stale
+// 'system' flash for one frame is fine; a permanent ignore of the user's
+// choice is not.
+void loadThemePreference()
 
 export default function RootLayout() {
   // Hold the app until Inter is ready so text doesn't flash in the system font
@@ -41,6 +54,19 @@ export default function RootLayout() {
     Inter_700Bold,
     Inter_800ExtraBold,
   });
+
+  // Restore soft-reboot: bumping the epoch remounts the provider subtree AND
+  // hands SQLiteProvider a fresh onInit identity. Both matter — expo-sqlite's
+  // Suspense provider caches the open database globally, keyed on prop
+  // identity (including onInit), so a bare key remount would return the same
+  // stale handle the restore just closed. New identity → true re-open, and
+  // runMigrations re-runs (re-seeds the HLC ratchet from the restored file).
+  const [dbEpoch, setDbEpoch] = useState(0);
+  useEffect(() => {
+    registerDbReload(() => setDbEpoch((e) => e + 1));
+  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const onDbInit = useCallback((db: SQLiteDatabase) => runMigrations(db), [dbEpoch]);
 
   if (!fontsLoaded) {
     return (
@@ -58,7 +84,7 @@ export default function RootLayout() {
         </View>
       }
     >
-      <SQLiteProvider databaseName="neu-invoicing.db" onInit={runMigrations} useSuspense>
+      <SQLiteProvider key={dbEpoch} databaseName="neu-invoicing.db" onInit={onDbInit} useSuspense>
         <AuthProvider>
           <RootLayoutInner />
         </AuthProvider>
@@ -109,11 +135,15 @@ function RootLayoutInner() {
   // so a not-yet-resolved value never triggers a wrong redirect.
   useEffect(() => {
     if (loading) return;
-    const inLoginRoute = segments[0] === 'login';
+    // Widened on purpose: without generated route types (.expo/types — absent
+    // on CI), expo-router's fallback types segments as a 1-tuple and indexing
+    // [1] fails to compile.
+    const segs: string[] = segments;
+    const inLoginRoute = segs[0] === 'login';
     // Specifically the SETUP screen, NOT the whole company/ folder. The edit
     // screen (company/edit) also lives under `company`, and conflating them was
     // bouncing a user who tapped "Edit company profile" straight back to home.
-    const inCompanySetup = segments[0] === 'company' && segments[1] === 'setup';
+    const inCompanySetup = segs[0] === 'company' && segs[1] === 'setup';
 
     // Offline mode counts as "allowed in", same as desktop where offlineMode is
     // accepted alongside a real Google session.
@@ -148,19 +178,27 @@ function RootLayoutInner() {
 
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      {/* Default headerShown: false — detail/edit/new screens render their
-          own header. Without this, unregistered routes (invoice/[id], etc.)
-          fall back to Expo's default header which shows the raw filename. */}
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="login" />
-        <Stack.Screen name="company/setup" />
-        <Stack.Screen name="company/edit" />
-        <Stack.Screen
-          name="modal"
-          options={{ presentation: 'modal', title: 'Modal', headerShown: true }}
-        />
-      </Stack>
+      {/* Foreground auto-sync (S3): renders nothing; pulls+pushes on focus and
+          every minute while active. Tripwire pauses still require the manual
+          Sync button in Settings. */}
+      <AutoSync />
+      {/* App lock wraps the WHOLE navigator so no route or deep link renders
+          under it; AutoSync stays outside — the lock protects eyes, not sync. */}
+      <AppLockGate>
+        {/* Default headerShown: false — detail/edit/new screens render their
+            own header. Without this, unregistered routes (invoice/[id], etc.)
+            fall back to Expo's default header which shows the raw filename. */}
+        <Stack screenOptions={{ headerShown: false }}>
+          <Stack.Screen name="(tabs)" />
+          <Stack.Screen name="login" />
+          <Stack.Screen name="company/setup" />
+          <Stack.Screen name="company/edit" />
+          <Stack.Screen
+            name="modal"
+            options={{ presentation: 'modal', title: 'Modal', headerShown: true }}
+          />
+        </Stack>
+      </AppLockGate>
       <StatusBar style="auto" />
     </ThemeProvider>
   );

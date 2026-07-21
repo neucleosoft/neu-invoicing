@@ -1,6 +1,7 @@
 import { ipcMain } from 'electron'
-
-import { getPrisma } from '../database'
+import { desc, eq } from '@neu/shared'
+import { getDb, schema } from '../db'
+import { attachCustomerAndItems } from './docLoaders'
 import {
   buildSalesDocumentValues,
   convertQuotationToInvoice,
@@ -9,21 +10,12 @@ import {
 } from './salesDocumentHelpers'
 
 export const setupQuotationHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
   ipcMain.handle('quotation:getAll', async () => {
     try {
-      const quotations = await prisma.quotation.findMany({
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true,
-            },
-          },
-        },
-        orderBy: { invoiceDate: 'desc' },
-      })
+      const headers = await db.select().from(schema.quotation).orderBy(desc(schema.quotation.invoiceDate))
+      const quotations = await attachCustomerAndItems(db, headers, schema.quotationItem, 'quotationId')
       return { success: true, data: quotations }
     } catch (error) {
       return {
@@ -35,17 +27,9 @@ export const setupQuotationHandlers = () => {
 
   ipcMain.handle('quotation:getById', async (_, id: string) => {
     try {
-      const quotation = await prisma.quotation.findUnique({
-        where: { id },
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true,
-            },
-          },
-        },
-      })
+      const [header] = await db.select().from(schema.quotation).where(eq(schema.quotation.id, id)).limit(1)
+      if (!header) return { success: true, data: null }
+      const [quotation] = await attachCustomerAndItems(db, [header], schema.quotationItem, 'quotationId')
       return { success: true, data: quotation }
     } catch (error) {
       return {
@@ -59,17 +43,20 @@ export const setupQuotationHandlers = () => {
     try {
       data.invoiceNumber = normalizeSalesDocumentNumber(data.invoiceNumber)
 
-      const quotation = await prisma.$transaction(async (tx: any) => {
-        const existing = await tx.quotation.findUnique({
-          where: { invoiceNumber: data.invoiceNumber },
-        })
+      const created = await db.transaction(async (tx) => {
+        const [existing] = await tx
+          .select({ id: schema.quotation.id })
+          .from(schema.quotation)
+          .where(eq(schema.quotation.invoiceNumber, data.invoiceNumber))
+          .limit(1)
         if (existing) throw new Error(`Quotation number ${data.invoiceNumber} already exists`)
 
         const values = await buildSalesDocumentValues(tx, data)
         const status = data.status || 'DRAFT'
 
-        return tx.quotation.create({
-          data: {
+        const [quotation] = await tx
+          .insert(schema.quotation)
+          .values({
             invoiceNumber: data.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
@@ -78,7 +65,7 @@ export const setupQuotationHandlers = () => {
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
             totalAmount: values.totalAmount,
-            status: status as any,
+            status,
             notes: data.notes,
             termsConditions: data.termsConditions ?? null,
             placeOfSupply: values.placeOfSupply,
@@ -92,17 +79,18 @@ export const setupQuotationHandlers = () => {
             supplyType: values.supplyType,
             ecommerceGstin: data.ecommerceGstin || null,
             deliveryTime: data.deliveryTime ? new Date(data.deliveryTime) : null,
-            items: {
-              create: values.processedItems,
-            },
-          },
-          include: {
-            items: { include: { item: true } },
-            customer: true,
-          },
-        })
+          })
+          .returning()
+
+        if (values.processedItems.length) {
+          await tx
+            .insert(schema.quotationItem)
+            .values(values.processedItems.map((i: any) => ({ ...i, quotationId: quotation.id })))
+        }
+        return quotation
       })
 
+      const [quotation] = await attachCustomerAndItems(db, [created], schema.quotationItem, 'quotationId')
       return { success: true, data: quotation }
     } catch (error) {
       return {
@@ -118,32 +106,29 @@ export const setupQuotationHandlers = () => {
         data.invoiceNumber = normalizeSalesDocumentNumber(data.invoiceNumber)
       }
 
-      const quotation = await prisma.$transaction(async (tx: any) => {
-        const existingQuotation = await tx.quotation.findUnique({
-          where: { id },
-        })
-
+      const updated = await db.transaction(async (tx) => {
+        const [existingQuotation] = await tx.select().from(schema.quotation).where(eq(schema.quotation.id, id)).limit(1)
         if (!existingQuotation) {
           throw new Error('Quotation not found')
         }
 
         if (data.invoiceNumber && data.invoiceNumber !== existingQuotation.invoiceNumber) {
-          const duplicate = await tx.quotation.findUnique({
-            where: { invoiceNumber: data.invoiceNumber },
-          })
+          const [duplicate] = await tx
+            .select({ id: schema.quotation.id })
+            .from(schema.quotation)
+            .where(eq(schema.quotation.invoiceNumber, data.invoiceNumber))
+            .limit(1)
           if (duplicate) throw new Error(`Quotation number ${data.invoiceNumber} already exists`)
         }
 
         const values = await buildSalesDocumentValues(tx, data)
         const status = data.status || existingQuotation.status
 
-        await tx.quotationItem.deleteMany({
-          where: { quotationId: id },
-        })
+        await tx.delete(schema.quotationItem).where(eq(schema.quotationItem.quotationId, id))
 
-        return tx.quotation.update({
-          where: { id },
-          data: {
+        const [quotation] = await tx
+          .update(schema.quotation)
+          .set({
             invoiceNumber: data.invoiceNumber || existingQuotation.invoiceNumber,
             invoiceDate: new Date(data.invoiceDate),
             dueDate: data.dueDate ? new Date(data.dueDate) : null,
@@ -152,7 +137,7 @@ export const setupQuotationHandlers = () => {
             discount: data.discount || 0,
             taxAmount: values.taxAmount,
             totalAmount: values.totalAmount,
-            status: status as any,
+            status,
             notes: data.notes,
             termsConditions: data.termsConditions ?? null,
             placeOfSupply: values.placeOfSupply,
@@ -166,17 +151,19 @@ export const setupQuotationHandlers = () => {
             supplyType: values.supplyType,
             ecommerceGstin: data.ecommerceGstin || null,
             deliveryTime: data.deliveryTime ? new Date(data.deliveryTime) : null,
-            items: {
-              create: values.processedItems,
-            },
-          },
-          include: {
-            items: { include: { item: true } },
-            customer: true,
-          },
-        })
+          })
+          .where(eq(schema.quotation.id, id))
+          .returning()
+
+        if (values.processedItems.length) {
+          await tx
+            .insert(schema.quotationItem)
+            .values(values.processedItems.map((i: any) => ({ ...i, quotationId: id })))
+        }
+        return quotation
       })
 
+      const [quotation] = await attachCustomerAndItems(db, [updated], schema.quotationItem, 'quotationId')
       return { success: true, data: quotation }
     } catch (error) {
       return {
@@ -188,20 +175,14 @@ export const setupQuotationHandlers = () => {
 
   ipcMain.handle('quotation:delete', async (_, id: string) => {
     try {
-      const quotation = await prisma.quotation.findUnique({
-        where: { id },
-      })
-
+      const [quotation] = await db.select({ id: schema.quotation.id }).from(schema.quotation).where(eq(schema.quotation.id, id)).limit(1)
       if (!quotation) {
         throw new Error('Quotation not found')
       }
 
-      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row and its line
-      // items stay put so a restore brings the whole document back intact.
-      await prisma.quotation.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      })
+      // Soft-delete: stamp deletedAt (updatedAt + hlc auto-bump). The row and its
+      // line items stay put so a restore brings the whole document back intact.
+      await db.update(schema.quotation).set({ deletedAt: new Date() }).where(eq(schema.quotation.id, id))
 
       return { success: true }
     } catch (error) {
@@ -214,18 +195,12 @@ export const setupQuotationHandlers = () => {
 
   ipcMain.handle('quotation:restore', async (_, id: string) => {
     try {
-      const quotation = await prisma.quotation.findUnique({
-        where: { id },
-      })
-
+      const [quotation] = await db.select({ id: schema.quotation.id }).from(schema.quotation).where(eq(schema.quotation.id, id)).limit(1)
       if (!quotation) {
         throw new Error('Quotation not found')
       }
 
-      await prisma.quotation.update({
-        where: { id },
-        data: { deletedAt: null },
-      })
+      await db.update(schema.quotation).set({ deletedAt: null }).where(eq(schema.quotation.id, id))
 
       return { success: true }
     } catch (error) {
@@ -238,7 +213,7 @@ export const setupQuotationHandlers = () => {
 
   ipcMain.handle('quotation:convertToInvoice', async (_, quotationId: string) => {
     try {
-      const invoice = await convertQuotationToInvoice(prisma, quotationId)
+      const invoice = await convertQuotationToInvoice(quotationId)
       return { success: true, data: invoice }
     } catch (error) {
       return {
@@ -250,7 +225,7 @@ export const setupQuotationHandlers = () => {
 
   ipcMain.handle('quotation:generateQuotationNumber', async () => {
     try {
-      const quotationNumber = await generateNextQuotationNumber(prisma)
+      const quotationNumber = await generateNextQuotationNumber(db)
       return { success: true, data: quotationNumber }
     } catch (error) {
       return {

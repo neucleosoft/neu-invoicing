@@ -19,7 +19,9 @@ import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
 import { Screen } from '@/components/ui/Screen'
 import { SectionHeader } from '@/components/ui/SectionHeader'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { useColors } from '@/hooks/use-colors'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 import { Radius, Spacing, Type } from '@/constants/tokens'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
@@ -94,9 +96,18 @@ export default function NewInvoiceScreen() {
   const [invoiceDate, setInvoiceDate] = useState(todayIso())
   const [dueDate, setDueDate] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
+  // Document-level discount, subtracted from the grand total AFTER tax (mirrors
+  // desktop: totalAmount = subtotal + tax − discount). Separate from the per-line
+  // discounts, which reduce each line's taxable base.
+  const [docDiscount, setDocDiscount] = useState('0')
   const [amountPaid, setAmountPaid] = useState('0')
   const [paymentMode, setPaymentMode] = useState<PaymentModeOption>('CASH')
   const [notes, setNotes] = useState('')
+
+  // Rage-guard: Android back / swipe must never silently eat a half-typed
+  // document (see hooks/use-unsaved-guard.ts).
+  const dirty = lines.length > 0 || customerId != null || notes.trim() !== ''
+  const { markClean } = useUnsavedGuard(dirty)
   const [termsConditions, setTermsConditions] = useState('')
 
   const [showAdditional, setShowAdditional] = useState(false)
@@ -138,8 +149,17 @@ export default function NewInvoiceScreen() {
     (s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100),
     0,
   )
-  const total = subtotal + taxAmount
-  const paid = parseFloat(amountPaid) || 0
+  const discount = parseFloat(docDiscount) || 0
+  const total = subtotal + taxAmount - discount
+  // The Status drives the paid amount (mirrors desktop): Paid = full total, Partial =
+  // the entered amount, Unpaid/Overdue = nothing paid — so the label can never
+  // contradict the money.
+  const paid =
+    status === 'PAID'
+      ? total
+      : status === 'PARTIAL'
+      ? parseFloat(amountPaid) || 0
+      : 0
   const balanceDue = total - paid
 
   function pickItem(it: Item) {
@@ -179,6 +199,10 @@ export default function NewInvoiceScreen() {
       Alert.alert('Validation', 'Invalid invoice date (use YYYY-MM-DD)')
       return
     }
+    if (status === 'PARTIAL' && (paid <= 0 || paid >= total)) {
+      Alert.alert('Validation', 'For a Partial invoice, enter an amount between 0 and the total')
+      return
+    }
     const due = parseDate(dueDate)
 
     setSaving(true)
@@ -213,6 +237,7 @@ export default function NewInvoiceScreen() {
             catalogSkuHsn: cat?.skuHsn,
           }
         }),
+        docDiscount: discount,
       })
 
       // Everything below is one transaction so the invoice, its lines, the
@@ -230,10 +255,14 @@ export default function NewInvoiceScreen() {
           .values({
             invoiceNumber: finalNumber,
             customerId,
-            status: 'DRAFT',
+            // Insert unpaid; applyPayment below derives PAID/PARTIAL from the money.
+            // OVERDUE is the one status not derivable from the amount (it's about the
+            // due date), so we set it directly here.
+            status: status === 'OVERDUE' ? 'OVERDUE' : 'DRAFT',
             invoiceDate: invDate,
             dueDate: due,
             subtotal: gst.subtotal,
+            discount,
             taxAmount: gst.taxAmount,
             totalAmount: gst.totalAmount,
             amountPaid: 0,
@@ -328,6 +357,9 @@ export default function NewInvoiceScreen() {
             referenceType: 'INVOICE',
             referenceId: inserted.id,
             salesInvoiceId: inserted.id,
+            // Tag the up-front payment so the edit screen can find & re-sync exactly
+            // this row (matches desktop's INLINE_PAYMENT_NOTE).
+            notes: 'Paid with invoice',
           })
           await applyPayment(tx, {
             type: 'PAYMENT_IN',
@@ -339,6 +371,8 @@ export default function NewInvoiceScreen() {
           })
         }
       })
+
+      markClean()
 
       router.back()
     } catch (e) {
@@ -491,6 +525,17 @@ export default function NewInvoiceScreen() {
           <Text style={[Type.body, { color: c.text }]}>₹{taxAmount.toFixed(2)}</Text>
         </View>
         <View style={styles.totalsRow}>
+          <Text style={[Type.body, { color: c.muted }]}>Discount</Text>
+          <TextInput
+            style={[styles.discountInput, { backgroundColor: c.surfaceAlt, borderColor: c.border, color: c.text }]}
+            value={docDiscount}
+            onChangeText={setDocDiscount}
+            keyboardType="numeric"
+            placeholder="0"
+            placeholderTextColor={c.muted}
+          />
+        </View>
+        <View style={styles.totalsRow}>
           <Text style={[Type.bodySemibold, { color: c.text }]}>Total</Text>
           <Text style={[Type.bodySemibold, { color: c.text }]}>₹{total.toFixed(2)}</Text>
         </View>
@@ -503,24 +548,45 @@ export default function NewInvoiceScreen() {
       </Card>
 
       <SectionHeader title="Payment" />
-      <Field
-        label="Amount Paid (₹)"
-        value={amountPaid}
-        onChangeText={setAmountPaid}
-        keyboardType="numeric"
-      />
-      <View style={styles.fieldGroup}>
-        <Text style={[styles.label, { color: c.muted }]}>Payment Mode</Text>
-        <Pressable
-          style={[
-            styles.picker,
-            { backgroundColor: c.surfaceAlt, borderColor: c.border },
-          ]}
-          onPress={() => setShowPaymentModePicker(true)}
-        >
-          <Text style={[Type.body, { color: c.text }]}>{paymentMode}</Text>
-        </Pressable>
-      </View>
+      {/* Amount Paid is driven by the Status above: editable only for Partial; for
+          Paid it's the full total, for Unpaid/Overdue it's zero — both locked, so the
+          amount can never disagree with the status. */}
+      {status === 'PARTIAL' ? (
+        <Field
+          label="Amount Paid (₹)"
+          value={amountPaid}
+          onChangeText={setAmountPaid}
+          keyboardType="numeric"
+        />
+      ) : (
+        <View style={styles.fieldGroup}>
+          <Text style={[styles.label, { color: c.muted }]}>Amount Paid (₹)</Text>
+          <View
+            style={[
+              styles.picker,
+              { backgroundColor: c.surfaceAlt, borderColor: c.border },
+            ]}
+          >
+            <Text style={[Type.body, { color: c.muted }]}>
+              ₹{(status === 'PAID' ? total : 0).toFixed(2)} — set by status
+            </Text>
+          </View>
+        </View>
+      )}
+      {status === 'PAID' || status === 'PARTIAL' ? (
+        <View style={styles.fieldGroup}>
+          <Text style={[styles.label, { color: c.muted }]}>Payment Mode</Text>
+          <Pressable
+            style={[
+              styles.picker,
+              { backgroundColor: c.surfaceAlt, borderColor: c.border },
+            ]}
+            onPress={() => setShowPaymentModePicker(true)}
+          >
+            <Text style={[Type.body, { color: c.text }]}>{paymentMode}</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <SectionHeader title="Notes & Terms" />
       <Field
@@ -591,8 +657,10 @@ export default function NewInvoiceScreen() {
             <Text style={[Type.title, styles.modalTitle, { color: c.text }]}>
               Select Customer
             </Text>
-            <FlatList
+            <PickerSearchList
               data={customers}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.phone]}
               keyExtractor={(c) => c.id}
               ListEmptyComponent={
                 <Text style={[styles.modalEmpty, { color: c.muted }]}>
@@ -628,8 +696,10 @@ export default function NewInvoiceScreen() {
             <Text style={[Type.title, styles.modalTitle, { color: c.text }]}>
               Select Item
             </Text>
-            <FlatList
+            <PickerSearchList
               data={items}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.hsnCode, x.skuHsn]}
               keyExtractor={(it) => it.id}
               ListEmptyComponent={
                 <Text style={[styles.modalEmpty, { color: c.muted }]}>
@@ -793,6 +863,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.sm,
     paddingVertical: Spacing.sm,
     fontSize: 15,
+  },
+  discountInput: {
+    borderWidth: 1,
+    borderRadius: Radius.sm,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+    fontSize: 15,
+    minWidth: 90,
+    textAlign: 'right',
   },
   lineAmountRow: {
     flexDirection: 'row',

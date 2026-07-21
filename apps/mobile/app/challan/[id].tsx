@@ -1,4 +1,4 @@
-import { and, eq, like, sql } from 'drizzle-orm'
+import { and, desc, eq, sql } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
@@ -17,23 +17,31 @@ type ChallanItem = typeof schema.deliveryChallanItem.$inferSelect
 
 type Db = ReturnType<typeof useDb>
 
-// Challan-specific invoice number: INV-YYYY-NNN where YYYY is the full calendar
-// year and NNN is the next sequence among salesInvoice rows already using that
-// INV-year- prefix. This is deliberately NOT the NS/SL series — desktop's
-// convert-challan path stamps this plain format. Inlined here per spec.
+// Challan-convert invoice number — a byte-for-byte port of desktop's
+// challan:convertToInvoice numbering (challan.ts): prefix from
+// company.invoicePrefix (fallback 'INV'), sequence = the GLOBAL last invoice
+// number's final '-'-segment + 1. The two apps must mint the SAME number from
+// the same data, or converts on different devices fork the series. (The old
+// mobile version scoped the sequence to its own INV-year prefix — a silent
+// divergence from desktop.)
 async function generateChallanInvoiceNumber(tx: any): Promise<string> {
-  const year = new Date().getFullYear()
-  const prefix = `INV-${year}-`
-  const rows = await tx
-    .select({ num: schema.salesInvoice.invoiceNumber })
+  const [lastInvoice] = await tx
+    .select({ invoiceNumber: schema.salesInvoice.invoiceNumber })
     .from(schema.salesInvoice)
-    .where(like(schema.salesInvoice.invoiceNumber, `${prefix}%`))
-  let max = 0
-  for (const r of rows as { num: string }[]) {
-    const parsed = parseInt(r.num.slice(prefix.length), 10)
-    if (!isNaN(parsed) && parsed > max) max = parsed
-  }
-  return `${prefix}${String(max + 1).padStart(3, '0')}`
+    .where(eq(schema.salesInvoice.type, 'INVOICE'))
+    .orderBy(desc(schema.salesInvoice.invoiceNumber))
+    .limit(1)
+  const [company] = await tx
+    .select({ invoicePrefix: schema.company.invoicePrefix })
+    .from(schema.company)
+    .limit(1)
+  const prefix = company?.invoicePrefix || 'INV'
+  const year = new Date().getFullYear()
+  const parsed = lastInvoice
+    ? parseInt(lastInvoice.invoiceNumber.split('-').pop() || '0', 10)
+    : 0
+  const lastNumber = isNaN(parsed) ? 0 : parsed
+  return `${prefix}-${year}-${String(lastNumber + 1).padStart(3, '0')}`
 }
 
 export default function ChallanDetailScreen() {
@@ -93,6 +101,10 @@ export default function ChallanDetailScreen() {
                 const [inv] = await tx
                   .insert(schema.salesInvoice)
                   .values({
+                    // Deterministic id: both devices converting this challan
+                    // offline mint the SAME invoice row — sync converges to
+                    // one invoice, not two. Mirrors desktop challan.ts.
+                    id: `conv-${challan!.id}`,
                     invoiceNumber: number,
                     type: 'INVOICE',
                     customerId: challan!.customerId,
@@ -206,7 +218,7 @@ export default function ChallanDetailScreen() {
         {isCancelled ? (
           <ThemedView style={styles.cancelledBanner}>
             <ThemedText style={styles.cancelledBannerText}>
-              This challan is cancelled — the dispatched stock was returned and it's left out of reports. It can't be restored.
+              This challan is cancelled — the dispatched stock was returned and it&apos;s left out of reports. It can&apos;t be restored.
             </ThemedText>
           </ThemedView>
         ) : null}
@@ -228,6 +240,10 @@ export default function ChallanDetailScreen() {
           <Row label="Date" value={formatDate(challan.challanDate)} />
           {challan.transportMode ? <Row label="Transport Mode" value={challan.transportMode} /> : null}
           {challan.vehicleNumber ? <Row label="Vehicle Number" value={challan.vehicleNumber} /> : null}
+          {challan.poNumber ? <Row label="Customer PO #" value={challan.poNumber} /> : null}
+          {challan.ewayBillNo ? <Row label="E-Way Bill" value={challan.ewayBillNo} /> : null}
+          {challan.warrantyPeriod ? <Row label="Warranty" value={challan.warrantyPeriod} /> : null}
+          {challan.dispatchedThrough ? <Row label="Dispatched Through" value={challan.dispatchedThrough} /> : null}
         </Section>
 
         <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.itemsCard}>

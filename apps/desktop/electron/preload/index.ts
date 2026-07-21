@@ -23,12 +23,28 @@ contextBridge.exposeInMainWorld("electronAPI", {
     syncState: () => ipcRenderer.invoke("sync:syncState"),
     upload: () => ipcRenderer.invoke("sync:upload"),
     download: () => ipcRenderer.invoke("sync:download"),
+    rowSyncNow: (confirmRemovals?: boolean) =>
+      ipcRenderer.invoke("sync:rowSyncNow", confirmRemovals),
+    getSyncActivityLog: () => ipcRenderer.invoke("sync:getActivityLog"),
+    getRowSyncStatus: () => ipcRenderer.invoke("sync:getRowSyncStatus"),
+    fetchBillImage: (billId: string) =>
+      ipcRenderer.invoke("sync:fetchBillImage", billId),
+    getLadderInfo: () => ipcRenderer.invoke("sync:getLadderInfo"),
+    restoreFromLadder: (slotName: string) =>
+      ipcRenderer.invoke("sync:restoreFromLadder", slotName),
     getBackupInfo: () => ipcRenderer.invoke("sync:getBackupInfo"),
     setBackupFrequency: (freq: "off" | "daily" | "weekly" | "monthly") =>
       ipcRenderer.invoke("sync:setBackupFrequency", freq),
     onSyncStatusChange: (callback: (status: any) => void) => {
       ipcRenderer.on("sync:statusChanged", (_, status) => callback(status));
     },
+  },
+
+  // Diagnostics — field logging (electron/main/logger.ts)
+  log: {
+    openFolder: () => ipcRenderer.invoke("log:openFolder"),
+    send: (level: string, message: string) =>
+      ipcRenderer.invoke("log:fromRenderer", level, message),
   },
 
   // Company
@@ -97,7 +113,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     create: (data: any) => ipcRenderer.invoke("sales:create", data),
     update: (id: string, data: any) =>
       ipcRenderer.invoke("sales:update", id, data),
-    delete: (id: string) => ipcRenderer.invoke("sales:delete", id),
+    cancel: (id: string) => ipcRenderer.invoke("sales:cancel", id),
+    cancelWithCreditNote: (id: string, payload: any) =>
+      ipcRenderer.invoke("sales:cancelWithCreditNote", id, payload),
     generateInvoiceNumber: () =>
       ipcRenderer.invoke("sales:generateInvoiceNumber"),
     generatePDF: (id: string) => ipcRenderer.invoke("sales:generatePDF", id),

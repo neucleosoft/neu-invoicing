@@ -69,6 +69,9 @@ export default function NewItemScreen() {
         taxRate: parseFloat(taxRate) || 0,
         trackStock,
         currentStock: parseFloat(currentStock) || 0,
+        // At birth the opening stock IS the current stock (no movements yet) — the
+        // anchor recompute replays movements on top of.
+        openingStock: parseFloat(currentStock) || 0,
         lowStockWarning: parseFloat(lowStockWarning) || 10,
       })
       router.back()

@@ -108,6 +108,7 @@ export async function buildQuotationPdfPayload(db: Db, quotationId: string): Pro
           stateCode: company.stateCode ?? undefined,
           stateName: company.stateName ?? undefined,
           logoBase64: company.logoPath ?? undefined,
+          signatureBase64: company.signaturePath ?? undefined,
         }
       : undefined,
   }

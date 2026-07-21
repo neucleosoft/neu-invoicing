@@ -45,6 +45,9 @@ export default function NewSupplierScreen() {
   const [email, setEmail] = useState('')
   const [taxId, setTaxId] = useState('')
   const [gstType, setGstType] = useState<GstTypeOption>('REGULAR')
+  const [legalName, setLegalName] = useState('')
+  const [tradeName, setTradeName] = useState('')
+  const [gstStatus, setGstStatus] = useState('')
   const [billingAddress, setBillingAddress] = useState('')
   const [shippingAddress, setShippingAddress] = useState('')
   const [city, setCity] = useState('')
@@ -91,6 +94,9 @@ export default function NewSupplierScreen() {
         email: email.trim() || null,
         taxId: taxId.trim().toUpperCase() || null,
         gstType,
+        legalName: legalName.trim() || null,
+        tradeName: tradeName.trim() || null,
+        gstStatus: gstStatus.trim() || null,
         billingAddress: billingAddress.trim() || null,
         shippingAddress: shippingAddress.trim() || null,
         city: city.trim() || null,
@@ -157,6 +163,25 @@ export default function NewSupplierScreen() {
       <Pressable style={styles.picker} onPress={() => setShowGstTypePicker(true)}>
         <ThemedText>{gstType}</ThemedText>
       </Pressable>
+
+      <Field
+        label="Legal Name"
+        value={legalName}
+        onChangeText={setLegalName}
+        placeholder="As registered with GST (optional)"
+      />
+      <Field
+        label="Trade Name"
+        value={tradeName}
+        onChangeText={setTradeName}
+        placeholder="Trading-as name (optional)"
+      />
+      <Field
+        label="GST Status"
+        value={gstStatus}
+        onChangeText={setGstStatus}
+        placeholder="e.g. Active (optional)"
+      />
 
       <Field
         label="Billing Address"

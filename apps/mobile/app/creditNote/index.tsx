@@ -4,6 +4,12 @@ import { memo, useCallback, useMemo, useState } from 'react'
 import { FlatList, type ListRenderItem, Pressable, StyleSheet, TextInput, View } from 'react-native'
 
 import EmptyState from '@/components/EmptyState'
+import {
+  applyListControls,
+  ListControls,
+  type DateRangeKey,
+  type SortKey,
+} from '@/components/ListControls'
 import Fab from '@/components/Fab'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
@@ -29,6 +35,8 @@ export default function CreditNotesScreen() {
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<Filter>('ALL')
+  const [range, setRange] = useState<DateRangeKey>('all')
+  const [sort, setSort] = useState<SortKey>('date_desc')
 
   useFocusEffect(
     useCallback(() => {
@@ -49,12 +57,13 @@ export default function CreditNotesScreen() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return notes.filter((x) => {
+    const matches = notes.filter((x) => {
       if (filter !== 'ALL' && x.type !== filter) return false
       if (!q) return true
       return x.noteNumber.toLowerCase().includes(q) || customerName(x.customerId).toLowerCase().includes(q)
     })
-  }, [notes, search, filter, customerName])
+    return applyListControls(matches, range, sort, (x) => x.noteDate, (x) => x.totalAmount)
+  }, [notes, search, filter, customerName, range, sort])
 
   // Count chip shows live notes only — cancelled notes stay visible in the list
   // (marked) but never count toward a number.
@@ -90,6 +99,8 @@ export default function CreditNotesScreen() {
           </Pressable>
         ))}
       </View>
+
+      <ListControls range={range} onRange={setRange} sort={sort} onSort={setSort} />
 
       <FlatList
         data={filtered}

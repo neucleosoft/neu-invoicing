@@ -3,7 +3,6 @@ import { router } from 'expo-router'
 import { useEffect, useState } from 'react'
 import {
   Alert,
-  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -17,9 +16,12 @@ import { computeGstValues } from '@neu/shared'
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
+import { PickerModal } from '@/components/PickerModal'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { generateChallanNumber } from '@/utils/docNumber'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
@@ -70,8 +72,17 @@ export default function NewChallanScreen() {
   const [challanDate, setChallanDate] = useState(todayIso())
   const [transportMode, setTransportMode] = useState<string>('Road')
   const [vehicleNumber, setVehicleNumber] = useState('')
+  const [poNumber, setPoNumber] = useState('')
+  const [ewayBillNo, setEwayBillNo] = useState('')
+  const [warrantyPeriod, setWarrantyPeriod] = useState('')
+  const [dispatchedThrough, setDispatchedThrough] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
   const [notes, setNotes] = useState('')
+
+  // Rage-guard: Android back / swipe must never silently eat a half-typed
+  // document (see hooks/use-unsaved-guard.ts).
+  const dirty = lines.length > 0 || customerId != null || notes.trim() !== ''
+  const { markClean } = useUnsavedGuard(dirty)
   const [termsConditions, setTermsConditions] = useState('')
 
   const [saving, setSaving] = useState(false)
@@ -165,8 +176,19 @@ export default function NewChallanScreen() {
             totalAmount: gst.totalAmount,
             transportMode: transportMode || null,
             vehicleNumber: vehicleNumber.trim() || null,
+            poNumber: poNumber.trim() || null,
+            ewayBillNo: ewayBillNo.trim() || null,
+            warrantyPeriod: warrantyPeriod.trim() || null,
+            dispatchedThrough: dispatchedThrough.trim() || null,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
           })
           .returning({ id: schema.deliveryChallan.id })
 
@@ -182,6 +204,15 @@ export default function NewChallanScreen() {
               taxRate: l.taxRate,
               total: g.total,
               hsnCode: g.hsnCode || null,
+              taxableAmount: g.taxableAmount,
+              cgstRate: g.cgstRate,
+              cgstAmount: g.cgstAmount,
+              sgstRate: g.sgstRate,
+              sgstAmount: g.sgstAmount,
+              igstRate: g.igstRate,
+              igstAmount: g.igstAmount,
+              cessRate: g.cessRate,
+              cessAmount: g.cessAmount,
             }
           }),
         )
@@ -202,6 +233,7 @@ export default function NewChallanScreen() {
           })
         }
       })
+      markClean()
       router.back()
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save challan')
@@ -237,6 +269,10 @@ export default function NewChallanScreen() {
       </Pressable>
 
       <Field label="Vehicle Number" value={vehicleNumber} onChangeText={setVehicleNumber} placeholder="e.g. MH12AB1234 (optional)" />
+      <Field label="Customer PO Number" value={poNumber} onChangeText={setPoNumber} placeholder="Their PO reference (optional)" />
+      <Field label="E-Way Bill No" value={ewayBillNo} onChangeText={setEwayBillNo} placeholder="Optional" />
+      <Field label="Warranty Period" value={warrantyPeriod} onChangeText={setWarrantyPeriod} placeholder="e.g. 12 months (optional)" />
+      <Field label="Dispatched Through" value={dispatchedThrough} onChangeText={setDispatchedThrough} placeholder="Courier/transporter (optional)" />
 
       <SectionHeader>Line Items</SectionHeader>
       {lines.map((l, i) => (
@@ -279,7 +315,7 @@ export default function NewChallanScreen() {
         <ThemedText style={styles.saveButtonText}>{saving ? 'Saving…' : 'Save Challan'}</ThemedText>
       </Pressable>
 
-      <PickerModal visible={showCustomerPicker} title="Select Customer" data={customers.map((c) => ({ key: c.id, label: c.name }))} selectedKey={customerId ?? ''} onSelect={setCustomerId} onClose={() => setShowCustomerPicker(false)} />
+      <PickerModal visible={showCustomerPicker} title="Select Customer" data={customers.map((c) => ({ key: c.id, label: c.name, sublabel: c.phone ?? undefined }))} selectedKey={customerId ?? ''} onSelect={setCustomerId} onClose={() => setShowCustomerPicker(false)} />
       <PickerModal visible={showStatusPicker} title="Status" data={STATUS_OPTIONS.map((s) => ({ key: s, label: s }))} selectedKey={status} onSelect={(k) => setStatus(k as StatusOption)} onClose={() => setShowStatusPicker(false)} />
       <PickerModal visible={showTransportPicker} title="Transport Mode" data={TRANSPORT_MODES.map((m) => ({ key: m, label: m }))} selectedKey={transportMode} onSelect={setTransportMode} onClose={() => setShowTransportPicker(false)} />
 
@@ -287,8 +323,10 @@ export default function NewChallanScreen() {
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.modalContent}>
             <ThemedText type="title" style={styles.modalTitle}>Select Item</ThemedText>
-            <FlatList
+            <PickerSearchList
               data={items}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.hsnCode, x.skuHsn]}
               keyExtractor={(it) => it.id}
               ListEmptyComponent={<ThemedText style={styles.modalEmpty}>No items yet.</ThemedText>}
               renderItem={({ item }) => (
@@ -333,32 +371,6 @@ function TotalRow({ label, value, bold }: { label: string; value: number; bold?:
       <ThemedText type={bold ? 'defaultSemiBold' : undefined}>{label}</ThemedText>
       <ThemedText type={bold ? 'defaultSemiBold' : undefined}>₹{value.toFixed(2)}</ThemedText>
     </View>
-  )
-}
-function PickerModal({ visible, title, data, selectedKey, onSelect, onClose }: { visible: boolean; title: string; data: { key: string; label: string }[]; selectedKey: string; onSelect: (k: string) => void; onClose: () => void }) {
-  return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.modalOverlay}>
-        <ThemedView style={styles.modalContent}>
-          <ThemedText type="title" style={styles.modalTitle}>{title}</ThemedText>
-          <FlatList
-            data={data}
-            keyExtractor={(o) => o.key}
-            ListEmptyComponent={<ThemedText style={styles.modalEmpty}>Nothing here yet.</ThemedText>}
-            renderItem={({ item }) => (
-              <Pressable style={styles.modalRow} onPress={() => { onSelect(item.key); onClose() }}>
-                <ThemedText type={item.key === selectedKey ? 'defaultSemiBold' : undefined}>
-                  {item.key === selectedKey ? `✓ ${item.label}` : item.label}
-                </ThemedText>
-              </Pressable>
-            )}
-          />
-          <Pressable style={styles.modalClose} onPress={onClose}>
-            <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
-          </Pressable>
-        </ThemedView>
-      </View>
-    </Modal>
   )
 }
 

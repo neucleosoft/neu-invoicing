@@ -2,8 +2,6 @@ import { Image } from 'expo-image'
 import { useState } from 'react'
 import {
   Alert,
-  FlatList,
-  Modal,
   Pressable,
   StyleSheet,
   TextInput,
@@ -13,6 +11,7 @@ import {
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerModal } from '@/components/PickerModal'
 import { INDIAN_STATE_CODES } from '@neu/shared'
 
 // Shared company-profile form, used by BOTH the first-run setup screen
@@ -270,51 +269,6 @@ function Field({ label, ...inputProps }: { label: string } & TextInputProps) {
   )
 }
 
-function PickerModal({
-  visible,
-  title,
-  data,
-  selectedKey,
-  onSelect,
-  onClose,
-}: {
-  visible: boolean
-  title: string
-  data: { key: string; label: string }[]
-  selectedKey: string
-  onSelect: (key: string) => void
-  onClose: () => void
-}) {
-  return (
-    <Modal visible={visible} animationType="slide" transparent>
-      <View style={styles.modalOverlay}>
-        <ThemedView style={styles.modalContent}>
-          <ThemedText type="title" style={styles.modalTitle}>{title}</ThemedText>
-          <FlatList
-            data={data}
-            keyExtractor={(o) => o.key}
-            renderItem={({ item }) => (
-              <Pressable
-                style={styles.modalRow}
-                onPress={() => {
-                  onSelect(item.key)
-                  onClose()
-                }}
-              >
-                <ThemedText type={item.key === selectedKey ? 'defaultSemiBold' : undefined}>
-                  {item.key === selectedKey ? `✓ ${item.label}` : item.label}
-                </ThemedText>
-              </Pressable>
-            )}
-          />
-          <Pressable style={styles.modalClose} onPress={onClose}>
-            <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
-          </Pressable>
-        </ThemedView>
-      </View>
-    </Modal>
-  )
-}
 
 const styles = StyleSheet.create({
   wrap: { gap: 12 },

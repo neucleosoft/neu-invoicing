@@ -1,6 +1,6 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   FlatList,
@@ -17,8 +17,10 @@ import { computeGstValues } from '@neu/shared'
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Item = typeof schema.item.$inferSelect
 type Invoice = typeof schema.salesInvoice.$inferSelect
@@ -68,6 +70,17 @@ export default function EditCreditNoteScreen() {
   const [reason, setReason] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
   const [notes, setNotes] = useState('')
+
+  // Rage-guard: Android back / swipe must never silently eat unsaved edits.
+  // The baseline snapshots the loaded document once; any drift = dirty
+  // (see hooks/use-unsaved-guard.ts).
+  const editSnapshot = JSON.stringify([lines, notes])
+  const baselineRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loading && baselineRef.current === null) baselineRef.current = editSnapshot
+  }, [loading, editSnapshot])
+  const dirty = !loading && baselineRef.current !== null && editSnapshot !== baselineRef.current
+  const { markClean } = useUnsavedGuard(dirty)
   const [termsConditions, setTermsConditions] = useState('')
 
   const [saving, setSaving] = useState(false)
@@ -247,12 +260,28 @@ export default function EditCreditNoteScreen() {
           .set({ currentBalance: sql`${schema.customer.currentBalance} + ${newSign * total}` })
           .where(eq(schema.customer.id, existing.customerId))
         if (referenceInvoiceId) {
-          await tx
-            .update(schema.salesInvoice)
-            .set({ balanceDue: sql`${schema.salesInvoice.balanceDue} + ${newSign * total}` })
+          // Adjust balanceDue AND derive the status from it, exactly like desktop
+          // creditNote.ts on update — reverse-old above touches only balanceDue
+          // (same as desktop); the apply-new step owns the status.
+          const [inv] = await tx
+            .select()
+            .from(schema.salesInvoice)
             .where(eq(schema.salesInvoice.id, referenceInvoiceId))
+            .limit(1)
+          if (inv) {
+            const newBalanceDue = inv.balanceDue + newSign * total
+            const newStatus =
+              existing.type === 'CREDIT_NOTE'
+                ? newBalanceDue <= 0 ? 'PAID' : inv.amountPaid > 0 ? 'PARTIAL' : inv.status
+                : newBalanceDue > 0 && inv.status === 'PAID' ? 'PARTIAL' : inv.status
+            await tx
+              .update(schema.salesInvoice)
+              .set({ balanceDue: newBalanceDue, status: newStatus })
+              .where(eq(schema.salesInvoice.id, referenceInvoiceId))
+          }
         }
       })
+      markClean()
       router.back()
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to update note')
@@ -372,7 +401,7 @@ export default function EditCreditNoteScreen() {
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.modalContent}>
             <ThemedText type="title" style={styles.modalTitle}>Select Item</ThemedText>
-            <FlatList data={items} keyExtractor={(it) => it.id} renderItem={({ item }) => (
+            <PickerSearchList data={items} getName={(x) => x.name} getExtra={(x) => [x.hsnCode, x.skuHsn]} keyExtractor={(it) => it.id} renderItem={({ item }) => (
               <Pressable style={styles.modalRow} onPress={() => pickItem(item)}>
                 <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
                 <ThemedText style={styles.modalRowSub}>₹{item.salePrice.toFixed(2)} / {item.unit} · {item.taxRate}% GST</ThemedText>

@@ -101,6 +101,10 @@ export default function EditItemScreen() {
     }
     setSaving(true)
     try {
+      // Editing stock directly (no movement written) adjusts the OPENING stock by the
+      // same delta, so currentStock = openingStock + Σ(movements) stays true for recompute.
+      const newStock = parseFloat(currentStock) || 0
+      const newOpening = (originalItem.openingStock ?? 0) + (newStock - originalItem.currentStock)
       await db
         .update(schema.item)
         .set({
@@ -112,7 +116,8 @@ export default function EditItemScreen() {
           purchasePrice: parseFloat(purchasePrice) || 0,
           taxRate: parseFloat(taxRate) || 0,
           trackStock,
-          currentStock: parseFloat(currentStock) || 0,
+          currentStock: newStock,
+          openingStock: newOpening,
           lowStockWarning: parseFloat(lowStockWarning) || 10,
         })
         .where(eq(schema.item.id, id))

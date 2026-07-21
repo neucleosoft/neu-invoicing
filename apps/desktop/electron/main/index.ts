@@ -6,29 +6,31 @@ import path from 'path'
 import fs from 'fs'
 
 import { app, BrowserWindow, protocol } from 'electron'
+import { initLogging } from './logger'
 import { setupDatabase } from './database'
 import { setupAuthHandlers } from './auth'
 import { setupSyncHandlers, startBackupScheduler } from './sync'
+import { setupRowSyncHandlers, startRowSyncScheduler } from './rowSync'
 import { setupCustomerHandlers } from './handlers/customer'
 import { setupSupplierHandlers, migrateLegacySuppliersFromParty } from './handlers/supplier'
 import { setupSupplierItemHandlers } from './handlers/supplierItem'
-import { setupItemHandlers } from './handlers/item'
+import { setupItemHandlers, backfillOpeningStock } from './handlers/item'
 import { setupSalesHandlers } from './handlers/sales'
 import { setupQuotationHandlers } from './handlers/quotation'
 import { setupProformaInvoiceHandlers } from './handlers/proformaInvoice'
 import { setupPurchaseHandlers } from './handlers/purchase'
 import { setupPurchaseOrderHandlers } from './handlers/purchaseOrder'
-import { setupPaymentHandlers } from './handlers/payment'
+import { setupPaymentHandlers, backfillInlinePayments, backfillInlinePurchasePayments, backfillPaymentUpdatedAt } from './handlers/payment'
 import { setupDashboardHandlers } from './handlers/dashboard'
 import { setupReportHandlers } from './handlers/report'
 import { setupGSTReportHandlers } from './handlers/gstReport'
-import { setupCompanyHandlers } from './handlers/company'
+import { setupCompanyHandlers, backfillInlineImages } from './handlers/company'
 import { setupSettingsHandlers } from './handlers/settings'
 import { setupGstHandlers } from './handlers/gst'
 import { setupChallanHandlers } from './handlers/challan'
 import { setupCreditNoteHandlers } from './handlers/creditNote'
 import { setupPreviousInvoiceHandlers } from './handlers/previousInvoice'
-import { setupCashBankHandlers } from './handlers/cashBank'
+import { setupCashBankHandlers, backfillBankOpeningJournals } from './handlers/cashBank'
 import { setupExpenseHandlers } from './handlers/expense'
 import { setupShareHandlers } from './handlers/share'
 
@@ -87,6 +89,9 @@ const createWindow = () => {
 }
 
 app.whenReady().then(async () => {
+  // File logging FIRST — so even a setupDatabase failure leaves a trace.
+  initLogging()
+
   // Initialize database
   await setupDatabase()
 
@@ -135,15 +140,47 @@ app.whenReady().then(async () => {
   setupCashBankHandlers()
   setupExpenseHandlers()
   setupShareHandlers()
+  setupRowSyncHandlers()
 
   // One-shot data fix: pre-split databases held suppliers in the Customer/Party
   // table with type='SUPPLIER'. Move them into the dedicated Supplier table.
   // Idempotent — no-op once everything's been migrated.
   migrateLegacySuppliersFromParty()
 
+  // One-shot data fix: align item.openingStock so stock rebuilds from rows. Idempotent —
+  // no-op once aligned. Runs automatically on every device, so no per-customer manual step.
+  backfillOpeningStock()
+
+  // One-shot data fix: record old inline payments (amountPaid with no payment row) as real
+  // PAYMENT_IN rows, so the rebuild can see that money. Idempotent; additive (never edits a
+  // balance). Leaves ambiguous "PAID with ₹0" invoices alone — those need a human.
+  backfillInlinePayments()
+
+  // Purchase twin of the above: bills saved with an up-front amountPaid but no
+  // PAYMENT_OUT row behind it. Must exist before any recompute-apply, or the
+  // rebuild erases those payments and inflates supplier balances.
+  backfillInlinePurchasePayments()
+
+  // One-shot data fix: fold filesystem logo/signature images into the DB as
+  // base64 data URLs so backups (and future sync) actually carry them.
+  backfillInlineImages()
+
+  // Stamp legacy payment rows' updatedAt (covers the db-push baseline path,
+  // which never runs the migration SQL's backfill UPDATE).
+  backfillPaymentUpdatedAt()
+
+  // One-shot data fix (P3): fold each account's typed balance into an
+  // opening-journal row (deterministic id → dual-device backfills converge)
+  // so bank balances are rebuildable like every other total.
+  backfillBankOpeningJournals()
+
   // Kick off scheduled-backup watchdog. Runs an immediate due-check, then
   // ticks every hour for as long as the app is open.
   startBackupScheduler()
+
+  // Row-sync auto ticks (S3): first run delayed past the backfills above,
+  // then every 5 minutes. Tripwire pauses always wait for the manual button.
+  startRowSyncScheduler()
 
   createWindow()
 

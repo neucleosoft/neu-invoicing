@@ -67,9 +67,25 @@ function totalDocs(docs: GstDoc[]): SectionTotals {
   return t
 }
 
+// One document behind a section total — feeds the drill-down list (tap a
+// section to see which docs are inside it). Mirrors desktop's per-section
+// invoice lists.
+export interface GstDocDetail {
+  id: string
+  number: string
+  date: Date
+  partyName: string
+  totalAmount: number
+}
+
 // ---- raw fetch shapes ----------------------------------------------------------
 interface InvoiceRow {
   id: string
+  invoiceNumber: string
+  invoiceDate: Date
+  customerName: string | null
+  placeOfSupply: string | null
+  reverseCharge: boolean
   taxId: string | null
   isInterState: boolean
   supplyType: string
@@ -85,6 +101,9 @@ interface InvoiceRow {
 
 interface BillRow {
   id: string
+  billNumber: string
+  billDate: Date
+  supplierName: string | null
   taxId: string | null
   reverseCharge: boolean
   itcEligibility: string
@@ -99,8 +118,13 @@ interface BillRow {
 }
 
 interface NoteRow {
+  id: string
+  noteNumber: string
+  noteDate: Date
+  customerName: string | null
   taxId: string | null
   type: string
+  isInterState: boolean
   subtotal: number
   totalAmount: number
   igstAmount: number
@@ -112,6 +136,11 @@ async function fetchInvoices(db: Db, range: GstRange): Promise<InvoiceRow[]> {
   const rows = await db
     .select({
       id: schema.salesInvoice.id,
+      invoiceNumber: schema.salesInvoice.invoiceNumber,
+      invoiceDate: schema.salesInvoice.invoiceDate,
+      customerName: schema.customer.name,
+      placeOfSupply: schema.salesInvoice.placeOfSupply,
+      reverseCharge: schema.salesInvoice.reverseCharge,
       taxId: schema.customer.taxId,
       isInterState: schema.salesInvoice.isInterState,
       supplyType: schema.salesInvoice.supplyType,
@@ -132,6 +161,7 @@ async function fetchInvoices(db: Db, range: GstRange): Promise<InvoiceRow[]> {
         gte(schema.salesInvoice.invoiceDate, range.start),
         lte(schema.salesInvoice.invoiceDate, range.end),
         notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
       ),
     )
   return rows
@@ -141,6 +171,9 @@ async function fetchBills(db: Db, range: GstRange): Promise<BillRow[]> {
   return db
     .select({
       id: schema.purchaseBill.id,
+      billNumber: schema.purchaseBill.billNumber,
+      billDate: schema.purchaseBill.billDate,
+      supplierName: schema.supplier.name,
       taxId: schema.supplier.taxId,
       reverseCharge: schema.purchaseBill.reverseCharge,
       itcEligibility: schema.purchaseBill.itcEligibility,
@@ -169,8 +202,13 @@ async function fetchBills(db: Db, range: GstRange): Promise<BillRow[]> {
 async function fetchNotes(db: Db, range: GstRange): Promise<NoteRow[]> {
   return db
     .select({
+      id: schema.creditDebitNote.id,
+      noteNumber: schema.creditDebitNote.noteNumber,
+      noteDate: schema.creditDebitNote.noteDate,
+      customerName: schema.customer.name,
       taxId: schema.customer.taxId,
       type: schema.creditDebitNote.type,
+      isInterState: schema.creditDebitNote.isInterState,
       subtotal: schema.creditDebitNote.subtotal,
       totalAmount: schema.creditDebitNote.totalAmount,
       igstAmount: schema.creditDebitNote.igstAmount,
@@ -232,6 +270,8 @@ export const GSTR1_SECTION_NAMES: Record<Gstr1SectionKey, string> = {
 
 export interface Gstr1Data {
   sections: Record<Gstr1SectionKey, SectionTotals>
+  // Drill-down: the documents behind each section total.
+  sectionDocs: Record<Gstr1SectionKey, GstDocDetail[]>
   docSummary: {
     totalInvoices: number
     totalValue: number
@@ -272,14 +312,39 @@ export async function getGSTR1(db: Db, range: GstRange): Promise<Gstr1Data> {
     exp: [],
     nilExempt: [],
   }
+  const sectionDocs: Record<Gstr1SectionKey, GstDocDetail[]> = {
+    b2b: [],
+    b2cl: [],
+    b2cs: [],
+    cdnr: [],
+    cdnur: [],
+    exp: [],
+    nilExempt: [],
+  }
 
   for (const inv of invoices) {
-    buckets[classifyInvoice(inv)].push(invToDoc(inv))
+    const key = classifyInvoice(inv)
+    buckets[key].push(invToDoc(inv))
+    sectionDocs[key].push({
+      id: inv.id,
+      number: inv.invoiceNumber,
+      date: inv.invoiceDate,
+      partyName: inv.customerName ?? 'Unknown',
+      totalAmount: inv.totalAmount,
+    })
   }
   // Mobile keeps credit/debit notes in a separate table (desktop relied on
   // negative-total invoices). Route them into the CDN sections by registration.
   for (const n of notes) {
-    buckets[isRegistered(n.taxId) ? 'cdnr' : 'cdnur'].push(noteToDoc(n))
+    const key = isRegistered(n.taxId) ? 'cdnr' : 'cdnur'
+    buckets[key].push(noteToDoc(n))
+    sectionDocs[key].push({
+      id: n.id,
+      number: n.noteNumber,
+      date: n.noteDate,
+      partyName: n.customerName ?? 'Unknown',
+      totalAmount: n.totalAmount,
+    })
   }
 
   const sections = {} as Record<Gstr1SectionKey, SectionTotals>
@@ -299,7 +364,117 @@ export async function getGSTR1(db: Db, range: GstRange): Promise<Gstr1Data> {
     totalCess: invoices.reduce((s, i) => s + (i.cessAmount || 0), 0),
   }
 
-  return { sections, docSummary, hsnSummary }
+  return { sections, sectionDocs, docSummary, hsnSummary }
+}
+
+// ---- GSTN portal file (GSTR-1) --------------------------------------------------
+// Assembles the invoice-level detail shape the SHARED toGSTNGstr1 consumes
+// (identical to what desktop's getGSTR1 feeds it), so both apps emit the same
+// portal file. Items are loaded in one inArray query and grouped per invoice.
+export async function getGstr1PortalData(
+  db: Db,
+  range: GstRange,
+  startDateIso: string,
+): Promise<any> {
+  const [invoices, notes, hsnSummary] = await Promise.all([
+    fetchInvoices(db, range),
+    fetchNotes(db, range),
+    getHSNSummary(db, range),
+  ])
+
+  const invIds = invoices.map((i) => i.id)
+  const items = invIds.length
+    ? await db
+        .select({
+          salesInvoiceId: schema.salesInvoiceItem.salesInvoiceId,
+          quantity: schema.salesInvoiceItem.quantity,
+          rate: schema.salesInvoiceItem.rate,
+          discount: schema.salesInvoiceItem.discount,
+          taxRate: schema.salesInvoiceItem.taxRate,
+          taxableAmount: schema.salesInvoiceItem.taxableAmount,
+          igstAmount: schema.salesInvoiceItem.igstAmount,
+          cgstAmount: schema.salesInvoiceItem.cgstAmount,
+          sgstAmount: schema.salesInvoiceItem.sgstAmount,
+          cessAmount: schema.salesInvoiceItem.cessAmount,
+        })
+        .from(schema.salesInvoiceItem)
+        .where(inArray(schema.salesInvoiceItem.salesInvoiceId, invIds))
+    : []
+  const itemsByInvoice = new Map<string, typeof items>()
+  for (const it of items) {
+    const list = itemsByInvoice.get(it.salesInvoiceId) ?? []
+    list.push(it)
+    itemsByInvoice.set(it.salesInvoiceId, list)
+  }
+
+  const toDetail = (inv: InvoiceRow) => ({
+    invoiceNumber: inv.invoiceNumber,
+    invoiceDate: inv.invoiceDate,
+    totalAmount: inv.totalAmount,
+    isInterState: inv.isInterState,
+    placeOfSupply: inv.placeOfSupply,
+    reverseCharge: inv.reverseCharge,
+    customer: { taxId: inv.taxId },
+    items: itemsByInvoice.get(inv.id) ?? [],
+  })
+
+  const grouped: Record<'b2b' | 'b2cl' | 'b2cs', any[]> = { b2b: [], b2cl: [], b2cs: [] }
+  for (const inv of invoices) {
+    const key = classifyInvoice(inv)
+    if (key === 'b2b' || key === 'b2cl' || key === 'b2cs') grouped[key].push(toDetail(inv))
+  }
+
+  // Credit/debit notes with their item-level rate detail — the shared builder
+  // routes registered ones into cdnr, qualifying unregistered ones into cdnur,
+  // and nets the small unregistered ones into b2cs.
+  const noteIds = notes.map((n) => n.id)
+  const noteItems = noteIds.length
+    ? await db
+        .select({
+          creditDebitNoteId: schema.creditDebitNoteItem.creditDebitNoteId,
+          quantity: schema.creditDebitNoteItem.quantity,
+          rate: schema.creditDebitNoteItem.rate,
+          discount: schema.creditDebitNoteItem.discount,
+          taxRate: schema.creditDebitNoteItem.taxRate,
+          taxableAmount: schema.creditDebitNoteItem.taxableAmount,
+          igstAmount: schema.creditDebitNoteItem.igstAmount,
+          cgstAmount: schema.creditDebitNoteItem.cgstAmount,
+          sgstAmount: schema.creditDebitNoteItem.sgstAmount,
+        })
+        .from(schema.creditDebitNoteItem)
+        .where(inArray(schema.creditDebitNoteItem.creditDebitNoteId, noteIds))
+    : []
+  const itemsByNote = new Map<string, typeof noteItems>()
+  for (const it of noteItems) {
+    const list = itemsByNote.get(it.creditDebitNoteId) ?? []
+    list.push(it)
+    itemsByNote.set(it.creditDebitNoteId, list)
+  }
+  const noteDetail = notes.map((n) => ({
+    noteNumber: n.noteNumber,
+    noteDate: n.noteDate,
+    noteType: n.type,
+    totalAmount: n.totalAmount,
+    isInterState: n.isInterState,
+    customer: { taxId: n.taxId },
+    items: itemsByNote.get(n.id) ?? [],
+  }))
+
+  return {
+    sections: {
+      b2b: { invoices: grouped.b2b },
+      b2cl: { invoices: grouped.b2cl },
+      b2cs: { invoices: grouped.b2cs },
+      cdnr: { notes: noteDetail.filter((n) => isRegistered(n.customer.taxId)) },
+      cdnur: { notes: noteDetail.filter((n) => !isRegistered(n.customer.taxId)) },
+    },
+    hsnSummary,
+    docSummary: {
+      totalInvoices: invoices.length,
+      totalValue: invoices.reduce((s, i) => s + i.totalAmount, 0),
+    },
+    period: { startDate: startDateIso },
+  }
 }
 
 // ===============================================================================
@@ -328,6 +503,7 @@ export async function getHSNSummary(db: Db, range: GstRange): Promise<HsnRow[]> 
         gte(schema.salesInvoice.invoiceDate, range.start),
         lte(schema.salesInvoice.invoiceDate, range.end),
         notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
       ),
     )
   const invIds = invoices.map((i) => i.id)
@@ -397,6 +573,10 @@ export const GSTR2_SECTION_NAMES: Record<Gstr2SectionKey, string> = {
 
 export interface Gstr2Data {
   sections: Record<Gstr2SectionKey, SectionTotals>
+  // Drill-down: the bills behind each section total.
+  sectionDocs: Record<Gstr2SectionKey, GstDocDetail[]>
+  // Inward (purchase-side) HSN summary.
+  hsnSummary: HsnRow[]
   eligibleITC: { igst: number; cgst: number; sgst: number; cess: number }
   ineligibleITC: { igst: number; cgst: number; sgst: number; cess: number }
   docSummary: {
@@ -408,12 +588,23 @@ export interface Gstr2Data {
 }
 
 export async function getGSTR2(db: Db, range: GstRange): Promise<Gstr2Data> {
-  const bills = await fetchBills(db, range)
+  const [bills, hsnSummary] = await Promise.all([
+    fetchBills(db, range),
+    getPurchaseHSNSummary(db, range),
+  ])
 
   const buckets: Record<Gstr2SectionKey, GstDoc[]> = { b2b: [], rcm: [], nilExempt: [] }
+  const sectionDocs: Record<Gstr2SectionKey, GstDocDetail[]> = { b2b: [], rcm: [], nilExempt: [] }
   for (const b of bills) {
     const key: Gstr2SectionKey = b.reverseCharge ? 'rcm' : isRegistered(b.taxId) ? 'b2b' : 'nilExempt'
     buckets[key].push(billToDoc(b))
+    sectionDocs[key].push({
+      id: b.id,
+      number: b.billNumber,
+      date: b.billDate,
+      partyName: b.supplierName ?? 'Unknown',
+      totalAmount: b.totalAmount,
+    })
   }
   const sections = {} as Record<Gstr2SectionKey, SectionTotals>
   ;(Object.keys(buckets) as Gstr2SectionKey[]).forEach((k) => {
@@ -431,6 +622,8 @@ export async function getGSTR2(db: Db, range: GstRange): Promise<Gstr2Data> {
 
   return {
     sections,
+    sectionDocs,
+    hsnSummary,
     eligibleITC,
     ineligibleITC,
     docSummary: {
@@ -556,15 +749,44 @@ interface AnnualBucket {
 const emptyAnnual = (): AnnualBucket => ({ taxableValue: 0, cgst: 0, sgst: 0, igst: 0, cess: 0 })
 
 export interface Gstr9Data {
-  outward: { b2b: AnnualBucket; b2c: AnnualBucket; exports: AnnualBucket; total: AnnualBucket }
+  outward: {
+    b2b: AnnualBucket
+    b2c: AnnualBucket
+    exports: AnnualBucket
+    exemptNilRated: { value: number }
+    total: AnnualBucket
+  }
   inward: { fromRegistered: AnnualBucket; fromUnregistered: AnnualBucket; total: AnnualBucket }
   itcClaimed: { igst: number; cgst: number; sgst: number; cess: number }
+  // Part V (mirrors desktop): nothing recorded through cash yet; through-ITC
+  // equals the claimed ITC.
+  taxPaid: {
+    throughCash: { igst: number; cgst: number; sgst: number; cess: number }
+    throughITC: { igst: number; cgst: number; sgst: number; cess: number }
+  }
+  docSummary: {
+    totalSalesInvoices: number
+    totalPurchaseBills: number
+    totalSalesValue: number
+    totalPurchaseValue: number
+  }
+  hsnSummary: HsnRow[]
 }
 
 export async function getGSTR9(db: Db, range: GstRange): Promise<Gstr9Data> {
-  const [invoices, bills] = await Promise.all([fetchInvoices(db, range), fetchBills(db, range)])
+  const [invoices, bills, hsnSummary] = await Promise.all([
+    fetchInvoices(db, range),
+    fetchBills(db, range),
+    getHSNSummary(db, range),
+  ])
 
-  const out = { b2b: emptyAnnual(), b2c: emptyAnnual(), exports: emptyAnnual(), total: emptyAnnual() }
+  const out = {
+    b2b: emptyAnnual(),
+    b2c: emptyAnnual(),
+    exports: emptyAnnual(),
+    exemptNilRated: { value: 0 },
+    total: emptyAnnual(),
+  }
   for (const inv of invoices) {
     const taxable = inv.subtotal - (inv.discount || 0)
     const add = (b: AnnualBucket) => {
@@ -578,7 +800,8 @@ export async function getGSTR9(db: Db, range: GstRange): Promise<Gstr9Data> {
       out.exports.taxableValue += taxable
       out.exports.igst += inv.igstAmount || 0
     } else if (inv.supplyType === 'NIL_EXEMPT') {
-      // value-only; folds into total below
+      // Value-only bucket (mirrors desktop's exemptNilRated); folds into total.
+      out.exemptNilRated.value += inv.totalAmount
     } else if (isRegistered(inv.taxId)) {
       add(out.b2b)
     } else {
@@ -610,5 +833,89 @@ export async function getGSTR9(db: Db, range: GstRange): Promise<Gstr9Data> {
     cess: eligible.reduce((s, b) => s + (b.cessAmount || 0), 0),
   }
 
-  return { outward: out, inward: inw, itcClaimed }
+  return {
+    outward: out,
+    inward: inw,
+    itcClaimed,
+    taxPaid: {
+      throughCash: { igst: 0, cgst: 0, sgst: 0, cess: 0 },
+      throughITC: { ...itcClaimed },
+    },
+    docSummary: {
+      totalSalesInvoices: invoices.length,
+      totalPurchaseBills: bills.length,
+      totalSalesValue: invoices.reduce((s, i) => s + i.totalAmount, 0),
+      totalPurchaseValue: bills.reduce((s, b) => s + b.totalAmount, 0),
+    },
+    hsnSummary,
+  }
+}
+
+// Purchase-side (inward) HSN summary — same grouping as getHSNSummary but over
+// purchase bill lines, with names/units from the supplier catalog. Fills the
+// "inward HSN" gap vs desktop's GSTR-2 depth.
+export async function getPurchaseHSNSummary(db: Db, range: GstRange): Promise<HsnRow[]> {
+  const bills = await db
+    .select({ id: schema.purchaseBill.id })
+    .from(schema.purchaseBill)
+    .where(
+      and(
+        gte(schema.purchaseBill.billDate, range.start),
+        lte(schema.purchaseBill.billDate, range.end),
+        notDeleted(schema.purchaseBill.deletedAt),
+        notCancelled(schema.purchaseBill.cancelledAt),
+      ),
+    )
+  const billIds = bills.map((b) => b.id)
+  if (billIds.length === 0) return []
+
+  const lines = await db
+    .select({
+      hsnLine: schema.purchaseBillItem.hsnCode,
+      hsnItem: schema.supplierItem.hsnCode,
+      name: schema.supplierItem.name,
+      unit: schema.supplierItem.unit,
+      quantity: schema.purchaseBillItem.quantity,
+      rate: schema.purchaseBillItem.rate,
+      discount: schema.purchaseBillItem.discount,
+      total: schema.purchaseBillItem.total,
+      taxableAmount: schema.purchaseBillItem.taxableAmount,
+      igstAmount: schema.purchaseBillItem.igstAmount,
+      cgstAmount: schema.purchaseBillItem.cgstAmount,
+      sgstAmount: schema.purchaseBillItem.sgstAmount,
+      cessAmount: schema.purchaseBillItem.cessAmount,
+    })
+    .from(schema.purchaseBillItem)
+    .leftJoin(schema.supplierItem, eq(schema.purchaseBillItem.supplierItemId, schema.supplierItem.id))
+    .where(inArray(schema.purchaseBillItem.purchaseBillId, billIds))
+
+  const map = new Map<string, HsnRow>()
+  for (const l of lines) {
+    const key = l.hsnLine || l.hsnItem || 'NA'
+    let row = map.get(key)
+    if (!row) {
+      row = {
+        hsnCode: key,
+        description: l.name || '',
+        uqc: l.unit || 'NOS',
+        totalQuantity: 0,
+        totalValue: 0,
+        taxableValue: 0,
+        igstAmount: 0,
+        cgstAmount: 0,
+        sgstAmount: 0,
+        cessAmount: 0,
+      }
+      map.set(key, row)
+    }
+    const taxable = l.taxableAmount || l.quantity * l.rate - (l.discount || 0)
+    row.totalQuantity += l.quantity
+    row.totalValue += l.total
+    row.taxableValue += taxable
+    row.igstAmount += l.igstAmount || 0
+    row.cgstAmount += l.cgstAmount || 0
+    row.sgstAmount += l.sgstAmount || 0
+    row.cessAmount += l.cessAmount || 0
+  }
+  return Array.from(map.values())
 }

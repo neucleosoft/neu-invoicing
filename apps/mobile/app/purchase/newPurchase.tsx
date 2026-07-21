@@ -21,10 +21,19 @@ import {
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { extractBillFromImage } from '@/utils/billOcr'
 import { formatCurrency } from '@/utils/currency'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
+import type { PurchaseTaxOverride } from '@neu/shared'
+
+import {
+  listOpenPurchaseOrders,
+  loadPoLinesForBill,
+  type OpenPoSummary,
+} from '@/utils/poSave'
 import {
   createPurchaseBill,
   generateBillNumber,
@@ -62,9 +71,31 @@ export default function NewPurchaseScreen() {
   const [notes, setNotes] = useState('')
   const [lines, setLines] = useState<BillLine[]>([])
 
+  // Rage-guard: Android back / swipe must never silently eat a half-typed
+  // document (see hooks/use-unsaved-guard.ts).
+  const dirty = lines.length > 0 || supplierId !== '' || notes.trim() !== ''
+  const { markClean } = useUnsavedGuard(dirty)
+  // Up-front payment typed on the form — becomes a real tagged PAYMENT_OUT row
+  // on save (mirrors desktop's create form). Kept as text for free typing.
+  const [amountPaidStr, setAmountPaidStr] = useState('')
+  // Document-level discount, subtracted from the grand total AFTER tax
+  // (totalAmount = subtotal + tax − discount, mirrors desktop).
+  const [docDiscountStr, setDocDiscountStr] = useState('')
+  // Bill-level tax from a scanned bill that shows tax only at the bottom
+  // (every line taxRate 0): the total plus, when the bill printed one, its
+  // explicit CGST/SGST/IGST breakdown. Deactivates automatically if the user
+  // types any per-line tax rate, so the two can never both apply.
+  const [taxOverride, setTaxOverride] = useState<PurchaseTaxOverride | null>(null)
+
   const [saving, setSaving] = useState(false)
   const [showSupplierPicker, setShowSupplierPicker] = useState(false)
   const [showCatalogPicker, setShowCatalogPicker] = useState(false)
+
+  // Reference PO (optional link, mirrors desktop): open POs for the chosen
+  // supplier feed the picker; selecting one offers to pre-fill the lines.
+  const [openPOs, setOpenPOs] = useState<OpenPoSummary[]>([])
+  const [purchaseOrderId, setPurchaseOrderId] = useState('')
+  const [showPoPicker, setShowPoPicker] = useState(false)
 
   // AI scan state. The base64 image is kept so it can be saved as the bill's
   // attachment on submit (matching desktop's "Original" audit trail).
@@ -99,16 +130,64 @@ export default function NewPurchaseScreen() {
       .then(setCatalog)
   }, [supplierId, db])
 
+  useEffect(() => {
+    if (!supplierId) {
+      setOpenPOs([])
+      return
+    }
+    listOpenPurchaseOrders(db, supplierId).then(setOpenPOs)
+  }, [supplierId, db])
+
   const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? ''
 
   const subtotal = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount), 0)
-  const taxAmount = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100), 0)
-  const total = subtotal + taxAmount
+  const computedTax = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100), 0)
+  const overrideActive = taxOverride != null && lines.every((l) => !l.taxRate)
+  const taxAmount = overrideActive ? (taxOverride?.taxAmount ?? 0) : computedTax
+  const docDiscount = parseFloat(docDiscountStr) || 0
+  const total = subtotal + taxAmount - docDiscount
 
   function pickSupplier(id: string) {
-    if (id !== supplierId) setLines([])
+    if (id !== supplierId) {
+      setLines([])
+      setPurchaseOrderId('')
+    }
     setSupplierId(id)
     setShowSupplierPicker(false)
+  }
+
+  async function applyPoPrefill(poId: string) {
+    const poLines = await loadPoLinesForBill(db, poId)
+    setLines(
+      poLines.map((l) => ({
+        supplierItemId: l.supplierItemId,
+        name: l.name ?? '',
+        hsnCode: l.hsnCode ?? '',
+        qty: l.quantity,
+        rate: l.rate,
+        discount: l.discount ?? 0,
+        taxRate: l.taxRate ?? 0,
+      })),
+    )
+  }
+
+  // Selecting a PO links it and offers to pre-fill the lines. Declining keeps
+  // just the link — same behavior as desktop's handleSelectPO.
+  function handleSelectPO(poId: string) {
+    setShowPoPicker(false)
+    if (!poId) {
+      setPurchaseOrderId('')
+      return
+    }
+    setPurchaseOrderId(poId)
+    if (lines.length === 0) {
+      void applyPoPrefill(poId)
+      return
+    }
+    Alert.alert('Pre-fill from PO?', "Replace the current line items with this PO's items?", [
+      { text: 'Keep my items', style: 'cancel' },
+      { text: 'Replace', onPress: () => void applyPoPrefill(poId) },
+    ])
   }
 
   function addFromCatalog(si: SupplierItem) {
@@ -255,6 +334,23 @@ export default function NewPurchaseScreen() {
         })),
       )
 
+      // Bills that show tax only as a bottom line arrive with every line's
+      // taxRate 0 and a doc-level taxAmount — honor that figure (and the bill's
+      // printed CGST/SGST/IGST breakdown, when the model extracted one) as the
+      // bill-level override. Same rule as desktop; the shared helper normalises
+      // an impossible split against the supplier's state.
+      const linesCarryTax = data.items.some((it) => (it.taxRate || 0) > 0)
+      setTaxOverride(
+        !linesCarryTax && data.taxAmount > 0
+          ? {
+              taxAmount: data.taxAmount,
+              cgstAmount: data.cgstAmount,
+              sgstAmount: data.sgstAmount,
+              igstAmount: data.igstAmount,
+            }
+          : null,
+      )
+
       const supplierMsg = matched
         ? `Supplier matched: ${matched.name}.`
         : data.supplierName
@@ -305,7 +401,12 @@ export default function NewPurchaseScreen() {
         billDate: isNaN(parsedDate.getTime()) ? new Date() : parsedDate,
         supplierInvoiceNumber: supplierInvoiceNumber.trim() || null,
         supplierInvoiceDate: null,
+        purchaseOrderId: purchaseOrderId || null,
         notes: notes.trim() || null,
+        discount: docDiscount,
+        taxOverride: overrideActive ? taxOverride : null,
+        amountPaid: parseFloat(amountPaidStr) || 0,
+        paymentMode: 'CASH',
         attachmentData,
         attachmentMimeType,
       }
@@ -319,6 +420,7 @@ export default function NewPurchaseScreen() {
         taxRate: l.taxRate,
       }))
       await createPurchaseBill(db, header, lineInputs)
+      markClean()
       router.back()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to save bill'
@@ -370,6 +472,19 @@ export default function NewPurchaseScreen() {
           {supplierId ? supplierName : 'Pick a supplier'}
         </ThemedText>
       </Pressable>
+
+      {supplierId && openPOs.length > 0 ? (
+        <>
+          <ThemedText style={styles.label}>Reference PO (optional)</ThemedText>
+          <Pressable style={styles.picker} onPress={() => setShowPoPicker(true)}>
+            <ThemedText style={purchaseOrderId ? undefined : styles.placeholder}>
+              {purchaseOrderId
+                ? openPOs.find((p) => p.id === purchaseOrderId)?.orderNumber ?? 'Linked PO'
+                : `Link one of ${openPOs.length} open PO${openPOs.length === 1 ? '' : 's'}`}
+            </ThemedText>
+          </Pressable>
+        </>
+      ) : null}
 
       <Field
         label="Bill Date (YYYY-MM-DD)"
@@ -457,11 +572,28 @@ export default function NewPurchaseScreen() {
 
       <Field label="Notes" value={notes} onChangeText={setNotes} placeholder="Optional" multiline />
 
+      <Field
+        label="Bill Discount (optional)"
+        value={docDiscountStr}
+        onChangeText={setDocDiscountStr}
+        placeholder="0"
+        keyboardType="numeric"
+      />
+
       <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.totals}>
         <TotalRow label="Subtotal" value={subtotal} />
-        <TotalRow label="Tax" value={taxAmount} />
+        <TotalRow label={overrideActive ? 'Tax (from scanned bill)' : 'Tax'} value={taxAmount} />
+        {docDiscount > 0 && <TotalRow label="Discount" value={-docDiscount} />}
         <TotalRow label="Total" value={total} bold />
       </ThemedView>
+
+      <Field
+        label="Amount Paid now (optional)"
+        value={amountPaidStr}
+        onChangeText={setAmountPaidStr}
+        placeholder="0"
+        keyboardType="numeric"
+      />
 
       <Pressable
         style={[styles.saveButton, saving && styles.saveButtonDisabled]}
@@ -475,8 +607,10 @@ export default function NewPurchaseScreen() {
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.modalContent}>
             <ThemedText type="title" style={styles.modalTitle}>Select Supplier</ThemedText>
-            <FlatList
+            <PickerSearchList
               data={suppliers}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.phone]}
               keyExtractor={(s) => s.id}
               renderItem={({ item }) => (
                 <Pressable style={styles.modalRow} onPress={() => pickSupplier(item.id)}>
@@ -493,6 +627,33 @@ export default function NewPurchaseScreen() {
         </View>
       </Modal>
 
+      <Modal visible={showPoPicker} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <ThemedView style={styles.modalContent}>
+            <ThemedText type="title" style={styles.modalTitle}>Link a Purchase Order</ThemedText>
+            <FlatList
+              data={[{ id: '', orderNumber: 'None — no PO link', orderDate: new Date(), totalAmount: 0 } as OpenPoSummary, ...openPOs]}
+              keyExtractor={(p) => p.id || 'none'}
+              renderItem={({ item }) => (
+                <Pressable style={styles.modalRow} onPress={() => handleSelectPO(item.id)}>
+                  <ThemedText type={item.id === purchaseOrderId ? 'defaultSemiBold' : undefined}>
+                    {item.id === purchaseOrderId ? `✓ ${item.orderNumber}` : item.orderNumber}
+                  </ThemedText>
+                  {item.id ? (
+                    <ThemedText style={styles.catalogMeta}>
+                      {new Date(item.orderDate).toLocaleDateString()} · {formatCurrency(item.totalAmount)}
+                    </ThemedText>
+                  ) : null}
+                </Pressable>
+              )}
+            />
+            <Pressable style={styles.modalClose} onPress={() => setShowPoPicker(false)}>
+              <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
+            </Pressable>
+          </ThemedView>
+        </View>
+      </Modal>
+
       <Modal visible={showCatalogPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.modalContent}>
@@ -502,8 +663,10 @@ export default function NewPurchaseScreen() {
                 This supplier has no catalog items yet. Close this and use “+ New item”.
               </ThemedText>
             ) : (
-              <FlatList
+              <PickerSearchList
                 data={catalog}
+                getName={(x) => x.name}
+                getExtra={(x) => [x.hsnCode]}
                 keyExtractor={(c) => c.id}
                 renderItem={({ item }) => (
                   <Pressable style={styles.modalRow} onPress={() => addFromCatalog(item)}>

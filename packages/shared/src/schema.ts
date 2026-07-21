@@ -6,9 +6,17 @@ import {
   blob,
   customType,
 } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 import cuid from "cuid";
+import { stampHlc } from "./hlc";
 
 const now = () => new Date();
+
+// hlc is stamped by the app's HLC clock once it is seeded at DB init
+// (setGlobalHlcStamper); before that — early one-time repairs — SQL NULL
+// keeps the row in the legacy "no stamp" state the sync comparator already
+// falls back from. ($defaultFn/$onUpdate may not return a plain null.)
+const hlcStamp = () => stampHlc() ?? sql`null`;
 
 // Stores Date values as Unix-epoch MILLISECOND integers — the format Prisma
 // actually writes for SQLite DateTime columns. (An earlier version wrote
@@ -95,6 +103,7 @@ export const customer = sqliteTable("Party", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -131,6 +140,7 @@ export const supplier = sqliteTable("Supplier", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -156,10 +166,14 @@ export const item = sqliteTable("Item", {
     .notNull()
     .default(false),
   currentStock: real("currentStock").notNull().default(0),
+  // Stock before any recorded movement — lets recompute rebuild
+  // currentStock = openingStock + Σ(stockMovements), mirroring party openingBalance.
+  openingStock: real("openingStock").notNull().default(0),
   lowStockWarning: real("lowStockWarning").notNull().default(10),
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -184,6 +198,7 @@ export const supplierItem = sqliteTable("SupplierItem", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -240,6 +255,7 @@ export const salesInvoice = sqliteTable("SalesInvoice", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -313,6 +329,7 @@ export const quotation = sqliteTable("Quotation", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -386,6 +403,7 @@ export const proformaInvoice = sqliteTable("ProformaInvoice", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -456,6 +474,7 @@ export const purchaseOrder = sqliteTable("PurchaseOrder", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -535,6 +554,7 @@ export const purchaseBill = sqliteTable("PurchaseBill", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -593,6 +613,10 @@ export const paymentTransaction = sqliteTable("PaymentTransaction", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  // Nullable to mirror Prisma (SQLite ADD COLUMN can't take now()); legacy rows
+  // are backfilled to createdAt. Needed so payment edits can sync newest-wins.
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
+  updatedAt: prismaDate("updatedAt").$defaultFn(now).$onUpdate(now),
 });
 
 // =============================================================
@@ -675,9 +699,22 @@ export const deliveryChallan = sqliteTable("DeliveryChallan", {
   ewayBillNo: text("ewayBillNo"),
   warrantyPeriod: text("warrantyPeriod"),
   dispatchedThrough: text("dispatchedThrough"),
+  // GST split (2026-07-14): the shared computeGstValues already produced these
+  // for challans on both apps — they were dropped for lack of columns. Same
+  // shape as salesInvoice.
+  placeOfSupply: text("placeOfSupply"),
+  placeOfSupplyName: text("placeOfSupplyName"),
+  isInterState: integer("isInterState", { mode: "boolean" })
+    .notNull()
+    .default(false),
+  cgstAmount: real("cgstAmount").notNull().default(0),
+  sgstAmount: real("sgstAmount").notNull().default(0),
+  igstAmount: real("igstAmount").notNull().default(0),
+  cessAmount: real("cessAmount").notNull().default(0),
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -698,6 +735,15 @@ export const deliveryChallanItem = sqliteTable("DeliveryChallanItem", {
   discount: real("discount").notNull().default(0),
   total: real("total").notNull(),
   hsnCode: text("hsnCode"),
+  taxableAmount: real("taxableAmount").notNull().default(0),
+  cgstRate: real("cgstRate").notNull().default(0),
+  cgstAmount: real("cgstAmount").notNull().default(0),
+  sgstRate: real("sgstRate").notNull().default(0),
+  sgstAmount: real("sgstAmount").notNull().default(0),
+  igstRate: real("igstRate").notNull().default(0),
+  igstAmount: real("igstAmount").notNull().default(0),
+  cessRate: real("cessRate").notNull().default(0),
+  cessAmount: real("cessAmount").notNull().default(0),
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
@@ -738,6 +784,7 @@ export const creditDebitNote = sqliteTable("CreditDebitNote", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -785,6 +832,38 @@ export const bankAccount = sqliteTable("BankAccount", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
+  updatedAt: prismaDate("updatedAt")
+    .notNull()
+    .$defaultFn(now)
+    .$onUpdate(now),
+});
+
+// =============================================================
+// Bank Transaction (append-only journal — P3)
+// =============================================================
+// Every balance change is a ROW, never an in-place counter edit: two devices
+// adjusting the same account offline become two rows that both survive any
+// merge order, and currentBalance becomes rebuildable (recomputeBankBalances)
+// like every other total. The opening balance is itself a journal row with the
+// deterministic id `open-<accountId>`, so both devices' backfills converge to
+// ONE row through sync. Rows are immutable — a mistake is corrected by a
+// counter-entry, the accounting way.
+export const bankTransaction = sqliteTable("BankTransaction", {
+  id: text("id").primaryKey().$defaultFn(cuid),
+  deletedAt: prismaDate("deletedAt"),
+  bankAccountId: text("bankAccountId")
+    .notNull()
+    .references(() => bankAccount.id),
+  amount: real("amount").notNull(), // signed: + money in, − money out
+  description: text("description"),
+  transactionDate: prismaDate("transactionDate")
+    .notNull()
+    .$defaultFn(now),
+  createdAt: prismaDate("createdAt")
+    .notNull()
+    .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)
@@ -794,6 +873,26 @@ export const bankAccount = sqliteTable("BankAccount", {
 // =============================================================
 // GST Lookup Cache
 // =============================================================
+// Daily business expenses — non-inventory money out (rent, utilities,
+// salaries, travel…). Standalone records: no supplier/bill linkage, no
+// bank-balance side-effect. Desktop-only UI for now and NOT row-synced —
+// no hlc column on purpose (adding sync later means adding hlc + packets).
+// Optional receipt attachment stored as BLOB (same pattern as PreviousInvoice).
+export const expense = sqliteTable("Expense", {
+  id: text("id").primaryKey().$defaultFn(cuid),
+  date: prismaDate("date").notNull().$defaultFn(now),
+  category: text("category").notNull(),
+  description: text("description").notNull(),
+  amount: real("amount").notNull(),
+  paymentMode: text("paymentMode").notNull().default("CASH"),
+  notes: text("notes"),
+  receiptData: blob("receiptData", { mode: "buffer" }),
+  receiptMimeType: text("receiptMimeType"),
+  receiptFileName: text("receiptFileName"),
+  createdAt: prismaDate("createdAt").notNull().$defaultFn(now),
+  updatedAt: prismaDate("updatedAt").notNull().$defaultFn(now).$onUpdate(now),
+});
+
 export const gstCache = sqliteTable("GstCache", {
   id: text("id").primaryKey().$defaultFn(cuid),
   gstin: text("gstin").notNull().unique(),
@@ -842,6 +941,7 @@ export const previousInvoice = sqliteTable("PreviousInvoice", {
   createdAt: prismaDate("createdAt")
     .notNull()
     .$defaultFn(now),
+  hlc: text("hlc").$defaultFn(hlcStamp).$onUpdate(hlcStamp), // sync HLC ordering stamp (P1)
   updatedAt: prismaDate("updatedAt")
     .notNull()
     .$defaultFn(now)

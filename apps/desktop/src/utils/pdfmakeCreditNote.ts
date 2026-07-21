@@ -8,7 +8,6 @@ import {
   extractPAN,
   getTaxGroups,
   getHSNGroups,
-  LOGO_BASE64,
 } from './pdfHelpers'
 
 type Content = any
@@ -96,7 +95,12 @@ function buildCreditNoteDefinition(note: CreditNotePDFData): any {
   const itemsForGroups = note.items.map((it) => ({ ...it, discount: it.discount ?? 0 }))
   const taxGroups = getTaxGroups(itemsForGroups as any, isInter)
   const hsnGroups = getHSNGroups(itemsForGroups as any, isInter)
-  const logo = note.company?.logoBase64 || LOGO_BASE64
+  // Logo & signature are OPTIONAL - only valid data: URIs embed (the old
+  // LOGO_BASE64 placeholder was corrupt and crashed pdfmake for logo-less companies).
+  const logoSrc = note.company?.logoBase64
+  const logo = logoSrc && logoSrc.startsWith('data:') ? logoSrc : undefined
+  const sigSrc = note.company?.signatureBase64
+  const signature = sigSrc && sigSrc.startsWith('data:') ? sigSrc : undefined
 
   return {
     pageSize: 'A4',
@@ -108,7 +112,7 @@ function buildCreditNoteDefinition(note: CreditNotePDFData): any {
       buildItemsSection(note, isInter, taxGroups),
       buildHSNSection(hsnGroups, isInter),
       buildAmountInWords(note.totalAmount),
-      buildFooter(note, logo),
+      buildFooter(note, logo, signature),
     ],
     defaultStyle: { fontSize: 9 },
   }
@@ -140,7 +144,7 @@ function buildTitle(type: 'CREDIT_NOTE' | 'DEBIT_NOTE'): Content {
   }
 }
 
-function buildCompanySection(note: CreditNotePDFData, logo: string): Content {
+function buildCompanySection(note: CreditNotePDFData, logo: string | undefined): Content {
   const company = note.company
   const companyStack: Content[] = [
     { text: (company?.name || 'Company').toUpperCase(), bold: true, fontSize: 16, color: '#2E7D32', margin: [0, 0, 0, 3] },
@@ -191,7 +195,7 @@ function buildCompanySection(note: CreditNotePDFData, logo: string): Content {
       body: [[
         {
           columns: [
-            { image: logo, width: 60, height: 60, margin: [0, 0, 8, 0] },
+            ...(logo ? [{ image: logo, width: 60, height: 60, margin: [0, 0, 8, 0] }] : [{ text: '', width: 0 }]),
             { stack: companyStack, width: '*' },
           ],
         },
@@ -496,7 +500,7 @@ function buildAmountInWords(totalAmount: number): Content {
   }
 }
 
-function buildFooter(note: CreditNotePDFData, logo: string): Content {
+function buildFooter(note: CreditNotePDFData, logo: string | undefined, signature: string | undefined): Content {
   const company = note.company
   const hasNotes = !!(note.notes && note.notes.trim())
   const hasReason = !!(note.reason && note.reason.trim())
@@ -545,7 +549,11 @@ function buildFooter(note: CreditNotePDFData, logo: string): Content {
 
   const sigStack: Content[] = [
     { text: '', fontSize: 1 },
-    { image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] },
+    ...(signature
+      ? [{ image: signature, width: 90, height: 32, alignment: 'center' as const, margin: [0, 12, 0, 4] as [number, number, number, number] }]
+      : logo
+        ? [{ image: logo, width: 45, height: 45, alignment: 'center' as const, margin: [0, 10, 0, 8] as [number, number, number, number] }]
+        : []),
     { text: 'Authorised Signatory For', fontSize: 9, alignment: 'center' as const },
     { text: (company?.name || '').toUpperCase(), bold: true, fontSize: 9, alignment: 'center' as const },
   ]

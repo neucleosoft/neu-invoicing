@@ -1,7 +1,9 @@
 import { ipcMain, app } from 'electron'
-import { getPrisma } from '../database'
+import { and, asc, eq, gte, inArray, lte, toGSTNGstr1 } from '@neu/shared'
+import { getDb, schema } from '../db'
 import ExcelJS from 'exceljs'
 import path from 'path'
+import { attachBillRelations, attachCustomerAndItems } from './docLoaders'
 import { notCancelled, notDeleted } from './softDelete'
 
 // Indian State Codes
@@ -66,13 +68,9 @@ interface GSTR1Section {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// GSTN-compliant GSTR-1 JSON converter
-// Reference: GSTN GSTR-1 JSON Schema v3 (offline tool / portal upload format).
-//
-// The internal `getGSTR1` handler returns data shaped for our UI (sections with
-// full Prisma rows). This function transforms that shape into the strict GSTN
-// schema with abbreviated keys (b2b, b2cs, hsn.data, doc_issue, etc.) that the
-// GST Portal and any GSTN-spec validator will accept.
+// GSTN-compliant GSTR-1 JSON converter: now the SHARED toGSTNGstr1
+// (packages/shared/src/gstr1Gstn.ts) so mobile produces the identical portal
+// file. The helpers below remain local for the friendly-JSON and Excel paths.
 // ────────────────────────────────────────────────────────────────────────────
 
 const round2 = (n: number) => Math.round((n || 0) * 100) / 100
@@ -93,159 +91,7 @@ const periodToFP = (startDateStr: string | undefined): string => {
   return startDateStr.substring(5, 7) + startDateStr.substring(0, 4)
 }
 
-// Group an invoice's line items by tax rate, returning the GSTN itms[] array.
-// Each tax rate becomes one entry with summed taxable value + tax amounts.
-const groupItemsByRateForGSTN = (items: any[], isInter: boolean) => {
-  const buckets: Record<number, { txval: number; iamt: number; camt: number; samt: number; csamt: number }> = {}
-  for (const it of items || []) {
-    const rt = it.taxRate || 0
-    if (!buckets[rt]) buckets[rt] = { txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 }
-    const taxable = it.taxableAmount ?? (it.quantity * it.rate - (it.discount || 0))
-    buckets[rt].txval += taxable
-    if (isInter) {
-      buckets[rt].iamt += it.igstAmount ?? (taxable * rt) / 100
-    } else {
-      buckets[rt].camt += it.cgstAmount ?? (taxable * rt) / 200
-      buckets[rt].samt += it.sgstAmount ?? (taxable * rt) / 200
-    }
-    buckets[rt].csamt += it.cessAmount || 0
-  }
-  return Object.entries(buckets).map(([rate, v], idx) => ({
-    num: idx + 1,
-    itm_det: {
-      rt: parseFloat(rate),
-      txval: round2(v.txval),
-      iamt: round2(v.iamt),
-      camt: round2(v.camt),
-      samt: round2(v.samt),
-      csamt: round2(v.csamt),
-    },
-  }))
-}
-
 const stateCodeFromGstin = (g: string | null | undefined) => (g || '').substring(0, 2)
-
-function toGSTNGstr1(data: any, companyGstin: string): any {
-  // === B2B: invoices grouped by customer GSTIN (ctin) ===
-  const b2bByCtin: Record<string, any[]> = {}
-  for (const inv of data.sections?.b2b?.invoices || []) {
-    const ctin = inv.customer?.taxId
-    if (!ctin) continue
-    if (!b2bByCtin[ctin]) b2bByCtin[ctin] = []
-    b2bByCtin[ctin].push({
-      inum: inv.invoiceNumber,
-      idt: fmtGSTNDate(inv.invoiceDate),
-      val: round2(inv.totalAmount),
-      pos: stateCodeFromGstin(inv.customer?.taxId),
-      rchrg: inv.reverseCharge ? 'Y' : 'N',
-      inv_typ: 'R', // R=Regular. SEZ/Deemed Export not tracked in our schema yet.
-      itms: groupItemsByRateForGSTN(inv.items || [], !!inv.isInterState),
-    })
-  }
-  const b2b = Object.entries(b2bByCtin).map(([ctin, inv]) => ({ ctin, inv }))
-
-  // === B2CL: invoices grouped by place-of-supply (pos) ===
-  const b2clByPos: Record<string, any[]> = {}
-  for (const inv of data.sections?.b2cl?.invoices || []) {
-    const pos = inv.placeOfSupply || stateCodeFromGstin(inv.customer?.taxId) || ''
-    if (!pos) continue
-    if (!b2clByPos[pos]) b2clByPos[pos] = []
-    b2clByPos[pos].push({
-      inum: inv.invoiceNumber,
-      idt: fmtGSTNDate(inv.invoiceDate),
-      val: round2(inv.totalAmount),
-      itms: groupItemsByRateForGSTN(inv.items || [], true), // B2CL is always inter-state
-    })
-  }
-  const b2cl = Object.entries(b2clByPos).map(([pos, inv]) => ({ pos, inv }))
-
-  // === B2CS: aggregated rows by (sply_ty × rt × pos × typ) ===
-  const b2csBuckets: Record<string, any> = {}
-  for (const inv of data.sections?.b2cs?.invoices || []) {
-    const pos = inv.placeOfSupply || stateCodeFromGstin(inv.customer?.taxId) || stateCodeFromGstin(companyGstin)
-    const isInter = !!inv.isInterState
-    const sply_ty = isInter ? 'INTER' : 'INTRA'
-    for (const it of inv.items || []) {
-      const rt = it.taxRate || 0
-      const key = `${sply_ty}|${rt}|${pos}|OE`
-      if (!b2csBuckets[key]) {
-        b2csBuckets[key] = { sply_ty, rt, typ: 'OE', pos, txval: 0, iamt: 0, camt: 0, samt: 0, csamt: 0 }
-      }
-      const taxable = it.taxableAmount ?? (it.quantity * it.rate - (it.discount || 0))
-      b2csBuckets[key].txval += taxable
-      if (isInter) {
-        b2csBuckets[key].iamt += it.igstAmount ?? (taxable * rt) / 100
-      } else {
-        b2csBuckets[key].camt += it.cgstAmount ?? (taxable * rt) / 200
-        b2csBuckets[key].samt += it.sgstAmount ?? (taxable * rt) / 200
-      }
-      b2csBuckets[key].csamt += it.cessAmount || 0
-    }
-  }
-  const b2cs = Object.values(b2csBuckets).map((v: any) => ({
-    sply_ty: v.sply_ty,
-    rt: v.rt,
-    typ: v.typ,
-    pos: v.pos,
-    txval: round2(v.txval),
-    iamt: round2(v.iamt),
-    camt: round2(v.camt),
-    samt: round2(v.samt),
-    csamt: round2(v.csamt),
-  }))
-
-  // === HSN summary ===
-  const hsnData = (data.hsnSummary || []).map((h: any, idx: number) => ({
-    num: idx + 1,
-    hsn_sc: h.hsnCode || '',
-    desc: h.description || '',
-    uqc: h.uqc || 'NOS',
-    qty: round2(h.totalQuantity || 0),
-    val: round2(h.totalValue || 0),
-    txval: round2(h.taxableValue || 0),
-    iamt: round2(h.igstAmount || 0),
-    camt: round2(h.cgstAmount || 0),
-    samt: round2(h.sgstAmount || 0),
-    csamt: round2(h.cessAmount || 0),
-  }))
-
-  // === Document issue summary (doc_num: 1 = Invoices for outward supply) ===
-  const totalIssued = data.docSummary?.totalInvoices || 0
-  const docIssue = {
-    doc_det: [
-      {
-        doc_num: 1,
-        docs: [
-          {
-            num: 1,
-            from: data.sections?.b2b?.invoices?.[0]?.invoiceNumber || '',
-            to:
-              data.sections?.b2b?.invoices?.[data.sections?.b2b?.invoices?.length - 1]?.invoiceNumber ||
-              '',
-            totnum: totalIssued,
-            cancel: 0,
-            net_issue: totalIssued,
-          },
-        ],
-      },
-    ],
-  }
-
-  const out: any = {
-    gstin: companyGstin || '',
-    fp: periodToFP(data.period?.startDate),
-    gt: 0, // Gross turnover preceding FY — not tracked; user fills on portal if needed.
-    cur_gt: round2(data.docSummary?.totalValue || 0),
-  }
-  if (b2b.length > 0) out.b2b = b2b
-  if (b2cl.length > 0) out.b2cl = b2cl
-  if (b2cs.length > 0) out.b2cs = b2cs
-  if (hsnData.length > 0) out.hsn = { data: hsnData }
-  out.doc_issue = docIssue
-  // cdnr / cdnur / exp / nil omitted for v1 — add when those sections actually
-  // have data in your books (most small businesses won't have any in a given month).
-  return out
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // Human-friendly GSTR-1 JSON
@@ -417,32 +263,43 @@ function toFriendlyGstr1(data: any, company: any): any {
 }
 
 export const setupGSTReportHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
+
+  // Period-filtered invoice load with customer + items(+item) — the shape the
+  // report builders below have always consumed (Prisma include, batched).
+  const loadInvoicesForPeriod = async (startDate: Date, endDate: Date) => {
+    const headers = await db
+      .select()
+      .from(schema.salesInvoice)
+      .where(and(
+        eq(schema.salesInvoice.type, 'INVOICE'),
+        notDeleted(schema.salesInvoice.deletedAt),
+        notCancelled(schema.salesInvoice.cancelledAt),
+        gte(schema.salesInvoice.invoiceDate, startDate),
+        lte(schema.salesInvoice.invoiceDate, endDate),
+      ))
+      .orderBy(asc(schema.salesInvoice.invoiceDate))
+    return attachCustomerAndItems(db, headers, schema.salesInvoiceItem, 'salesInvoiceId')
+  }
+
+  const loadBillsForPeriod = async (startDate: Date, endDate: Date) => {
+    const headers = await db
+      .select()
+      .from(schema.purchaseBill)
+      .where(and(
+        notDeleted(schema.purchaseBill.deletedAt),
+        notCancelled(schema.purchaseBill.cancelledAt),
+        gte(schema.purchaseBill.billDate, startDate),
+        lte(schema.purchaseBill.billDate, endDate),
+      ))
+      .orderBy(asc(schema.purchaseBill.billDate))
+    return attachBillRelations(db, headers)
+  }
 
   // Get GSTR-1 Report (Sales/Outward Supplies)
   ipcMain.handle('gstReport:getGSTR1', async (_, filters: GSTReportFilters) => {
     try {
-      const where: any = {
-        type: 'INVOICE',
-        ...notDeleted,
-        invoiceDate: {
-          gte: new Date(filters.startDate),
-          lte: new Date(filters.endDate)
-        }
-      }
-
-      const invoices = await prisma.salesInvoice.findMany({
-        where,
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true
-            }
-          }
-        },
-        orderBy: { invoiceDate: 'asc' }
-      })
+      const invoices = await loadInvoicesForPeriod(new Date(filters.startDate), new Date(filters.endDate))
 
       // Categorize invoices into GSTR-1 sections
       const b2bInvoices: any[] = []
@@ -560,31 +417,7 @@ export const setupGSTReportHandlers = () => {
   // Get GSTR-2 Report (Purchases/Inward Supplies)
   ipcMain.handle('gstReport:getGSTR2', async (_, filters: GSTReportFilters) => {
     try {
-      const where: any = {
-        ...notDeleted,
-        ...notCancelled,
-        billDate: {
-          gte: new Date(filters.startDate),
-          lte: new Date(filters.endDate)
-        }
-      }
-
-      const bills = await prisma.purchaseBill.findMany({
-        where,
-        include: {
-          supplier: true,
-          items: {
-            include: {
-              supplierItem: {
-                include: {
-                  linkedItem: true
-                }
-              }
-            }
-          }
-        },
-        orderBy: { billDate: 'asc' }
-      })
+      const bills = await loadBillsForPeriod(new Date(filters.startDate), new Date(filters.endDate))
 
       // Categorize bills
       const b2bPurchases: any[] = []
@@ -693,30 +526,10 @@ export const setupGSTReportHandlers = () => {
       const endDate = new Date(filters.endDate)
 
       // Get all sales invoices
-      const salesInvoices = await prisma.salesInvoice.findMany({
-        where: {
-          type: 'INVOICE',
-          ...notDeleted,
-          invoiceDate: { gte: startDate, lte: endDate }
-        },
-        include: {
-          customer: true,
-          items: true
-        }
-      })
+      const salesInvoices = await loadInvoicesForPeriod(startDate, endDate)
 
       // Get all purchase bills
-      const purchaseBills = await prisma.purchaseBill.findMany({
-        where: {
-          ...notDeleted,
-          ...notCancelled,
-          billDate: { gte: startDate, lte: endDate }
-        },
-        include: {
-          supplier: true,
-          items: true
-        }
-      })
+      const purchaseBills = await loadBillsForPeriod(startDate, endDate)
 
       // 3.1 - Outward Supplies (Taxable)
       const outwardTaxable = {
@@ -866,30 +679,10 @@ export const setupGSTReportHandlers = () => {
       const endDate = new Date(filters.endDate)
 
       // Get all sales invoices for the year
-      const salesInvoices = await prisma.salesInvoice.findMany({
-        where: {
-          type: 'INVOICE',
-          ...notDeleted,
-          invoiceDate: { gte: startDate, lte: endDate }
-        },
-        include: {
-          customer: true,
-          items: true
-        }
-      })
+      const salesInvoices = await loadInvoicesForPeriod(startDate, endDate)
 
       // Get all purchase bills for the year
-      const purchaseBills = await prisma.purchaseBill.findMany({
-        where: {
-          ...notDeleted,
-          ...notCancelled,
-          billDate: { gte: startDate, lte: endDate }
-        },
-        include: {
-          supplier: true,
-          items: true
-        }
-      })
+      const purchaseBills = await loadBillsForPeriod(startDate, endDate)
 
       // Part II - Outward supplies during the year
       const outwardSupplies = {
@@ -1066,20 +859,7 @@ export const setupGSTReportHandlers = () => {
       const startDate = new Date(filters.startDate)
       const endDate = new Date(filters.endDate)
 
-      const invoices = await prisma.salesInvoice.findMany({
-        where: {
-          type: 'INVOICE',
-          ...notDeleted,
-          invoiceDate: { gte: startDate, lte: endDate }
-        },
-        include: {
-          items: {
-            include: {
-              item: true
-            }
-          }
-        }
-      })
+      const invoices = await loadInvoicesForPeriod(startDate, endDate)
 
       const hsnSummary = await generateHSNSummary(invoices)
 
@@ -1118,7 +898,7 @@ export const setupGSTReportHandlers = () => {
   // Company table — fails loudly if unset, since the schema requires it.
   ipcMain.handle('gstReport:exportGSTR1ToGSTNJSON', async (_, data: any) => {
     try {
-      const company = await prisma.company.findFirst()
+      const [company] = await db.select().from(schema.company).limit(1)
       const gstin = company?.taxId
       if (!gstin) {
         return {
@@ -1126,7 +906,52 @@ export const setupGSTReportHandlers = () => {
           error: 'Company GSTIN is not set. Open Settings → Company Profile and add it before exporting.',
         }
       }
-      const payload = toGSTNGstr1(data, gstin)
+
+      // CDNR/CDNUR routing: real credit/debit notes live in the CreditDebitNote
+      // table (Mode B), which the legacy on-screen GSTR-1 (negative-total
+      // invoices) never sees. Fetch them for the report period and attach as
+      // sections.cdnr/.cdnur `notes` — the shape the shared builder reads.
+      const noteHeaders = await db
+        .select({ note: schema.creditDebitNote, customerTaxId: schema.customer.taxId })
+        .from(schema.creditDebitNote)
+        .leftJoin(schema.customer, eq(schema.creditDebitNote.customerId, schema.customer.id))
+        .where(and(
+          eq(schema.creditDebitNote.status, 'ACTIVE'),
+          notDeleted(schema.creditDebitNote.deletedAt),
+          notCancelled(schema.creditDebitNote.cancelledAt),
+          gte(schema.creditDebitNote.noteDate, new Date(data.period?.startDate)),
+          lte(schema.creditDebitNote.noteDate, new Date(`${data.period?.endDate}T23:59:59.999`)),
+        ))
+      const noteIds = noteHeaders.map((r) => r.note.id)
+      const noteItems = noteIds.length
+        ? await db.select().from(schema.creditDebitNoteItem).where(inArray(schema.creditDebitNoteItem.creditDebitNoteId, noteIds))
+        : []
+      const itemsByNote = new Map<string, any[]>()
+      for (const it of noteItems) {
+        if (!itemsByNote.has(it.creditDebitNoteId)) itemsByNote.set(it.creditDebitNoteId, [])
+        itemsByNote.get(it.creditDebitNoteId)!.push(it)
+      }
+      const notes = noteHeaders.map((r) => ({ ...r.note, customer: { taxId: r.customerTaxId }, items: itemsByNote.get(r.note.id) ?? [] }))
+      const isReg = (t?: string | null) => !!t && t.length === 15
+      const noteDetail = notes.map((n) => ({
+        noteNumber: n.noteNumber,
+        noteDate: n.noteDate,
+        noteType: n.type,
+        totalAmount: n.totalAmount,
+        isInterState: n.isInterState,
+        customer: { taxId: n.customer?.taxId },
+        items: n.items,
+      }))
+      const withNotes = {
+        ...data,
+        sections: {
+          ...data.sections,
+          cdnr: { ...(data.sections?.cdnr ?? {}), notes: noteDetail.filter((n) => isReg(n.customer.taxId)) },
+          cdnur: { ...(data.sections?.cdnur ?? {}), notes: noteDetail.filter((n) => !isReg(n.customer.taxId)) },
+        },
+      }
+
+      const payload = toGSTNGstr1(withNotes, gstin)
       return { success: true, data: JSON.stringify(payload, null, 2) }
     } catch (error) {
       return {
@@ -1142,7 +967,7 @@ export const setupGSTReportHandlers = () => {
   // review and archiving — NOT for portal upload.
   ipcMain.handle('gstReport:exportGSTR1ToFriendlyJSON', async (_, data: any) => {
     try {
-      const company = await prisma.company.findFirst()
+      const [company] = await db.select().from(schema.company).limit(1)
       const payload = toFriendlyGstr1(data, company)
       return { success: true, data: JSON.stringify(payload, null, 2) }
     } catch (error) {
@@ -1423,7 +1248,7 @@ export const setupGSTReportHandlers = () => {
   // Get company GST details
   ipcMain.handle('gstReport:getCompanyGSTDetails', async () => {
     try {
-      const company = await prisma.company.findFirst()
+      const [company] = await db.select().from(schema.company).limit(1)
 
       if (!company) {
         return {

@@ -434,12 +434,27 @@ const Purchase = () => {
   // Fetch the saved supplier attachment (BLOB) for a bill. Centralized so both
   // open-in-window and share-via-X paths use the same fetch + Buffer→Uint8Array conversion.
   const loadAttachment = async (id: string) => {
-    const result = await window.electronAPI.purchase.getById(id)
+    let result = await window.electronAPI.purchase.getById(id)
     if (!result.success || !result.data) {
       toast.error(result.error || 'Failed to fetch bill')
       return null
     }
-    const bill = result.data as any
+    let bill = result.data as any
+
+    // Synced-in bill: the photo lives on Drive as its own file (S4 image
+    // split) — fetch it once, then it's local forever.
+    if (!bill.attachmentData && bill.attachmentMimeType) {
+      toast.info('Fetching the photo from your Drive…')
+      const fetched = await window.electronAPI.sync.fetchBillImage(id)
+      if (!fetched.success) {
+        toast.error(fetched.error || 'Photo download failed')
+        return null
+      }
+      result = await window.electronAPI.purchase.getById(id)
+      if (!result.success || !result.data) return null
+      bill = result.data as any
+    }
+
     if (!bill.attachmentData || !bill.attachmentMimeType) {
       toast.info('No attachment saved on this bill')
       return null
@@ -809,14 +824,17 @@ const Purchase = () => {
       return sum + ((qty * rate - discount) * taxRate / 100)
     }, 0)
 
-    // If the user (or AI extraction) populated any of CGST/SGST/IGST at the bill level,
-    // those override per-item tax. Otherwise fall back to per-item computation.
+    // If the user (or AI extraction) populated any of CGST/SGST/IGST at the bill
+    // level, those override per-item tax — but ONLY while every line's own tax
+    // rate is 0 (same deactivation rule as mobile: typing a per-line rate takes
+    // over, so the two sources can never both apply). Otherwise fall back to
+    // per-item computation.
     const breakdownTotal = taxBreakdown.cgst + taxBreakdown.sgst + taxBreakdown.igst
-    const useBreakdown = breakdownTotal > 0
+    const useBreakdown = breakdownTotal > 0 && billItems.every((it) => !(it.taxRate || 0))
     const taxAmount = useBreakdown ? breakdownTotal : computedTax
     const total = subtotal + taxAmount
 
-    return { subtotal, taxAmount, total }
+    return { subtotal, taxAmount, total, useBreakdown }
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -840,7 +858,7 @@ const Purchase = () => {
       return
     }
 
-    const { subtotal, taxAmount, total } = calculateTotals()
+    const { subtotal, taxAmount, total, useBreakdown } = calculateTotals()
 
     // Keep _extractedName: backend's resolveSupplierItem reads it to auto-create SupplierItem rows
     // for lines the user didn't map to the catalog (typical AI-extraction path).
@@ -853,9 +871,12 @@ const Purchase = () => {
         items: itemsToSave,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
-        cgstAmount: taxBreakdown.cgst,
-        sgstAmount: taxBreakdown.sgst,
-        igstAmount: taxBreakdown.igst,
+        // Send the explicit split only while the bill-level breakdown is the
+        // active tax source — a stale breakdown from a scan must not override
+        // the state-based split once per-line rates take over.
+        cgstAmount: useBreakdown ? taxBreakdown.cgst : 0,
+        sgstAmount: useBreakdown ? taxBreakdown.sgst : 0,
+        igstAmount: useBreakdown ? taxBreakdown.igst : 0,
         totalAmount: total,
         // Only include attachment if a new one was uploaded this session
         ...(attachmentBytes && {
@@ -892,9 +913,10 @@ const Purchase = () => {
         items: itemsToSave,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
-        cgstAmount: taxBreakdown.cgst,
-        sgstAmount: taxBreakdown.sgst,
-        igstAmount: taxBreakdown.igst,
+        // Same rule as update above: the split rides only with an active breakdown.
+        cgstAmount: useBreakdown ? taxBreakdown.cgst : 0,
+        sgstAmount: useBreakdown ? taxBreakdown.sgst : 0,
+        igstAmount: useBreakdown ? taxBreakdown.igst : 0,
         totalAmount: total,
         balanceDue: total,
         status: 'DRAFT',
@@ -1444,27 +1466,22 @@ const Purchase = () => {
                         <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                           <div className="flex-1">
                             <label className="label text-xs">Item</label>
-                            <select
-                              className="input"
+                            <SearchableSelect
                               value={item.itemId}
-                              onChange={(e) => updateBillItem(index, 'itemId', e.target.value)}
-                              // Required only when this row has no extracted name. Extraction-driven
-                              // lines may keep itemId empty — backend auto-creates a SupplierItem
-                              // row from _extractedName on save.
+                              onChange={(id) => updateBillItem(index, 'itemId', id)}
+                              // The empty-id pseudo-option keeps the old select's revert path:
+                              // picking it clears itemId so save auto-creates the SupplierItem
+                              // from the extracted name. Required only when no extracted name.
+                              options={[
+                                ...(item._extractedName
+                                  ? [{ id: '', name: `+ Add "${item._extractedName}" to catalog` }]
+                                  : []),
+                                ...items.map((i) => ({ id: i.id, name: i.name, subtitle: i.hsnCode || undefined })),
+                              ]}
+                              placeholder={formData.supplierId ? 'Select Item' : 'Pick a supplier first'}
                               required={!item._extractedName}
                               disabled={!formData.supplierId}
-                            >
-                              <option value="">
-                                {item._extractedName
-                                  ? `+ Add "${item._extractedName}" to catalog`
-                                  : formData.supplierId
-                                  ? 'Select Item'
-                                  : 'Pick a supplier first'}
-                              </option>
-                              {items.map((i) => (
-                                <option key={i.id} value={i.id}>{i.name}</option>
-                              ))}
-                            </select>
+                            />
                             {item._extractedName && (
                               item.itemId ? (
                                 <p className="text-xs mt-1 truncate text-blue-600 dark:text-blue-400" title={item._extractedName}>

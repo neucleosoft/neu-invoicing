@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   FlatList,
@@ -17,8 +17,10 @@ import { computeGstValues } from '@neu/shared'
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Item = typeof schema.item.$inferSelect
 type Customer = typeof schema.customer.$inferSelect
@@ -63,8 +65,23 @@ export default function EditChallanScreen() {
   const [challanDate, setChallanDate] = useState('')
   const [transportMode, setTransportMode] = useState<string>('Road')
   const [vehicleNumber, setVehicleNumber] = useState('')
+  const [poNumber, setPoNumber] = useState('')
+  const [ewayBillNo, setEwayBillNo] = useState('')
+  const [warrantyPeriod, setWarrantyPeriod] = useState('')
+  const [dispatchedThrough, setDispatchedThrough] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
   const [notes, setNotes] = useState('')
+
+  // Rage-guard: Android back / swipe must never silently eat unsaved edits.
+  // The baseline snapshots the loaded document once; any drift = dirty
+  // (see hooks/use-unsaved-guard.ts).
+  const editSnapshot = JSON.stringify([lines, notes])
+  const baselineRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loading && baselineRef.current === null) baselineRef.current = editSnapshot
+  }, [loading, editSnapshot])
+  const dirty = !loading && baselineRef.current !== null && editSnapshot !== baselineRef.current
+  const { markClean } = useUnsavedGuard(dirty)
   const [termsConditions, setTermsConditions] = useState('')
 
   const [saving, setSaving] = useState(false)
@@ -91,6 +108,10 @@ export default function EditChallanScreen() {
       setChallanDate(toIso(dc.challanDate))
       setTransportMode(dc.transportMode ?? 'Road')
       setVehicleNumber(dc.vehicleNumber ?? '')
+      setPoNumber(dc.poNumber ?? '')
+      setEwayBillNo(dc.ewayBillNo ?? '')
+      setWarrantyPeriod(dc.warrantyPeriod ?? '')
+      setDispatchedThrough(dc.dispatchedThrough ?? '')
       setNotes(dc.notes ?? '')
       setTermsConditions(dc.termsConditions ?? '')
       const [c] = await db.select().from(schema.customer).where(eq(schema.customer.id, dc.customerId)).limit(1)
@@ -176,6 +197,15 @@ export default function EditChallanScreen() {
               taxRate: l.taxRate,
               total: g.total,
               hsnCode: g.hsnCode || null,
+              taxableAmount: g.taxableAmount,
+              cgstRate: g.cgstRate,
+              cgstAmount: g.cgstAmount,
+              sgstRate: g.sgstRate,
+              sgstAmount: g.sgstAmount,
+              igstRate: g.igstRate,
+              igstAmount: g.igstAmount,
+              cessRate: g.cessRate,
+              cessAmount: g.cessAmount,
             }
           }),
         )
@@ -186,14 +216,26 @@ export default function EditChallanScreen() {
             challanDate: cDate,
             transportMode: transportMode || null,
             vehicleNumber: vehicleNumber.trim() || null,
+            poNumber: poNumber.trim() || null,
+            ewayBillNo: ewayBillNo.trim() || null,
+            warrantyPeriod: warrantyPeriod.trim() || null,
+            dispatchedThrough: dispatchedThrough.trim() || null,
             subtotal: gst.subtotal,
             taxAmount: gst.taxAmount,
             totalAmount: gst.totalAmount,
             notes: notes.trim() || null,
             termsConditions: termsConditions.trim() || null,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
           })
           .where(eq(schema.deliveryChallan.id, id))
       })
+      markClean()
       router.back()
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to update challan')
@@ -239,6 +281,10 @@ export default function EditChallanScreen() {
       <Pressable style={styles.picker} onPress={() => setShowTransportPicker(true)}><ThemedText>{transportMode}</ThemedText></Pressable>
 
       <Field label="Vehicle Number" value={vehicleNumber} onChangeText={setVehicleNumber} placeholder="e.g. MH12AB1234 (optional)" />
+      <Field label="Customer PO Number" value={poNumber} onChangeText={setPoNumber} placeholder="Their PO reference (optional)" />
+      <Field label="E-Way Bill No" value={ewayBillNo} onChangeText={setEwayBillNo} placeholder="Optional" />
+      <Field label="Warranty Period" value={warrantyPeriod} onChangeText={setWarrantyPeriod} placeholder="e.g. 12 months (optional)" />
+      <Field label="Dispatched Through" value={dispatchedThrough} onChangeText={setDispatchedThrough} placeholder="Courier/transporter (optional)" />
 
       <SectionHeader>Line Items</SectionHeader>
       {lines.map((l, i) => (
@@ -312,7 +358,7 @@ export default function EditChallanScreen() {
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.modalContent}>
             <ThemedText type="title" style={styles.modalTitle}>Select Item</ThemedText>
-            <FlatList data={items} keyExtractor={(it) => it.id} renderItem={({ item }) => (
+            <PickerSearchList data={items} getName={(x) => x.name} getExtra={(x) => [x.hsnCode, x.skuHsn]} keyExtractor={(it) => it.id} renderItem={({ item }) => (
               <Pressable style={styles.modalRow} onPress={() => pickItem(item)}>
                 <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
                 <ThemedText style={styles.modalRowSub}>₹{item.salePrice.toFixed(2)} / {item.unit} · {item.taxRate}% GST</ThemedText>

@@ -6,6 +6,7 @@ const LABELS: Record<string, string> = {
   PAID: 'Paid',
   PARTIAL: 'Partial',
   OVERDUE: 'Overdue',
+  REVERSED: 'Reversed',
 }
 
 export const formatInvoiceStatus = (status?: string | null): string => {

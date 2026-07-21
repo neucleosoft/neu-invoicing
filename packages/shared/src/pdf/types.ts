@@ -48,6 +48,10 @@ export interface PDFDocumentData {
     logoPath?: string
     logoBase64?: string
     signaturePath?: string
+    // Signature image as a data-URI, drawn in the Authorised Signatory box.
+    // Mobile passes signaturePath through (it stores data-URIs); desktop's
+    // loadCompanyForPDF inlines a file path into this field.
+    signatureBase64?: string
   }
   totalAmount: number
   subtotal?: number
@@ -84,6 +88,10 @@ export interface InvoiceData extends PDFDocumentData {
   warrantyPeriod?: string
   dispatchedThrough?: string
   deliveryTime?: string
+  // Which visual template to render ('classic' when absent). Rides inside the
+  // data so the mobile WebView bridge — which passes a single plain-JSON
+  // argument — can select the template too.
+  template?: string
 }
 
 // pdfmake ships no type definitions; its content/cell nodes are plain objects.

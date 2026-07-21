@@ -128,7 +128,7 @@ export default function CreditNoteDetailScreen() {
         {isCancelled ? (
           <ThemedView style={styles.cancelledBanner}>
             <ThemedText style={styles.cancelledBannerText}>
-              This note is cancelled — its balance effect was reversed and it's left out of reports. It can't be restored.
+              This note is cancelled — its balance effect was reversed and it&apos;s left out of reports. It can&apos;t be restored.
             </ThemedText>
           </ThemedView>
         ) : null}

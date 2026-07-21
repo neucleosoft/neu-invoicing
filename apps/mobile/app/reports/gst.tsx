@@ -1,20 +1,23 @@
 import { router } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
+import { Alert, FlatList, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
+import { shareTextFile } from '@/utils/exportShare'
 import {
   getGSTR1,
   getGSTR2,
   getGSTR3B,
   getGSTR9,
+  getGstr1PortalData,
   getHSNSummary,
   GSTR1_SECTION_NAMES,
   GSTR2_SECTION_NAMES,
+  type GstDocDetail,
   type Gstr1Data,
   type Gstr1SectionKey,
   type Gstr2Data,
@@ -25,6 +28,7 @@ import {
   type HsnRow,
   type SectionTotals,
 } from '@/utils/gstReport'
+import { toGSTNGstr1 } from '@neu/shared'
 
 // GST Reports — GSTR-1 / GSTR-2 / GSTR-3B / GSTR-9 / HSN summary, on-screen. The
 // user picks a period (presets or custom dates) then taps a report card. Mirrors
@@ -240,6 +244,57 @@ export default function GstReportsScreen() {
           <View style={styles.reportBlock}>
             {loading ? <ThemedText style={styles.loadingText}>Generating…</ThemedText> : null}
             <ReportView report={report} />
+            <Pressable
+              style={styles.exportBtn}
+              onPress={async () => {
+                try {
+                  // Same as desktop's generic JSON export: the report data,
+                  // pretty-printed, for CA review/archiving (the GSTN portal
+                  // file is a separate GSTR-1-only export).
+                  await shareTextFile(
+                    `${report.type.toUpperCase()}_${startDate}_${endDate}.json`,
+                    JSON.stringify(report.data, null, 2),
+                    'application/json',
+                  )
+                } catch (e) {
+                  Alert.alert('Export failed', e instanceof Error ? e.message : String(e))
+                }
+              }}
+            >
+              <ThemedText style={styles.exportBtnText}>Share JSON</ThemedText>
+            </Pressable>
+            {report.type === 'gstr1' ? (
+              <Pressable
+                style={styles.exportBtn}
+                onPress={async () => {
+                  try {
+                    // GST-Portal-compliant file via the SHARED toGSTNGstr1 —
+                    // the same builder desktop uses, so both apps emit the
+                    // identical upload file. Requires the company GSTIN.
+                    if (!companyGstin) {
+                      Alert.alert(
+                        'GSTIN missing',
+                        'Set your company GSTIN in Settings → Business before exporting a portal file.',
+                      )
+                      return
+                    }
+                    const range = toRange(startDate, endDate)
+                    if (!range) return
+                    const detail = await getGstr1PortalData(db, range, startDate)
+                    const payload = toGSTNGstr1(detail, companyGstin)
+                    await shareTextFile(
+                      `GSTR1_GSTN_${startDate}_${endDate}.json`,
+                      JSON.stringify(payload, null, 2),
+                      'application/json',
+                    )
+                  } catch (e) {
+                    Alert.alert('Export failed', e instanceof Error ? e.message : String(e))
+                  }
+                }}
+              >
+                <ThemedText style={styles.exportBtnText}>GSTN Portal JSON (gst.gov.in)</ThemedText>
+              </Pressable>
+            ) : null}
           </View>
         ) : (
           <View style={styles.cardsGrid}>
@@ -279,36 +334,82 @@ function ReportView({ report }: { report: ReportData }) {
   }
 }
 
-// A compact 4-number row used in section/HSN tables.
+// A compact 4-number row used in section/HSN tables. With onPress (and docs
+// behind it) the row becomes the drill-down entry point.
 function TaxRow({
   label,
   count,
   totals,
+  onPress,
 }: {
   label: string
   count?: number
   totals: SectionTotals
+  onPress?: () => void
 }) {
   return (
-    <View style={styles.taxRow}>
-      <View style={styles.taxRowLeft}>
-        <ThemedText type="defaultSemiBold" numberOfLines={2}>{label}</ThemedText>
-        {count != null ? <ThemedText style={styles.taxRowMeta}>{count} doc(s)</ThemedText> : null}
-        <ThemedText style={styles.taxRowMeta}>Taxable {formatCurrency(totals.taxableValue)}</ThemedText>
+    <Pressable onPress={onPress} disabled={!onPress}>
+      <View style={styles.taxRow}>
+        <View style={styles.taxRowLeft}>
+          <ThemedText type="defaultSemiBold" numberOfLines={2}>
+            {label}
+            {onPress ? ' ›' : ''}
+          </ThemedText>
+          {count != null ? <ThemedText style={styles.taxRowMeta}>{count} doc(s)</ThemedText> : null}
+          <ThemedText style={styles.taxRowMeta}>Taxable {formatCurrency(totals.taxableValue)}</ThemedText>
+        </View>
+        <View style={styles.taxRowRight}>
+          <ThemedText style={styles.taxCell}>IGST {formatCurrency(totals.igst)}</ThemedText>
+          <ThemedText style={styles.taxCell}>
+            CGST {formatCurrency(totals.cgst)} · SGST {formatCurrency(totals.sgst)}
+          </ThemedText>
+        </View>
       </View>
-      <View style={styles.taxRowRight}>
-        <ThemedText style={styles.taxCell}>IGST {formatCurrency(totals.igst)}</ThemedText>
-        <ThemedText style={styles.taxCell}>
-          CGST {formatCurrency(totals.cgst)} · SGST {formatCurrency(totals.sgst)}
-        </ThemedText>
+    </Pressable>
+  )
+}
+
+// Drill-down modal: the documents behind a tapped section total.
+function DocListModal({
+  drill,
+  onClose,
+}: {
+  drill: { title: string; docs: GstDocDetail[] } | null
+  onClose: () => void
+}) {
+  return (
+    <Modal visible={drill != null} animationType="slide" transparent>
+      <View style={styles.drillOverlay}>
+        <ThemedView style={styles.drillCard}>
+          <ThemedText type="subtitle">{drill?.title}</ThemedText>
+          <FlatList
+            data={drill?.docs ?? []}
+            keyExtractor={(d) => d.id}
+            renderItem={({ item }) => (
+              <View style={styles.drillRow}>
+                <View style={styles.drillLeft}>
+                  <ThemedText type="defaultSemiBold" numberOfLines={1}>{item.number}</ThemedText>
+                  <ThemedText style={styles.taxRowMeta}>
+                    {new Date(item.date).toLocaleDateString()} · {item.partyName}
+                  </ThemedText>
+                </View>
+                <ThemedText type="defaultSemiBold">{formatCurrency(item.totalAmount)}</ThemedText>
+              </View>
+            )}
+          />
+          <Pressable style={styles.drillClose} onPress={onClose}>
+            <ThemedText style={styles.drillCloseText}>Close</ThemedText>
+          </Pressable>
+        </ThemedView>
       </View>
-    </View>
+    </Modal>
   )
 }
 
 function Gstr1View({ data }: { data: Gstr1Data }) {
   const d = data.docSummary
   const sectionKeys = Object.keys(GSTR1_SECTION_NAMES) as Gstr1SectionKey[]
+  const [drill, setDrill] = useState<{ title: string; docs: GstDocDetail[] } | null>(null)
   return (
     <View style={styles.viewWrap}>
       <Section title="GSTR-1 Summary">
@@ -323,6 +424,7 @@ function Gstr1View({ data }: { data: Gstr1Data }) {
       </Section>
 
       <ThemedText type="subtitle" style={styles.sectionHeading}>Section-wise Breakup</ThemedText>
+      <ThemedText style={styles.taxRowMeta}>Tap a section to see its documents.</ThemedText>
       <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.tableCard}>
         {sectionKeys.map((k) => (
           <TaxRow
@@ -330,11 +432,17 @@ function Gstr1View({ data }: { data: Gstr1Data }) {
             label={GSTR1_SECTION_NAMES[k]}
             count={data.sections[k].count}
             totals={data.sections[k]}
+            onPress={
+              data.sectionDocs[k].length > 0
+                ? () => setDrill({ title: GSTR1_SECTION_NAMES[k], docs: data.sectionDocs[k] })
+                : undefined
+            }
           />
         ))}
       </ThemedView>
 
       <HsnView rows={data.hsnSummary} heading="HSN Summary" />
+      <DocListModal drill={drill} onClose={() => setDrill(null)} />
     </View>
   )
 }
@@ -342,6 +450,7 @@ function Gstr1View({ data }: { data: Gstr1Data }) {
 function Gstr2View({ data }: { data: Gstr2Data }) {
   const d = data.docSummary
   const sectionKeys = Object.keys(GSTR2_SECTION_NAMES) as Gstr2SectionKey[]
+  const [drill, setDrill] = useState<{ title: string; docs: GstDocDetail[] } | null>(null)
   return (
     <View style={styles.viewWrap}>
       <Section title="GSTR-2 Summary">
@@ -352,6 +461,7 @@ function Gstr2View({ data }: { data: Gstr2Data }) {
       </Section>
 
       <ThemedText type="subtitle" style={styles.sectionHeading}>Section-wise Breakup</ThemedText>
+      <ThemedText style={styles.taxRowMeta}>Tap a section to see its documents.</ThemedText>
       <ThemedView lightColor="#f9fafb" darkColor="#1f2937" style={styles.tableCard}>
         {sectionKeys.map((k) => (
           <TaxRow
@@ -359,9 +469,15 @@ function Gstr2View({ data }: { data: Gstr2Data }) {
             label={GSTR2_SECTION_NAMES[k]}
             count={data.sections[k].count}
             totals={data.sections[k]}
+            onPress={
+              data.sectionDocs[k].length > 0
+                ? () => setDrill({ title: GSTR2_SECTION_NAMES[k], docs: data.sectionDocs[k] })
+                : undefined
+            }
           />
         ))}
       </ThemedView>
+      <DocListModal drill={drill} onClose={() => setDrill(null)} />
 
       <Section title="Input Tax Credit (ITC)">
         <Row label="Eligible IGST" value={formatCurrency(data.eligibleITC.igst)} />
@@ -371,6 +487,8 @@ function Gstr2View({ data }: { data: Gstr2Data }) {
         <Row label="Ineligible CGST" value={formatCurrency(data.ineligibleITC.cgst)} />
         <Row label="Ineligible SGST" value={formatCurrency(data.ineligibleITC.sgst)} />
       </Section>
+
+      <HsnView rows={data.hsnSummary} heading="Purchase HSN Summary" />
     </View>
   )
 }
@@ -443,6 +561,24 @@ function Gstr9View({ data }: { data: Gstr9Data }) {
         <Row label="SGST" value={formatCurrency(data.itcClaimed.sgst)} />
         <Row label="Cess" value={formatCurrency(data.itcClaimed.cess)} />
       </Section>
+
+      <Section title="Part V — Tax Paid">
+        <Row
+          label="Through ITC"
+          value={`IGST ${formatCurrency(data.taxPaid.throughITC.igst)} · CGST ${formatCurrency(data.taxPaid.throughITC.cgst)} · SGST ${formatCurrency(data.taxPaid.throughITC.sgst)}`}
+        />
+        <Row label="Through Cash" value={formatCurrency(0)} />
+      </Section>
+
+      <Section title="Documents (Year)">
+        <Row label="Sales Invoices" value={String(data.docSummary.totalSalesInvoices)} />
+        <Row label="Sales Value" value={formatCurrency(data.docSummary.totalSalesValue)} />
+        <Row label="Purchase Bills" value={String(data.docSummary.totalPurchaseBills)} />
+        <Row label="Purchase Value" value={formatCurrency(data.docSummary.totalPurchaseValue)} />
+        <Row label="Nil/Exempt Outward" value={formatCurrency(data.outward.exemptNilRated.value)} />
+      </Section>
+
+      <HsnView rows={data.hsnSummary} heading="HSN Summary (Year)" />
     </View>
   )
 }
@@ -534,6 +670,34 @@ const styles = StyleSheet.create({
   cardHint: { fontSize: 12, opacity: 0.6 },
   loadingText: { textAlign: 'center', opacity: 0.6, marginTop: 12 },
   reportBlock: { marginTop: 16 },
+  exportBtn: {
+    marginTop: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#007AFF',
+    alignItems: 'center',
+  },
+  exportBtnText: { color: '#007AFF', fontWeight: '600' },
+  drillOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  drillCard: {
+    maxHeight: '75%',
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 16,
+    gap: 8,
+  },
+  drillRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#d1d5db',
+  },
+  drillLeft: { flex: 1, gap: 2 },
+  drillClose: { paddingVertical: 12, alignItems: 'center' },
+  drillCloseText: { color: '#007AFF', fontWeight: '600' },
   viewWrap: { gap: 16 },
   sectionHeading: { paddingHorizontal: 4 },
   tableCard: { borderRadius: 12, paddingVertical: 2 },

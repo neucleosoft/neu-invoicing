@@ -41,6 +41,7 @@ export async function getSalesReport(
   const conds: SQL[] = [
     eq(schema.salesInvoice.type, 'INVOICE'),
     notDeleted(schema.salesInvoice.deletedAt),
+    notCancelled(schema.salesInvoice.cancelledAt),
   ]
   if (range.startDate) conds.push(gte(schema.salesInvoice.invoiceDate, range.startDate))
   if (range.endDate) conds.push(lte(schema.salesInvoice.invoiceDate, range.endDate))
@@ -59,12 +60,32 @@ export async function getSalesReport(
     .from(schema.salesInvoice)
     .where(and(...conds))
 
+  // Net out credit/debit notes for the same period (a return reduces sales). Notes
+  // carry no PAID/PARTIAL state, so they're netted regardless of the status filter.
+  // CREDIT_NOTE subtracts, DEBIT_NOTE adds; period keyed on the note's own noteDate.
+  const noteConds: SQL[] = [
+    eq(schema.creditDebitNote.status, 'ACTIVE'),
+    notDeleted(schema.creditDebitNote.deletedAt),
+    notCancelled(schema.creditDebitNote.cancelledAt),
+  ]
+  if (range.startDate) noteConds.push(gte(schema.creditDebitNote.noteDate, range.startDate))
+  if (range.endDate) noteConds.push(lte(schema.creditDebitNote.noteDate, range.endDate))
+  const noteRows = await db
+    .select({
+      netTotal: sql<number>`COALESCE(SUM(CASE WHEN ${schema.creditDebitNote.type} = 'CREDIT_NOTE' THEN -${schema.creditDebitNote.totalAmount} ELSE ${schema.creditDebitNote.totalAmount} END), 0)`,
+      netTax: sql<number>`COALESCE(SUM(CASE WHEN ${schema.creditDebitNote.type} = 'CREDIT_NOTE' THEN -${schema.creditDebitNote.taxAmount} ELSE ${schema.creditDebitNote.taxAmount} END), 0)`,
+      netSub: sql<number>`COALESCE(SUM(CASE WHEN ${schema.creditDebitNote.type} = 'CREDIT_NOTE' THEN -${schema.creditDebitNote.subtotal} ELSE ${schema.creditDebitNote.subtotal} END), 0)`,
+    })
+    .from(schema.creditDebitNote)
+    .where(and(...noteConds))
+  const n = noteRows[0]
+
   const r = rows[0]
   return {
-    totalSales: r?.totalAmount ?? 0,
-    totalTax: r?.taxAmount ?? 0,
+    totalSales: (r?.totalAmount ?? 0) + (n?.netTotal ?? 0),
+    totalTax: (r?.taxAmount ?? 0) + (n?.netTax ?? 0),
     invoiceCount: r?.invoiceCount ?? 0,
-    subtotal: r?.subtotal ?? 0,
+    subtotal: (r?.subtotal ?? 0) + (n?.netSub ?? 0),
     discount: r?.discount ?? 0,
     amountPaid: r?.amountPaid ?? 0,
     balanceDue: r?.balanceDue ?? 0,
@@ -161,6 +182,7 @@ export async function getTaxReport(db: Db, range: DateRange): Promise<TaxReport>
   const sConds: SQL[] = [
     eq(schema.salesInvoice.type, 'INVOICE'),
     notDeleted(schema.salesInvoice.deletedAt),
+    notCancelled(schema.salesInvoice.cancelledAt),
   ]
   if (range.startDate) sConds.push(gte(schema.salesInvoice.invoiceDate, range.startDate))
   if (range.endDate) sConds.push(lte(schema.salesInvoice.invoiceDate, range.endDate))
@@ -169,7 +191,15 @@ export async function getTaxReport(db: Db, range: DateRange): Promise<TaxReport>
   if (range.startDate) pConds.push(gte(schema.purchaseBill.billDate, range.startDate))
   if (range.endDate) pConds.push(lte(schema.purchaseBill.billDate, range.endDate))
 
-  const [salesRows, purchaseRows] = await Promise.all([
+  const nConds: SQL[] = [
+    eq(schema.creditDebitNote.status, 'ACTIVE'),
+    notDeleted(schema.creditDebitNote.deletedAt),
+    notCancelled(schema.creditDebitNote.cancelledAt),
+  ]
+  if (range.startDate) nConds.push(gte(schema.creditDebitNote.noteDate, range.startDate))
+  if (range.endDate) nConds.push(lte(schema.creditDebitNote.noteDate, range.endDate))
+
+  const [salesRows, purchaseRows, noteRows] = await Promise.all([
     db
       .select({ taxCollected: sql<number>`COALESCE(SUM(${schema.salesInvoice.taxAmount}), 0)` })
       .from(schema.salesInvoice)
@@ -178,9 +208,14 @@ export async function getTaxReport(db: Db, range: DateRange): Promise<TaxReport>
       .select({ taxPaid: sql<number>`COALESCE(SUM(${schema.purchaseBill.taxAmount}), 0)` })
       .from(schema.purchaseBill)
       .where(pConds.length ? and(...pConds) : undefined),
+    db
+      .select({ netTax: sql<number>`COALESCE(SUM(CASE WHEN ${schema.creditDebitNote.type} = 'CREDIT_NOTE' THEN -${schema.creditDebitNote.taxAmount} ELSE ${schema.creditDebitNote.taxAmount} END), 0)` })
+      .from(schema.creditDebitNote)
+      .where(and(...nConds)),
   ])
 
-  const taxCollected = salesRows[0]?.taxCollected ?? 0
+  // Credit notes reduce the GST you collected (a return gives the tax back).
+  const taxCollected = (salesRows[0]?.taxCollected ?? 0) + (noteRows[0]?.netTax ?? 0)
   const taxPaid = purchaseRows[0]?.taxPaid ?? 0
   return { taxCollected, taxPaid, netTax: taxCollected - taxPaid }
 }

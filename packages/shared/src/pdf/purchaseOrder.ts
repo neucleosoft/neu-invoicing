@@ -16,6 +16,7 @@ import {
   getHSNGroups,
   getTaxGroups,
   numberToWords,
+  getSignatureImage,
 } from './helpers'
 import type { Content, DocDefinition, PDFDocumentData, TableCell } from './types'
 
@@ -634,7 +635,12 @@ function buildFooter(po: PurchaseOrderData, logo: string | undefined): Content {
   const sigStack: Content[] = [
     { text: '', fontSize: 1 },
   ]
-  if (logo) sigStack.push({ image: logo, width: 45, height: 45, alignment: 'center', margin: [0, 10, 0, 8] })
+  // Uploaded signature wins the signatory box; the logo is only a stand-in
+  // when no signature exists. Both are optional — absent both, the box keeps
+  // blank space above the text for a pen.
+  const signature = getSignatureImage(company)
+  if (signature) sigStack.push({ image: signature, width: 90, height: 32, alignment: 'center', margin: [0, 12, 0, 4] })
+  else if (logo) sigStack.push({ image: logo, width: 45, height: 45, alignment: 'center', margin: [0, 10, 0, 8] })
   sigStack.push(
     { text: 'Authorised Signatory For', fontSize: 9, alignment: 'center' },
     { text: (company?.name || '').toUpperCase(), bold: true, fontSize: 9, alignment: 'center' },

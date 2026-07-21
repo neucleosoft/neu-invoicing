@@ -4,6 +4,12 @@ import { memo, useCallback, useMemo, useState } from 'react'
 import { FlatList, type ListRenderItem, Pressable, StyleSheet, TextInput, View } from 'react-native'
 
 import EmptyState from '@/components/EmptyState'
+import {
+  applyListControls,
+  ListControls,
+  type DateRangeKey,
+  type SortKey,
+} from '@/components/ListControls'
 import Fab from '@/components/Fab'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
@@ -28,6 +34,8 @@ export default function PurchaseOrdersScreen() {
   const [orders, setOrders] = useState<PurchaseOrder[]>([])
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [search, setSearch] = useState('')
+  const [range, setRange] = useState<DateRangeKey>('all')
+  const [sort, setSort] = useState<SortKey>('date_desc')
 
   const load = useCallback(() => {
     return Promise.all([
@@ -60,9 +68,11 @@ export default function PurchaseOrdersScreen() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return orders
-    return orders.filter((o) => o.orderNumber.toLowerCase().includes(q) || supplierName(o.supplierId).toLowerCase().includes(q))
-  }, [orders, search, supplierName])
+    const matches = q
+      ? orders.filter((o) => o.orderNumber.toLowerCase().includes(q) || supplierName(o.supplierId).toLowerCase().includes(q))
+      : orders
+    return applyListControls(matches, range, sort, (o) => o.orderDate, (o) => o.totalAmount)
+  }, [orders, search, supplierName, range, sort])
 
   const renderItem = useCallback<ListRenderItem<PurchaseOrder>>(
     ({ item }) => (
@@ -86,6 +96,7 @@ export default function PurchaseOrdersScreen() {
       <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.searchWrap}>
         <TextInput value={search} onChangeText={setSearch} placeholder="Search by PO # or supplier…" placeholderTextColor="#9ca3af" style={styles.searchInput} />
       </ThemedView>
+      <ListControls range={range} onRange={setRange} sort={sort} onSort={setSort} />
       <FlatList
         data={filtered}
         keyExtractor={(o) => o.id}

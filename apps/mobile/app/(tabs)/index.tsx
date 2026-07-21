@@ -15,12 +15,16 @@ import { useColors } from '@/hooks/use-colors'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
 import {
+  getCashBankTotals,
   getFiscalYearStartMonth,
   getLowStockCount,
+  getMonthlySales,
   getOverdueCount,
   getRecentInvoices,
   getTotalInvoicedThisFY,
+  getTotalPayables,
   getTotalReceivables,
+  type MonthlySales,
   type RecentInvoice,
 } from '@/utils/dashboard'
 import {
@@ -37,6 +41,9 @@ export default function DashboardScreen() {
   const [invoicedFY, setInvoicedFY] = useState(0)
   const [overdueCount, setOverdueCount] = useState(0)
   const [lowStockCount, setLowStockCount] = useState(0)
+  const [payables, setPayables] = useState(0)
+  const [cashBank, setCashBank] = useState({ cash: 0, bank: 0, total: 0 })
+  const [trend, setTrend] = useState<MonthlySales[]>([])
   const [recent, setRecent] = useState<RecentInvoice[]>([])
 
   // Refetch every time the tab regains focus, e.g. after creating an invoice.
@@ -44,17 +51,23 @@ export default function DashboardScreen() {
     useCallback(() => {
       void (async () => {
         const fyMonth = await getFiscalYearStartMonth(db)
-        const [r, i, o, l, rec] = await Promise.all([
+        const [r, i, o, l, p, cb, t, rec] = await Promise.all([
           getTotalReceivables(db),
           getTotalInvoicedThisFY(db, fyMonth),
           getOverdueCount(db),
           getLowStockCount(db),
+          getTotalPayables(db),
+          getCashBankTotals(db),
+          getMonthlySales(db, 6),
           getRecentInvoices(db, 5),
         ])
         setReceivables(r)
         setInvoicedFY(i)
         setOverdueCount(o)
         setLowStockCount(l)
+        setPayables(p)
+        setCashBank(cb)
+        setTrend(t)
         setRecent(rec)
       })()
     }, [db]),
@@ -110,7 +123,49 @@ export default function DashboardScreen() {
             hint={lowStockCount ? 'Below threshold' : 'All in stock'}
           />
         </View>
+        <View style={styles.metricCol}>
+          <MetricCard
+            label="Payables"
+            value={formatCurrency(payables)}
+            tone="rose"
+            iconName="wallet.pass.fill"
+            to="/purchase"
+            hint="Owed to suppliers"
+          />
+        </View>
+        <View style={styles.metricCol}>
+          <MetricCard
+            label="Cash & Bank"
+            value={formatCurrency(cashBank.total)}
+            tone="blue"
+            iconName="wallet.pass.fill"
+            to="/cashBank"
+            hint={`Cash ${formatCurrency(cashBank.cash)} · Bank ${formatCurrency(cashBank.bank)}`}
+          />
+        </View>
       </View>
+
+      {trend.some((m) => m.total > 0) && (
+        <Card>
+          <SectionHeader title="Sales — last 6 months" />
+          <View style={styles.trendRow}>
+            {trend.map((m) => {
+              const max = Math.max(...trend.map((t) => t.total), 1)
+              return (
+                <View key={m.label} style={styles.trendCol}>
+                  <View
+                    style={[
+                      styles.trendBar,
+                      { height: 6 + 66 * (m.total / max), backgroundColor: c.accent },
+                    ]}
+                  />
+                  <Text style={[Type.caption, { color: c.muted }]}>{m.label}</Text>
+                </View>
+              )
+            })}
+          </View>
+        </Card>
+      )}
 
       <Card>
         <SectionHeader
@@ -271,6 +326,14 @@ const styles = StyleSheet.create({
   pressedRow: { opacity: 0.7 },
   recentLeft: { flex: 1, gap: Spacing.xs / 2 },
   recentRight: { alignItems: 'flex-end', gap: Spacing.xs },
+  trendRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: Spacing.sm,
+    paddingTop: Spacing.md,
+  },
+  trendCol: { flex: 1, alignItems: 'center', gap: Spacing.xs },
+  trendBar: { width: '70%', borderRadius: 4 },
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -Spacing.xs },
   tile: { width: '50%', paddingHorizontal: Spacing.xs, marginBottom: Spacing.md },
   tileInner: {

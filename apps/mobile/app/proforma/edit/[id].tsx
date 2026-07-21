@@ -1,6 +1,6 @@
 import { eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   FlatList,
@@ -17,8 +17,10 @@ import { computeGstValues } from '@neu/shared'
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Item = typeof schema.item.$inferSelect
 type Customer = typeof schema.customer.$inferSelect
@@ -61,7 +63,22 @@ export default function EditProformaScreen() {
   const [expiryDate, setExpiryDate] = useState('')
   const [deliveryTime, setDeliveryTime] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
+  // Stored document-level discount, preserved through re-save (no input here —
+  // desktop can set it, and dropping it on a mobile edit would silently inflate
+  // the total). totalAmount = subtotal + tax − discount.
+  const [docDiscount, setDocDiscount] = useState(0)
   const [notes, setNotes] = useState('')
+
+  // Rage-guard: Android back / swipe must never silently eat unsaved edits.
+  // The baseline snapshots the loaded document once; any drift = dirty
+  // (see hooks/use-unsaved-guard.ts).
+  const editSnapshot = JSON.stringify([lines, notes])
+  const baselineRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loading && baselineRef.current === null) baselineRef.current = editSnapshot
+  }, [loading, editSnapshot])
+  const dirty = !loading && baselineRef.current !== null && editSnapshot !== baselineRef.current
+  const { markClean } = useUnsavedGuard(dirty)
   const [termsConditions, setTermsConditions] = useState('')
 
   const [saving, setSaving] = useState(false)
@@ -81,6 +98,7 @@ export default function EditProformaScreen() {
       setDeliveryTime(toIso(d.deliveryTime))
       setNotes(d.notes ?? '')
       setTermsConditions(d.termsConditions ?? '')
+      setDocDiscount(d.discount ?? 0)
       const [c] = await db.select().from(schema.customer).where(eq(schema.customer.id, d.customerId)).limit(1)
       setCustomer(c ?? null)
       setCustomerName(c?.name ?? 'Unknown')
@@ -98,7 +116,7 @@ export default function EditProformaScreen() {
 
   const subtotal = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount), 0)
   const taxAmount = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100), 0)
-  const total = subtotal + taxAmount
+  const total = subtotal + taxAmount - docDiscount
 
   function pickItem(it: Item) { setLines([...lines, { itemId: it.id, itemName: it.name, qty: 1, rate: it.salePrice, discount: 0, taxRate: it.taxRate }]); setShowItemPicker(false) }
   function updateLine(i: number, patch: Partial<LineRow>) { setLines(lines.map((l, idx) => (idx === i ? { ...l, ...patch } : l))) }
@@ -132,6 +150,7 @@ export default function EditProformaScreen() {
           catalogSkuHsn: cat?.skuHsn,
         }
       }),
+      docDiscount,
     })
 
     setSaving(true)
@@ -171,6 +190,7 @@ export default function EditProformaScreen() {
           notes: notes.trim() || null, termsConditions: termsConditions.trim() || null,
         }).where(eq(schema.proformaInvoice.id, id))
       })
+      markClean()
       router.back()
     } catch (e) { Alert.alert('Error', e instanceof Error ? e.message : 'Failed to update proforma') } finally { setSaving(false) }
   }
@@ -240,7 +260,7 @@ export default function EditProformaScreen() {
       <Modal visible={showItemPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}><ThemedView style={styles.modalContent}>
           <ThemedText type="title" style={styles.modalTitle}>Select Item</ThemedText>
-          <FlatList data={items} keyExtractor={(it) => it.id} renderItem={({ item }) => (
+          <PickerSearchList data={items} getName={(x) => x.name} getExtra={(x) => [x.hsnCode, x.skuHsn]} keyExtractor={(it) => it.id} renderItem={({ item }) => (
             <Pressable style={styles.modalRow} onPress={() => pickItem(item)}><ThemedText type="defaultSemiBold">{item.name}</ThemedText><ThemedText style={styles.modalRowSub}>₹{item.salePrice.toFixed(2)} / {item.unit} · {item.taxRate}% GST</ThemedText></Pressable>
           )} />
           <Pressable style={styles.modalClose} onPress={() => setShowItemPicker(false)}><ThemedText style={styles.modalCloseText}>Cancel</ThemedText></Pressable>

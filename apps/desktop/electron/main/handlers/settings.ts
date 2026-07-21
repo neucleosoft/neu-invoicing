@@ -1,15 +1,14 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { eq } from '@neu/shared'
+import { getDb, schema } from '../db'
 
 export const setupSettingsHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
   // Get a setting by key
   ipcMain.handle('settings:get', async (_, key: string) => {
     try {
-      const setting = await prisma.settings.findUnique({
-        where: { key }
-      })
+      const [setting] = await db.select().from(schema.settings).where(eq(schema.settings.key, key)).limit(1)
       return { success: true, data: setting?.value || null }
     } catch (error) {
       return {
@@ -22,11 +21,11 @@ export const setupSettingsHandlers = () => {
   // Set a setting
   ipcMain.handle('settings:set', async (_, key: string, value: string) => {
     try {
-      const setting = await prisma.settings.upsert({
-        where: { key },
-        update: { value },
-        create: { key, value }
-      })
+      const [setting] = await db
+        .insert(schema.settings)
+        .values({ key, value })
+        .onConflictDoUpdate({ target: schema.settings.key, set: { value } })
+        .returning()
       return { success: true, data: setting }
     } catch (error) {
       return {
@@ -39,9 +38,9 @@ export const setupSettingsHandlers = () => {
   // Get all settings
   ipcMain.handle('settings:getAll', async () => {
     try {
-      const settings = await prisma.settings.findMany()
+      const settings = await db.select().from(schema.settings)
       const settingsMap: Record<string, string> = {}
-      settings.forEach(s => {
+      settings.forEach((s) => {
         settingsMap[s.key] = s.value
       })
       return { success: true, data: settingsMap }

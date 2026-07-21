@@ -9,6 +9,12 @@ import { eq } from 'drizzle-orm'
 
 import { buildPurchaseOrderFilename, type PurchaseOrderData } from '@neu/shared'
 import { schema, useDb } from '@/db'
+import { getSetting } from '@/utils/appSettings'
+import {
+  PO_GENERAL_TERMS_DEFAULT,
+  PO_SETTINGS_KEYS,
+  PO_SPECIAL_INSTRUCTIONS_DEFAULT,
+} from '@/utils/poDefaults'
 
 type Db = ReturnType<typeof useDb>
 
@@ -45,9 +51,18 @@ export async function buildPurchaseOrderPdfPayload(
     )
     .where(eq(schema.purchaseOrderItem.purchaseOrderId, id))
 
+  // PO boilerplate from Settings (editable in Settings → Purchase Order
+  // Defaults); falls back to the stock text, mirroring desktop.
+  const [specialInstructions, generalTerms] = await Promise.all([
+    getSetting(db, PO_SETTINGS_KEYS.specialInstructions),
+    getSetting(db, PO_SETTINGS_KEYS.generalTerms),
+  ])
+
   const data: PurchaseOrderData = {
     orderNumber: po.orderNumber,
     orderDate: po.orderDate.toISOString(),
+    specialInstructions: specialInstructions ?? PO_SPECIAL_INSTRUCTIONS_DEFAULT,
+    generalTerms: generalTerms ?? PO_GENERAL_TERMS_DEFAULT,
     expectedDate: po.expectedDate ? po.expectedDate.toISOString() : undefined,
     notes: po.notes ?? undefined,
     termsConditions: po.termsConditions ?? undefined,
@@ -92,6 +107,7 @@ export async function buildPurchaseOrderPdfPayload(
           stateCode: company.stateCode ?? undefined,
           stateName: company.stateName ?? undefined,
           logoBase64: company.logoPath ?? undefined,
+          signatureBase64: company.signaturePath ?? undefined,
         }
       : undefined,
   }

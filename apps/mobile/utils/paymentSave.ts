@@ -32,6 +32,9 @@ export type PaymentInput = {
   // a salesInvoiceId through the same util.
   salesInvoiceId?: string | null
   purchaseBillId?: string | null
+  // Display metadata mirroring desktop ('BILL' / 'INVOICE') when the payment
+  // targets a specific document.
+  referenceType?: string | null
 }
 
 function toEffect(p: {
@@ -66,6 +69,7 @@ export async function createPayment(db: Db, input: PaymentInput): Promise<string
         paymentDate: input.paymentDate,
         salesInvoiceId: input.salesInvoiceId ?? null,
         purchaseBillId: input.purchaseBillId ?? null,
+        referenceType: input.referenceType ?? null,
         notes: input.notes,
       })
       .returning({ id: schema.paymentTransaction.id })

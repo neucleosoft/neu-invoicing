@@ -1,29 +1,17 @@
-import * as SecureStore from 'expo-secure-store'
-
 // Mobile port of the OpenRouter OCR path in desktop's handlers/purchase.ts.
 // Desktop can also use Gemini, but that needs the Files API (three round trips)
 // and a Google key; OpenRouter is one fetch with a base64 data URL and a free
 // OCR-specialized default model, which fits a phone far better. Same prompt and
 // same JSON-extraction rules as desktop so a bill scanned on either reads the
 // same way.
+//
+// The API key comes from apps/mobile/.env (EXPO_PUBLIC_OPENROUTER_API_KEY),
+// mirroring desktop's OPENROUTER_API_KEY in apps/desktop/.env — no in-app key
+// entry. .env is gitignored; EXPO_PUBLIC_* values are inlined at BUNDLE time,
+// so changing the key needs a dev-server restart (dev) or a new build (APK).
 
-const OPENROUTER_KEY_STORE = 'neu.openrouter.apiKey'
+const OPENROUTER_API_KEY = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY ?? ''
 const DEFAULT_MODEL = 'baidu/qianfan-ocr-fast:free'
-
-// SecureStore mirrors how the Google token is kept (auth/index.ts). The key is
-// a credential, so it never lands in the SQLite db or the Drive backup.
-export async function getOpenRouterKey(): Promise<string | null> {
-  return SecureStore.getItemAsync(OPENROUTER_KEY_STORE)
-}
-
-export async function setOpenRouterKey(key: string): Promise<void> {
-  const trimmed = key.trim()
-  if (trimmed) {
-    await SecureStore.setItemAsync(OPENROUTER_KEY_STORE, trimmed)
-  } else {
-    await SecureStore.deleteItemAsync(OPENROUTER_KEY_STORE)
-  }
-}
 
 // One extracted line from the bill. Matches the shape desktop's prompt asks for.
 export type ExtractedItem = {
@@ -43,6 +31,9 @@ export type ExtractedBill = {
   subtotal: number
   taxAmount: number
   totalAmount: number
+  cgstAmount: number
+  sgstAmount: number
+  igstAmount: number
   items: ExtractedItem[]
 }
 
@@ -63,6 +54,9 @@ Extract the data from this bill image and return ONLY valid JSON in this exact f
   "subtotal": 0,
   "taxAmount": 0,
   "totalAmount": 0,
+  "cgstAmount": 0,
+  "sgstAmount": 0,
+  "igstAmount": 0,
   "items": [
     {
       "name": "string (item description as printed on the bill)",
@@ -81,6 +75,12 @@ Rules:
 - Numbers must be numbers (not strings), with no currency symbols or commas
 - Dates must be YYYY-MM-DD format
 - The "items" array can be empty if no line items are visible
+- TAX HANDLING: only set per-item "taxRate" when the bill shows a tax %
+  column (or per-line CGST/SGST/IGST values) for each line item. When the
+  bill shows tax only as a single total at the bottom (no per-item tax
+  column), leave every item's "taxRate" at 0 and put the total tax into
+  "taxAmount" (and split into cgst/sgst/igst when those line items exist).
+  Do not distribute a bottom-line tax across items.
 - Return ONLY the JSON object, nothing else.`
 
 // Strip markdown fences / preamble, then JSON.parse the first {...} block.
@@ -120,6 +120,9 @@ function parseExtractedJson(text: string): OcrResult {
         subtotal: Number(raw.subtotal) || 0,
         taxAmount: Number(raw.taxAmount) || 0,
         totalAmount: Number(raw.totalAmount) || 0,
+        cgstAmount: Number(raw.cgstAmount) || 0,
+        sgstAmount: Number(raw.sgstAmount) || 0,
+        igstAmount: Number(raw.igstAmount) || 0,
         items,
       },
     }
@@ -137,12 +140,12 @@ export async function extractBillFromImage(
   base64: string,
   mimeType: string,
 ): Promise<OcrResult> {
-  const apiKey = await getOpenRouterKey()
+  const apiKey = OPENROUTER_API_KEY
   if (!apiKey) {
     return {
       success: false,
       error:
-        'No OpenRouter API key set. Add a free key in Settings → AI Bill Scan to use this.',
+        'No OpenRouter API key configured. Set EXPO_PUBLIC_OPENROUTER_API_KEY in apps/mobile/.env and restart (or rebuild).',
     }
   }
 

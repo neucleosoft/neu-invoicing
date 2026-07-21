@@ -16,11 +16,117 @@ import {
 
 type SettingsTab = 'company' | 'templates' | 'tax' | 'po' | 'backup'
 
+// Company images are stored either inline as data-URIs (the one-shot DB
+// conversion) or as legacy file paths served via local-resource://.
+const imageSrc = (path?: string | null) =>
+  !path ? undefined : path.startsWith('data:') ? path : `local-resource://${path.replace(/\\/g, '/')}`
+
 const Settings = () => {
   const { company, setCompany, authStatus } = useStore()
   const { triggerBackup, isWorking: isBackingUp, conflictDialogProps } = useManualBackup()
+
+  // Row-level "Sync changes now" (S2). Separate from the whole-file backup
+  // above — this merges individual documents instead of replacing databases.
+  const [rowSyncing, setRowSyncing] = useState(false)
+  const [rowSyncSummary, setRowSyncSummary] = useState<string | null>(null)
+  const [syncActivity, setSyncActivity] = useState<
+    { at: number; kind: string; detail: string }[]
+  >([])
+  const [rowSyncStatus, setRowSyncStatus] = useState<{
+    lastSyncAt: number | null
+    pendingRemovals: number | null
+  }>({ lastSyncAt: null, pendingRemovals: null })
+
+  const [ladderInfo, setLadderInfo] = useState<
+    { name: string; modifiedTime: string | null; size: number | null }[]
+  >([])
+  const [ladderRestoring, setLadderRestoring] = useState(false)
+
+  const refreshSyncActivity = async () => {
+    try {
+      setSyncActivity(await window.electronAPI.sync.getSyncActivityLog())
+      setRowSyncStatus(await window.electronAPI.sync.getRowSyncStatus())
+      setLadderInfo(await window.electronAPI.sync.getLadderInfo())
+    } catch { /* log display is best-effort */ }
+  }
+
+  const LADDER_LABELS: Record<string, string> = {
+    'backup-daily.db': 'Daily (freshest)',
+    'backup-weekly.db': 'Weekly (kept ~7 days old on purpose)',
+    'backup-monthly.db': 'Monthly (kept ~30 days old on purpose)',
+  }
+
+  const handleLadderRestore = async (slotName: string, when: string | null) => {
+    const ok = await confirm({
+      title: 'Restore from the time machine?',
+      message: `This REPLACES all local data with the ${LADDER_LABELS[slotName] || slotName} copy${when ? ` from ${new Date(when).toLocaleString()}` : ''}. Bill photos and archive files re-download automatically when opened. This cannot be undone.`,
+      confirmText: 'Replace local data',
+      cancelText: 'Cancel',
+    })
+    if (!ok) return
+    setLadderRestoring(true)
+    try {
+      const r = await window.electronAPI.sync.restoreFromLadder(slotName)
+      if (r.success) {
+        toast.success('Restored — reloading')
+        window.location.reload()
+      } else {
+        toast.error(r.error || 'Restore failed')
+      }
+    } finally {
+      setLadderRestoring(false)
+    }
+  }
+
+  const handleRowSync = async () => {
+    setRowSyncing(true)
+    setRowSyncSummary(null)
+    try {
+      let r = await window.electronAPI.sync.rowSyncNow()
+
+      // D6 tripwire: the pull wants to remove many live records — a human
+      // decides before anything is applied.
+      if (r.needsConfirmation) {
+        const ok = await confirm({
+          title: 'Large removal incoming',
+          message: `The other device wants to archive or cancel ${r.removalsPending} records here. Apply them? (Choose Cancel to keep everything and investigate first.)`,
+          confirmText: 'Apply removals',
+          cancelText: 'Cancel',
+        })
+        if (!ok) {
+          setRowSyncSummary(`Sync paused — ${r.removalsPending} incoming removals were NOT applied.`)
+          return
+        }
+        r = await window.electronAPI.sync.rowSyncNow(true)
+      }
+
+      if (!r.success) {
+        setRowSyncSummary(`Sync failed: ${r.error || 'unknown error'}`)
+        return
+      }
+      const bits = [
+        `pulled ${r.applied ?? 0} change${(r.applied ?? 0) === 1 ? '' : 's'}`,
+        `pushed ${r.pushedPackets ?? 0}`,
+      ]
+      if (r.localRenumbers) bits.push(`${r.localRenumbers} renumbered`)
+      if (r.recomputeChanges) bits.push(`${r.recomputeChanges} totals corrected`)
+      if (r.photosPushed) bits.push(`${r.photosPushed} photo${r.photosPushed === 1 ? '' : 's'} uploaded`)
+      setRowSyncSummary(`Synced ✓ — ${bits.join(', ')}`)
+    } catch (e) {
+      setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setRowSyncing(false)
+      void refreshSyncActivity()
+    }
+  }
   const { connect: connectGoogle, isConnecting, dialog: connectDialog } = useConnectGoogle()
   const confirm = useConfirm()
+
+  // Sync activity receipts + status load once; each sync refreshes them.
+  useEffect(() => {
+    void refreshSyncActivity()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const [activeTab, setActiveTab] = useState<SettingsTab>('company')
   const [backupInfo, setBackupInfo] = useState<{
     cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
@@ -45,6 +151,7 @@ const Settings = () => {
   const [templateLoading, setTemplateLoading] = useState(true)
   const [logoMissing, setLogoMissing] = useState(false)
   const [logoLoading, setLogoLoading] = useState(false)
+  const [signatureLoading, setSignatureLoading] = useState(false)
   // PO boilerplate — printed on every Purchase Order PDF. Defaults seeded from a real PO
   // we received; users edit to match their business.
   const [poSpecialInstructions, setPoSpecialInstructions] = useState('')
@@ -65,10 +172,11 @@ const Settings = () => {
   }, [])
 
   // Check whether the logo file exists on disk (Drive syncs DB but not upload folders,
-  // so on a new device the logoPath may point nowhere)
+  // so on a new device the logoPath may point nowhere). Data-URI logos (the
+  // one-shot inline conversion stores images IN the DB) are never "missing".
   useEffect(() => {
     const checkLogo = async () => {
-      if (!company?.logoPath) { setLogoMissing(false); return }
+      if (!company?.logoPath || company.logoPath.startsWith('data:')) { setLogoMissing(false); return }
       try {
         const res = await fetch(`local-resource://${company.logoPath.replace(/\\/g, '/')}`)
         setLogoMissing(!res.ok)
@@ -116,7 +224,7 @@ const Settings = () => {
   // is rebuilt against the fresh DB instead of staying stale.
   const handleRestoreFromCloud = async () => {
     if (!backupInfo?.cloudBackup) {
-      toast.info('No cloud backup found yet. Click Sync Now first to create one.')
+      toast.info('No cloud backup found yet. Click "Back up now" first to create one.')
       return
     }
     const ok = await confirm({
@@ -207,6 +315,38 @@ const Settings = () => {
       }
     } catch {
       toast.error('Failed to remove logo')
+    }
+  }
+
+  const handleChangeSignature = async () => {
+    if (!company?.id) return
+    setSignatureLoading(true)
+    try {
+      const img = await window.electronAPI.company.selectImage()
+      if (img.success && img.path) {
+        const upd = await window.electronAPI.company.update(company.id, { signaturePath: img.path })
+        if (upd.success && upd.data) {
+          setCompany(upd.data)
+          toast.success('Signature updated')
+        }
+      }
+    } catch {
+      toast.error('Failed to update signature')
+    } finally {
+      setSignatureLoading(false)
+    }
+  }
+
+  const handleRemoveSignature = async () => {
+    if (!company?.id) return
+    try {
+      const upd = await window.electronAPI.company.update(company.id, { signaturePath: null })
+      if (upd.success && upd.data) {
+        setCompany(upd.data)
+        toast.success('Signature removed')
+      }
+    } catch {
+      toast.error('Failed to remove signature')
     }
   }
 
@@ -312,12 +452,12 @@ const Settings = () => {
               <h2 className="text-2xl font-bold mb-6">Company Profile</h2>
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div>
-                  <label className="label">Company Logo</label>
+                  <label className="label">Company Logo (optional)</label>
                   <div className="flex items-start gap-4">
                     <div className="w-32 h-32 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 overflow-hidden">
                       {company?.logoPath && !logoMissing ? (
                         <img
-                          src={`local-resource://${company.logoPath.replace(/\\/g, '/')}`}
+                          src={imageSrc(company.logoPath)}
                           alt="Logo"
                           className="max-w-full max-h-full object-contain"
                         />
@@ -346,6 +486,46 @@ const Settings = () => {
                           </button>
                         )}
                       </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Shown on invoices when present — documents print fine without one.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="label">Signature (optional)</label>
+                  <div className="flex items-start gap-4">
+                    <div className="w-48 h-24 border-2 border-dashed border-gray-300 rounded-lg flex items-center justify-center bg-gray-50 overflow-hidden">
+                      {company?.signaturePath ? (
+                        <img
+                          src={imageSrc(company.signaturePath)}
+                          alt="Signature"
+                          className="max-w-full max-h-full object-contain"
+                        />
+                      ) : (
+                        <span className="text-xs text-gray-400">No signature</span>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={handleChangeSignature}
+                          disabled={signatureLoading}
+                          className="btn btn-secondary"
+                        >
+                          {signatureLoading ? 'Uploading...' : company?.signaturePath ? 'Change Signature' : 'Upload Signature'}
+                        </button>
+                        {company?.signaturePath && (
+                          <button type="button" onClick={handleRemoveSignature} className="btn btn-danger">
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                      <p className="text-xs text-gray-500 mt-2">
+                        Printed in the Authorised Signatory box on every document.
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -681,9 +861,56 @@ const Settings = () => {
                 ) : (
                   <>
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-2">Device Sync (beta)</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                    Exchanges individual changes with your phone through your own Google Drive.
+                    Nothing is wiped wholesale — each document merges newest-edit-wins, and every
+                    balance is rebuilt from the documents after the merge.
+                  </p>
+                  {rowSyncStatus.pendingRemovals != null && (
+                    <div className="flex items-start gap-2 mb-3 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-lg border border-amber-200 dark:border-amber-800">
+                      <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-600 dark:text-amber-400" />
+                      <div className="text-xs text-amber-800 dark:text-amber-200">
+                        Incoming sync wants to remove {rowSyncStatus.pendingRemovals} records — auto-sync
+                        has paused. Press <strong>Sync changes now</strong> to review and decide.
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleRowSync}
+                    disabled={rowSyncing || isBackingUp || isRestoring}
+                  >
+                    {rowSyncing ? 'Syncing changes…' : 'Sync changes now'}
+                  </button>
+                  {rowSyncStatus.lastSyncAt && (
+                    <p className="text-xs mt-2 text-gray-500 dark:text-gray-400">
+                      Last synced {new Date(rowSyncStatus.lastSyncAt).toLocaleString()} · auto-syncs every 5 minutes while the app is open
+                    </p>
+                  )}
+                  {rowSyncSummary && (
+                    <p className="text-xs mt-3 text-gray-700 dark:text-gray-300">{rowSyncSummary}</p>
+                  )}
+                  {syncActivity.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-gray-200 dark:border-gray-700">
+                      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 mb-2">
+                        Sync activity — every renumber, conflict and pause gets a receipt
+                      </div>
+                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                        {syncActivity.slice(0, 15).map((e, i) => (
+                          <div key={i} className="text-xs text-gray-600 dark:text-gray-300">
+                            {new Date(e.at).toLocaleString()} — {e.detail}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Google Drive Backup</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                    Your data is backed up to your private Google Drive. Use Sync Now to back up immediately, or set an automatic schedule.
+                    Your data is backed up to your private Google Drive as one full copy — photos included, so it can take a few minutes. For everyday device-to-device syncing use &quot;Sync changes now&quot; above; this button is your safety copy.
                   </p>
 
                   <div className="bg-white dark:bg-gray-800 rounded-lg p-3 mb-4 space-y-1.5">
@@ -703,7 +930,7 @@ const Settings = () => {
                         </div>
                       </>
                     ) : (
-                      <div className="text-xs text-gray-500 dark:text-gray-400">No backup yet — click Sync Now to create one.</div>
+                      <div className="text-xs text-gray-500 dark:text-gray-400">No backup yet — click &quot;Back up now&quot; to create one.</div>
                     )}
                   </div>
 
@@ -727,9 +954,9 @@ const Settings = () => {
                   <button
                     className="btn btn-primary"
                     onClick={triggerBackup}
-                    disabled={isBackingUp || isRestoring}
+                    disabled={isBackingUp || isRestoring || rowSyncing}
                   >
-                    {isBackingUp ? 'Syncing…' : 'Sync Now'}
+                    {isBackingUp ? 'Backing up…' : 'Back up now (full copy)'}
                   </button>
 
                   <div className="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
@@ -742,10 +969,39 @@ const Settings = () => {
                     <button
                       className="px-4 py-2 text-sm font-medium rounded-lg text-white bg-red-600 hover:bg-red-700 disabled:bg-red-400 disabled:cursor-wait"
                       onClick={handleRestoreFromCloud}
-                      disabled={isBackingUp || isRestoring}
+                      disabled={isBackingUp || isRestoring || rowSyncing}
                     >
                       {isRestoring ? 'Restoring…' : 'Restore from cloud…'}
                     </button>
+
+                    {ladderInfo.some((l) => l.modifiedTime) && (
+                      <div className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
+                        <h4 className="text-sm font-semibold mb-1">Time machine</h4>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                          The weekly and monthly copies stay old on purpose — they survive a
+                          disaster that quietly poisoned every fresh backup.
+                        </p>
+                        <div className="space-y-2">
+                          {ladderInfo.filter((l) => l.modifiedTime).map((l) => (
+                            <div key={l.name} className="flex items-center justify-between gap-3">
+                              <div className="text-xs text-gray-700 dark:text-gray-300">
+                                <span className="font-medium">{LADDER_LABELS[l.name] || l.name}</span>
+                                {' · '}
+                                {l.modifiedTime ? new Date(l.modifiedTime).toLocaleString() : '—'}
+                                {l.size ? ` · ${(l.size / (1024 * 1024)).toFixed(1)} MB` : ''}
+                              </div>
+                              <button
+                                className="px-3 py-1 text-xs font-medium rounded-lg border border-red-300 text-red-700 dark:text-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                                onClick={() => handleLadderRestore(l.name, l.modifiedTime)}
+                                disabled={isBackingUp || isRestoring || rowSyncing || ladderRestoring}
+                              >
+                                Restore this copy…
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
                 <SyncConflictDialog {...conflictDialogProps} />
@@ -758,6 +1014,20 @@ const Settings = () => {
                     Your data is stored locally in the app's data folder. The Google Drive sync provides an additional
                     backup layer for your important business data.
                   </p>
+                </div>
+
+                <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-2">Diagnostics</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                    Every error the app hits is written to a log file. If something misbehaves,
+                    open the folder and share the newest <code>app.log</code>.
+                  </p>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => window.electronAPI.log.openFolder()}
+                  >
+                    Open logs folder
+                  </button>
                 </div>
               </div>
               {connectDialog}

@@ -160,7 +160,7 @@ export default function NewSupplierItemScreen() {
       </Pressable>
       <ThemedText style={styles.hint}>
         Link only if this is the same product you also sell — purchases will then
-        bump that item's stock.
+        bump that item&apos;s stock.
       </ThemedText>
 
       <Pressable

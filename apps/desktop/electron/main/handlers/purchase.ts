@@ -1,5 +1,11 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { and, applyPurchaseTaxOverride, computeGstValues, desc, eq, isNull, reversePayment, sql, type PaymentEffect } from '@neu/shared'
+import { getDb, schema } from '../db'
+import { attachBillRelations } from './docLoaders'
+
+// Tag on the PAYMENT_OUT row auto-created for a bill saved with an up-front
+// payment — the purchase twin of sales' 'Paid with invoice'.
+const INLINE_PAYMENT_NOTE = 'Paid with bill'
 
 // Normalize a SupplierItem name for fuzzy-but-bounded matching. Must stay in sync with
 // the inline normalizer in src/pages/Purchase.tsx — the frontend pre-selects on extraction
@@ -13,49 +19,22 @@ function normalizeItemName(name: string): string {
     .trim()
 }
 
-const purchaseBillInclude = {
-  supplier: true,
-  items: {
-    include: {
-      supplierItem: {
-        include: {
-          linkedItem: true
-        }
-      }
-    }
-  },
-  payments: true,
-  // Surface the linked PO summary so the bill view modal can show "Issued against PO-N"
-  purchaseOrder: { select: { id: true, orderNumber: true, orderDate: true, status: true } }
-} as const
-
-const purchaseBillListInclude = {
-  supplier: true,
-  items: {
-    include: {
-      supplierItem: {
-        include: {
-          linkedItem: true
-        }
-      }
-    }
-  },
-  // Same summary on list rows so the bills table can show a "PO" tag inline
-  purchaseOrder: { select: { id: true, orderNumber: true } }
-} as const
 
 async function resolveSupplierItem(tx: any, supplierId: string, item: any) {
+  const withLinked = async (si: any) => {
+    if (!si.linkedItemId) return { ...si, linkedItem: null }
+    const [linked] = await tx.select().from(schema.item).where(eq(schema.item.id, si.linkedItemId)).limit(1)
+    return { ...si, linkedItem: linked ?? null }
+  }
+
   if (item.supplierItemId) {
-    const supplierItem = await tx.supplierItem.findUnique({
-      where: { id: item.supplierItemId },
-      include: { linkedItem: true }
-    })
+    const [supplierItem] = await tx.select().from(schema.supplierItem).where(eq(schema.supplierItem.id, item.supplierItemId)).limit(1)
 
     if (!supplierItem) {
       throw new Error('Supplier item not found')
     }
 
-    return supplierItem
+    return withLinked(supplierItem)
   }
 
   if (!item.itemId) {
@@ -68,66 +47,59 @@ async function resolveSupplierItem(tx: any, supplierId: string, item: any) {
       // for an item we already have.
       // Done in JS because SQLite's default collation is case-sensitive and the per-supplier
       // catalog is small enough that fetching all rows is cheap.
-      const candidates = await tx.supplierItem.findMany({
-        where: { supplierId },
-        include: { linkedItem: true }
-      })
+      const candidates: any[] = await tx.select().from(schema.supplierItem).where(eq(schema.supplierItem.supplierId, supplierId))
       const target = normalizeItemName(extractedName)
       const existing = target
         ? candidates.find((c: any) => normalizeItemName(c.name) === target)
         : undefined
-      if (existing) return existing
+      if (existing) return withLinked(existing)
 
-      return tx.supplierItem.create({
-        data: {
+      const [created] = await tx
+        .insert(schema.supplierItem)
+        .values({
           supplierId,
           name: extractedName,
           hsnCode: item.hsnCode || null,
           unit: 'pcs',
           lastPurchasePrice: item.rate || 0,
           defaultTaxRate: item.taxRate || 0
-        },
-        include: { linkedItem: true }
-      })
+        })
+        .returning()
+      return { ...created, linkedItem: null }
     }
 
     throw new Error('Each purchase line must have a supplier item')
   }
 
-  const supplierItemByLegacyId = await tx.supplierItem.findFirst({
-    where: {
-      id: item.itemId,
-      supplierId
-    },
-    include: { linkedItem: true }
-  })
+  const [supplierItemByLegacyId] = await tx
+    .select()
+    .from(schema.supplierItem)
+    .where(and(eq(schema.supplierItem.id, item.itemId), eq(schema.supplierItem.supplierId, supplierId)))
+    .limit(1)
 
   if (supplierItemByLegacyId) {
-    return supplierItemByLegacyId
+    return withLinked(supplierItemByLegacyId)
   }
 
-  const linkedItem = await tx.item.findUnique({
-    where: { id: item.itemId }
-  })
+  const [linkedItem] = await tx.select().from(schema.item).where(eq(schema.item.id, item.itemId)).limit(1)
 
   if (!linkedItem) {
     throw new Error('Linked item not found')
   }
 
-  const existingSupplierItem = await tx.supplierItem.findFirst({
-    where: {
-      supplierId,
-      linkedItemId: linkedItem.id
-    },
-    include: { linkedItem: true }
-  })
+  const [existingSupplierItem] = await tx
+    .select()
+    .from(schema.supplierItem)
+    .where(and(eq(schema.supplierItem.supplierId, supplierId), eq(schema.supplierItem.linkedItemId, linkedItem.id)))
+    .limit(1)
 
   if (existingSupplierItem) {
-    return existingSupplierItem
+    return withLinked(existingSupplierItem)
   }
 
-  return tx.supplierItem.create({
-    data: {
+  const [created] = await tx
+    .insert(schema.supplierItem)
+    .values({
       supplierId,
       name: item._extractedName || linkedItem.name,
       hsnCode: item.hsnCode || linkedItem.hsnCode || linkedItem.skuHsn || null,
@@ -135,9 +107,9 @@ async function resolveSupplierItem(tx: any, supplierId: string, item: any) {
       lastPurchasePrice: item.rate || linkedItem.purchasePrice || 0,
       defaultTaxRate: item.taxRate || linkedItem.taxRate || 0,
       linkedItemId: linkedItem.id
-    },
-    include: { linkedItem: true }
-  })
+    })
+    .returning()
+  return { ...created, linkedItem }
 }
 
 async function normalizePurchaseItems(tx: any, supplierId: string, items: any[]) {
@@ -156,14 +128,14 @@ async function normalizePurchaseItems(tx: any, supplierId: string, items: any[])
     const supplierItem = await resolveSupplierItem(tx, supplierId, item)
     const taxableAmount = item.quantity * item.rate - (item.discount || 0)
 
-    await tx.supplierItem.update({
-      where: { id: supplierItem.id },
-      data: {
+    await tx
+      .update(schema.supplierItem)
+      .set({
         hsnCode: item.hsnCode || supplierItem.hsnCode || supplierItem.linkedItem?.hsnCode || null,
         lastPurchasePrice: item.rate || 0,
         defaultTaxRate: item.taxRate || 0
-      }
-    })
+      })
+      .where(eq(schema.supplierItem.id, supplierItem.id))
 
     normalizedItems.push({
       supplierItemId: supplierItem.id,
@@ -184,34 +156,28 @@ async function applyStockUpdates(tx: any, items: Array<{ linkedItemId: string | 
   for (const item of items) {
     if (!item.linkedItemId) continue
 
-    const linkedItem = await tx.item.findUnique({
-      where: { id: item.linkedItemId }
-    })
+    const [linkedItem] = await tx.select().from(schema.item).where(eq(schema.item.id, item.linkedItemId)).limit(1)
 
     if (!linkedItem) continue
 
-    const updateData: any = { purchasePrice: item.rate }
+    const updateData: Record<string, unknown> = { purchasePrice: item.rate }
 
     if (linkedItem.trackStock) {
-      updateData.currentStock = {
-        [direction]: item.quantity
-      }
+      updateData.currentStock =
+        direction === 'increment'
+          ? sql`${schema.item.currentStock} + ${item.quantity}`
+          : sql`${schema.item.currentStock} - ${item.quantity}`
     }
 
-    await tx.item.update({
-      where: { id: item.linkedItemId },
-      data: updateData
-    })
+    await tx.update(schema.item).set(updateData).where(eq(schema.item.id, item.linkedItemId))
 
     if (linkedItem.trackStock) {
-      await tx.stockMovement.create({
-        data: {
-          itemId: item.linkedItemId,
-          movementType: 'PURCHASE',
-          quantity: direction === 'increment' ? item.quantity : -item.quantity,
-          referenceType: 'BILL',
-          referenceId
-        }
+      await tx.insert(schema.stockMovement).values({
+        itemId: item.linkedItemId,
+        movementType: 'PURCHASE',
+        quantity: direction === 'increment' ? item.quantity : -item.quantity,
+        referenceType: 'BILL',
+        referenceId
       })
     }
   }
@@ -478,15 +444,13 @@ async function extractWithOpenRouter(args: { fileBytes: Uint8Array; mimeType: st
 }
 
 export const setupPurchaseHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
   // Get all purchase bills
   ipcMain.handle('purchase:getAll', async () => {
     try {
-      const bills = await prisma.purchaseBill.findMany({
-        include: purchaseBillListInclude,
-        orderBy: { billDate: 'desc' }
-      })
+      const headers = await db.select().from(schema.purchaseBill).orderBy(desc(schema.purchaseBill.billDate))
+      const bills = await attachBillRelations(db, headers)
       return { success: true, data: bills }
     } catch (error) {
       return {
@@ -499,10 +463,9 @@ export const setupPurchaseHandlers = () => {
   // Get bill by ID
   ipcMain.handle('purchase:getById', async (_, id: string) => {
     try {
-      const bill = await prisma.purchaseBill.findUnique({
-        where: { id },
-        include: purchaseBillInclude
-      })
+      const [header] = await db.select().from(schema.purchaseBill).where(eq(schema.purchaseBill.id, id)).limit(1)
+      if (!header) return { success: true, data: null }
+      const [bill] = await attachBillRelations(db, [header], { withPayments: true })
       return { success: true, data: bill }
     } catch (error) {
       return {
@@ -515,41 +478,52 @@ export const setupPurchaseHandlers = () => {
   // Create purchase bill
   ipcMain.handle('purchase:create', async (_, data) => {
     try {
-      const bill = await prisma.$transaction(async (tx: any) => {
+      const createdId = await db.transaction(async (tx) => {
         const supplierId = data.supplierId || data.partyId
         const normalizedItems = await normalizePurchaseItems(tx, supplierId, data.items)
 
-        // Calculate totals
-        let subtotal = 0
-        let computedTax = 0
+        // GST split (place of supply, inter-state CGST/SGST vs IGST, per-line tax)
+        // via the shared helper — the same math mobile runs, so a bill entered on
+        // either device stores identical tax columns. The buyer is OUR company; the
+        // counter-party is the SUPPLIER. The bill-level tax override (a scanned bill
+        // showing tax only as a single total, item.taxRate all 0) goes through the
+        // shared applyPurchaseTaxOverride — one rule on both platforms.
+        const [[company], [supplier]] = await Promise.all([
+          tx.select().from(schema.company).limit(1),
+          tx.select().from(schema.supplier).where(eq(schema.supplier.id, supplierId)).limit(1),
+        ])
+        const gst = applyPurchaseTaxOverride(
+          computeGstValues({
+            company: company ? { stateCode: company.stateCode, stateName: company.stateName } : null,
+            party: { taxId: supplier?.taxId, stateCode: supplier?.stateCode, stateName: supplier?.stateName },
+            items: normalizedItems.map((item) => ({
+              quantity: item.quantity,
+              rate: item.rate,
+              discount: item.discount,
+              taxRate: item.taxRate,
+              catalogHsnCode: item.hsnCode || null
+            })),
+            docDiscount: data.discount || 0
+          }),
+          { taxAmount: data.taxAmount, cgstAmount: data.cgstAmount, sgstAmount: data.sgstAmount, igstAmount: data.igstAmount }
+        )
 
-        normalizedItems.forEach((item: any) => {
-          const itemTotal = item.quantity * item.rate - (item.discount || 0)
-          subtotal += itemTotal
-          computedTax += (itemTotal * (item.taxRate || 0)) / 100
-        })
+        const { subtotal, taxAmount, totalAmount } = gst
+        const amountPaid = data.amountPaid || 0
+        const balanceDue = totalAmount - amountPaid
 
-        // Bill-level tax override: when the original bill shows tax only as a
-        // single total (no per-item tax column), the renderer sends the explicit
-        // `taxAmount` and leaves item.taxRate at 0. Honor it here so totals
-        // match the source document.
-        const taxOverrideProvided =
-          typeof data.taxAmount === 'number' && Number.isFinite(data.taxAmount) && data.taxAmount >= 0
-        const taxAmount = taxOverrideProvided ? data.taxAmount : computedTax
-
-        const totalAmount = subtotal + taxAmount - (data.discount || 0)
-        const balanceDue = totalAmount - (data.amountPaid || 0)
-
-        // Determine status
+        // Status derives from the money, exactly like the recompute engine:
+        // nothing left to pay → PAID, some money moved → PARTIAL, else DRAFT.
         let status = 'DRAFT'
-        if (data.amountPaid >= totalAmount) {
+        if (balanceDue <= 0) {
           status = 'PAID'
-        } else if (data.amountPaid > 0) {
+        } else if (amountPaid > 0) {
           status = 'PARTIAL'
         }
 
-        const created = await tx.purchaseBill.create({
-          data: {
+        const [created] = await tx
+          .insert(schema.purchaseBill)
+          .values({
             billNumber: data.billNumber,
             billDate: new Date(data.billDate),
             supplierId,
@@ -564,52 +538,87 @@ export const setupPurchaseHandlers = () => {
             subtotal,
             discount: data.discount || 0,
             taxAmount,
-            cgstAmount: data.cgstAmount || 0,
-            sgstAmount: data.sgstAmount || 0,
-            igstAmount: data.igstAmount || 0,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
             totalAmount,
-            amountPaid: data.amountPaid || 0,
+            amountPaid,
             balanceDue,
-            status: status as any,
+            status,
             notes: data.notes,
             attachmentData: data.attachmentData ?? null,
             attachmentMimeType: data.attachmentMimeType ?? null,
-            items: {
-              create: normalizedItems.map((item) => ({
-                supplierItemId: item.supplierItemId,
-                hsnCode: item.hsnCode,
-                quantity: item.quantity,
-                rate: item.rate,
-                discount: item.discount,
-                taxRate: item.taxRate,
-                total: item.total
-              }))
-            }
-          },
-          include: purchaseBillListInclude
-        })
+          })
+          .returning({ id: schema.purchaseBill.id })
 
-        await tx.supplier.update({
-          where: { id: supplierId },
-          data: { currentBalance: { increment: balanceDue } }
-        })
+        if (normalizedItems.length) {
+          await tx.insert(schema.purchaseBillItem).values(
+            normalizedItems.map((item, idx) => ({
+              purchaseBillId: created.id,
+              supplierItemId: item.supplierItemId,
+              hsnCode: item.hsnCode,
+              quantity: item.quantity,
+              rate: item.rate,
+              discount: item.discount,
+              taxRate: item.taxRate,
+              total: gst.items[idx].total,
+              taxableAmount: gst.items[idx].taxableAmount,
+              cgstRate: gst.items[idx].cgstRate,
+              cgstAmount: gst.items[idx].cgstAmount,
+              sgstRate: gst.items[idx].sgstRate,
+              sgstAmount: gst.items[idx].sgstAmount,
+              igstRate: gst.items[idx].igstRate,
+              igstAmount: gst.items[idx].igstAmount,
+              cessRate: gst.items[idx].cessRate,
+              cessAmount: gst.items[idx].cessAmount
+            })),
+          )
+        }
+
+        await tx
+          .update(schema.supplier)
+          .set({ currentBalance: sql`${schema.supplier.currentBalance} + ${balanceDue}` })
+          .where(eq(schema.supplier.id, supplierId))
 
         await applyStockUpdates(tx, normalizedItems, created.id, 'increment')
+
+        // Record any up-front payment as a real Payment Out row so it shows in the
+        // supplier's ledger AND so the recompute engine (which sums payment ROWS)
+        // can see the money. currentBalance was already bumped by the NET balanceDue
+        // above, so the row is NOT re-applied — it's the ledger record of that money.
+        if (amountPaid > 0) {
+          await tx.insert(schema.paymentTransaction).values({
+            type: 'PAYMENT_OUT',
+            supplierId,
+            amount: amountPaid,
+            paymentMode: data.paymentMode || 'CASH',
+            paymentDate: new Date(data.billDate),
+            referenceType: 'BILL',
+            purchaseBillId: created.id,
+            notes: INLINE_PAYMENT_NOTE
+          })
+        }
 
         // If this bill references a PO, mark that PO as CLOSED now that the
         // financial side is recorded. Future bills referencing the same PO are
         // still allowed (split deliveries) — closing just signals "no more
         // expected." Manual reopen would require an explicit status update.
         if (data.purchaseOrderId) {
-          await tx.purchaseOrder.update({
-            where: { id: data.purchaseOrderId },
-            data: { status: 'CLOSED' },
-          })
+          await tx
+            .update(schema.purchaseOrder)
+            .set({ status: 'CLOSED' })
+            .where(eq(schema.purchaseOrder.id, data.purchaseOrderId))
         }
 
-        return created
+        return created.id
       })
 
+      const [header] = await db.select().from(schema.purchaseBill).where(eq(schema.purchaseBill.id, createdId)).limit(1)
+      const [bill] = await attachBillRelations(db, [header])
       return { success: true, data: bill }
     } catch (error) {
       return {
@@ -622,127 +631,161 @@ export const setupPurchaseHandlers = () => {
   // Update purchase bill
   ipcMain.handle('purchase:update', async (_, id: string, data) => {
     try {
-      const bill = await prisma.$transaction(async (tx: any) => {
-        const existingBill = await tx.purchaseBill.findUnique({
-          where: { id },
-          include: {
-            items: {
-              include: {
-                supplierItem: {
-                  include: {
-                    linkedItem: true
-                  }
-                }
-              }
-            }
-          }
-        })
+      await db.transaction(async (tx) => {
+        const [existingBill] = await tx.select().from(schema.purchaseBill).where(eq(schema.purchaseBill.id, id)).limit(1)
 
         if (!existingBill) {
           throw new Error('Purchase bill not found')
         }
 
+        const existingItems: any[] = await tx
+          .select({
+            line: schema.purchaseBillItem,
+            supplierItem: schema.supplierItem,
+          })
+          .from(schema.purchaseBillItem)
+          .leftJoin(schema.supplierItem, eq(schema.purchaseBillItem.supplierItemId, schema.supplierItem.id))
+          .where(eq(schema.purchaseBillItem.purchaseBillId, id))
+
         const supplierId = data.supplierId || data.partyId
-        const normalizedItems = await normalizePurchaseItems(tx, supplierId, data.items)
 
-        let subtotal = 0
-        let computedTax = 0
-
-        normalizedItems.forEach((item: any) => {
-          const itemTotal = item.quantity * item.rate - (item.discount || 0)
-          subtotal += itemTotal
-          computedTax += (itemTotal * (item.taxRate || 0)) / 100
-        })
-
-        const taxOverrideProvided =
-          typeof data.taxAmount === 'number' && Number.isFinite(data.taxAmount) && data.taxAmount >= 0
-        const taxAmount = taxOverrideProvided ? data.taxAmount : computedTax
-
-        const totalAmount = subtotal + taxAmount - (data.discount || 0)
-        const balanceDue = totalAmount - (existingBill.amountPaid || 0)
-
-        let status = existingBill.status
-        if (existingBill.amountPaid >= totalAmount) {
-          status = 'PAID'
-        } else if ((existingBill.amountPaid || 0) > 0) {
-          status = 'PARTIAL'
-        } else {
-          status = 'DRAFT'
+        // A bill's payment rows carry the supplier they were paid to. Changing
+        // the supplier while active payments exist would strand those rows on
+        // the old supplier — live balances would diverge from the recompute
+        // engine's rebuild, and a later cancel would corrupt BOTH suppliers.
+        // Block it; the user cancels the payments first (or keeps the supplier).
+        if (supplierId !== existingBill.supplierId) {
+          const [activeLinked] = await tx
+            .select({ id: schema.paymentTransaction.id })
+            .from(schema.paymentTransaction)
+            .where(and(
+              eq(schema.paymentTransaction.purchaseBillId, id),
+              isNull(schema.paymentTransaction.cancelledAt),
+              isNull(schema.paymentTransaction.deletedAt),
+            ))
+            .limit(1)
+          if (activeLinked) {
+            throw new Error('This bill has payments recorded against it — cancel those payments before changing the supplier')
+          }
         }
 
-        await tx.supplier.update({
-          where: { id: existingBill.supplierId },
-          data: { currentBalance: { decrement: existingBill.balanceDue } }
-        })
+        const normalizedItems = await normalizePurchaseItems(tx, supplierId, data.items)
+
+        // Same shared GST computation + override rule as purchase:create above.
+        const [[company], [supplier]] = await Promise.all([
+          tx.select().from(schema.company).limit(1),
+          tx.select().from(schema.supplier).where(eq(schema.supplier.id, supplierId)).limit(1),
+        ])
+        const gst = applyPurchaseTaxOverride(
+          computeGstValues({
+            company: company ? { stateCode: company.stateCode, stateName: company.stateName } : null,
+            party: { taxId: supplier?.taxId, stateCode: supplier?.stateCode, stateName: supplier?.stateName },
+            items: normalizedItems.map((item) => ({
+              quantity: item.quantity,
+              rate: item.rate,
+              discount: item.discount,
+              taxRate: item.taxRate,
+              catalogHsnCode: item.hsnCode || null
+            })),
+            docDiscount: data.discount || 0
+          }),
+          { taxAmount: data.taxAmount, cgstAmount: data.cgstAmount, sgstAmount: data.sgstAmount, igstAmount: data.igstAmount }
+        )
+
+        const { subtotal, taxAmount, totalAmount } = gst
+        const amountPaid = existingBill.amountPaid || 0
+        const balanceDue = totalAmount - amountPaid
+
+        let status = 'DRAFT'
+        if (balanceDue <= 0) {
+          status = 'PAID'
+        } else if (amountPaid > 0) {
+          status = 'PARTIAL'
+        }
+
+        await tx
+          .update(schema.supplier)
+          .set({ currentBalance: sql`${schema.supplier.currentBalance} - ${existingBill.balanceDue}` })
+          .where(eq(schema.supplier.id, existingBill.supplierId))
 
         await applyStockUpdates(
           tx,
-          existingBill.items.map((item: any) => ({
-            linkedItemId: item.supplierItem?.linkedItemId || null,
-            quantity: item.quantity,
-            rate: item.rate
+          existingItems.map((r: any) => ({
+            linkedItemId: r.supplierItem?.linkedItemId || null,
+            quantity: r.line.quantity,
+            rate: r.line.rate
           })),
           id,
           'decrement'
         )
 
-        await tx.stockMovement.deleteMany({
-          where: {
-            referenceType: 'BILL',
-            referenceId: id
-          }
-        })
+        await tx
+          .delete(schema.stockMovement)
+          .where(and(eq(schema.stockMovement.referenceType, 'BILL'), eq(schema.stockMovement.referenceId, id)))
 
-        await tx.purchaseBillItem.deleteMany({
-          where: { purchaseBillId: id }
-        })
+        await tx.delete(schema.purchaseBillItem).where(eq(schema.purchaseBillItem.purchaseBillId, id))
 
-        const updatedBill = await tx.purchaseBill.update({
-          where: { id },
-          data: {
-            billDate: new Date(data.billDate),
-            supplierId,
-            supplierInvoiceNumber: data.supplierInvoiceNumber ?? undefined,
-            supplierInvoiceDate: data.supplierInvoiceDate ? new Date(data.supplierInvoiceDate) : undefined,
-            // Allow updating the PO link (or clearing it) on edit
-            purchaseOrderId: data.purchaseOrderId ?? undefined,
-            subtotal,
-            discount: data.discount || 0,
-            taxAmount,
-            cgstAmount: data.cgstAmount ?? 0,
-            sgstAmount: data.sgstAmount ?? 0,
-            igstAmount: data.igstAmount ?? 0,
-            totalAmount,
-            balanceDue,
-            status: status as any,
-            notes: data.notes,
-            attachmentData: data.attachmentData ?? undefined,
-            attachmentMimeType: data.attachmentMimeType ?? undefined,
-            items: {
-              create: normalizedItems.map((item) => ({
-                supplierItemId: item.supplierItemId,
-                hsnCode: item.hsnCode,
-                quantity: item.quantity,
-                rate: item.rate,
-                discount: item.discount,
-                taxRate: item.taxRate,
-                total: item.total
-              }))
-            }
-          },
-          include: purchaseBillListInclude
-        })
+        const patch: Record<string, unknown> = {
+          billDate: new Date(data.billDate),
+          supplierId,
+          subtotal,
+          discount: data.discount || 0,
+          taxAmount,
+          placeOfSupply: gst.placeOfSupply || null,
+          placeOfSupplyName: gst.placeOfSupplyName || null,
+          isInterState: gst.isInterState,
+          cgstAmount: gst.totalCgst,
+          sgstAmount: gst.totalSgst,
+          igstAmount: gst.totalIgst,
+          cessAmount: gst.totalCess,
+          totalAmount,
+          balanceDue,
+          status,
+          notes: data.notes,
+        }
+        // Prisma's `?? undefined` skip-if-absent semantics, made explicit.
+        if (data.supplierInvoiceNumber != null) patch.supplierInvoiceNumber = data.supplierInvoiceNumber
+        if (data.supplierInvoiceDate != null) patch.supplierInvoiceDate = new Date(data.supplierInvoiceDate)
+        if (data.purchaseOrderId !== undefined) patch.purchaseOrderId = data.purchaseOrderId
+        if (data.attachmentData !== undefined && data.attachmentData !== null) patch.attachmentData = data.attachmentData
+        if (data.attachmentMimeType !== undefined && data.attachmentMimeType !== null) patch.attachmentMimeType = data.attachmentMimeType
 
-        await tx.supplier.update({
-          where: { id: supplierId },
-          data: { currentBalance: { increment: balanceDue } }
-        })
+        await tx.update(schema.purchaseBill).set(patch).where(eq(schema.purchaseBill.id, id))
+
+        if (normalizedItems.length) {
+          await tx.insert(schema.purchaseBillItem).values(
+            normalizedItems.map((item, idx) => ({
+              purchaseBillId: id,
+              supplierItemId: item.supplierItemId,
+              hsnCode: item.hsnCode,
+              quantity: item.quantity,
+              rate: item.rate,
+              discount: item.discount,
+              taxRate: item.taxRate,
+              total: gst.items[idx].total,
+              taxableAmount: gst.items[idx].taxableAmount,
+              cgstRate: gst.items[idx].cgstRate,
+              cgstAmount: gst.items[idx].cgstAmount,
+              sgstRate: gst.items[idx].sgstRate,
+              sgstAmount: gst.items[idx].sgstAmount,
+              igstRate: gst.items[idx].igstRate,
+              igstAmount: gst.items[idx].igstAmount,
+              cessRate: gst.items[idx].cessRate,
+              cessAmount: gst.items[idx].cessAmount
+            })),
+          )
+        }
+
+        await tx
+          .update(schema.supplier)
+          .set({ currentBalance: sql`${schema.supplier.currentBalance} + ${balanceDue}` })
+          .where(eq(schema.supplier.id, supplierId))
 
         await applyStockUpdates(tx, normalizedItems, id, 'increment')
-
-        return updatedBill
       })
 
+      const [header] = await db.select().from(schema.purchaseBill).where(eq(schema.purchaseBill.id, id)).limit(1)
+      const [bill] = await attachBillRelations(db, [header])
       return { success: true, data: bill }
     } catch (error) {
       return {
@@ -754,25 +797,12 @@ export const setupPurchaseHandlers = () => {
 
   // Cancel purchase bill (Mode B): reverse the supplier balance + stock, then stamp
   // cancelledAt. applyStockUpdates('decrement') APPENDS the reversing movements; we do
-  // NOT deleteMany — cancel preserves the record and a deleted movement can't sync.
+  // NOT delete them — cancel preserves the record and a deleted movement can't sync.
   // Terminal — there is no restore.
   ipcMain.handle('purchase:cancel', async (_, id: string) => {
     try {
-      await prisma.$transaction(async (tx: any) => {
-        const bill = await tx.purchaseBill.findUnique({
-          where: { id },
-          include: {
-            items: {
-              include: {
-                supplierItem: {
-                  include: {
-                    linkedItem: true
-                  }
-                }
-              }
-            }
-          }
-        })
+      await db.transaction(async (tx) => {
+        const [bill] = await tx.select().from(schema.purchaseBill).where(eq(schema.purchaseBill.id, id)).limit(1)
 
         if (!bill) {
           throw new Error('Purchase bill not found')
@@ -783,24 +813,53 @@ export const setupPurchaseHandlers = () => {
           return
         }
 
-        await tx.supplier.update({
-          where: { id: bill.supplierId },
-          data: {
-            currentBalance: {
-              decrement: bill.balanceDue
-            }
-          }
-        })
+        const billItems: any[] = await tx
+          .select({
+            line: schema.purchaseBillItem,
+            supplierItem: schema.supplierItem,
+          })
+          .from(schema.purchaseBillItem)
+          .leftJoin(schema.supplierItem, eq(schema.purchaseBillItem.supplierItemId, schema.supplierItem.id))
+          .where(eq(schema.purchaseBillItem.purchaseBillId, id))
+
+        // A paid/part-paid bill carries active payment rows. Cancel them FIRST via
+        // the exact reverse flow (which restores the bill's amountPaid/balanceDue and
+        // the supplier's balance), then reverse the bill's now-full balance. Leaving
+        // them active would disagree with the recompute engine, which counts every
+        // active payment row against the supplier.
+        const linkedPayments: any[] = await tx
+          .select()
+          .from(schema.paymentTransaction)
+          .where(and(
+            eq(schema.paymentTransaction.purchaseBillId, id),
+            isNull(schema.paymentTransaction.cancelledAt),
+            isNull(schema.paymentTransaction.deletedAt),
+          ))
+        for (const p of linkedPayments) {
+          await reversePayment(tx, p as unknown as PaymentEffect)
+          await tx
+            .update(schema.paymentTransaction)
+            .set({ cancelledAt: new Date() })
+            .where(eq(schema.paymentTransaction.id, p.id))
+        }
+        const [freshBill] = linkedPayments.length > 0
+          ? await tx.select().from(schema.purchaseBill).where(eq(schema.purchaseBill.id, id)).limit(1)
+          : [bill]
+
+        await tx
+          .update(schema.supplier)
+          .set({ currentBalance: sql`${schema.supplier.currentBalance} - ${freshBill.balanceDue}` })
+          .where(eq(schema.supplier.id, bill.supplierId))
 
         // Reverse stock AND append the reversing movements (direction 'decrement'
         // inserts -qty PURCHASE rows). The original +qty rows and these reversals both
-        // stay — net zero, append-only, sync-safe. No deleteMany.
+        // stay — net zero, append-only, sync-safe. No deletes.
         await applyStockUpdates(
           tx,
-          bill.items.map((item: any) => ({
-            linkedItemId: item.supplierItem?.linkedItemId || null,
-            quantity: item.quantity,
-            rate: item.rate
+          billItems.map((r: any) => ({
+            linkedItemId: r.supplierItem?.linkedItemId || null,
+            quantity: r.line.quantity,
+            rate: r.line.rate
           })),
           id,
           'decrement'
@@ -808,10 +867,7 @@ export const setupPurchaseHandlers = () => {
 
         // CANCEL, not delete: stamp cancelledAt; the bill, its items, and its stock
         // movements all stay on record.
-        await tx.purchaseBill.update({
-          where: { id },
-          data: { cancelledAt: new Date() }
-        })
+        await tx.update(schema.purchaseBill).set({ cancelledAt: new Date() }).where(eq(schema.purchaseBill.id, id))
       })
 
       return { success: true }
@@ -849,9 +905,11 @@ export const setupPurchaseHandlers = () => {
   // Generate bill number
   ipcMain.handle('purchase:generateBillNumber', async () => {
     try {
-      const lastBill = await prisma.purchaseBill.findFirst({
-        orderBy: { billNumber: 'desc' }
-      })
+      const [lastBill] = await db
+        .select({ billNumber: schema.purchaseBill.billNumber })
+        .from(schema.purchaseBill)
+        .orderBy(desc(schema.purchaseBill.billNumber))
+        .limit(1)
 
       const year = new Date().getFullYear()
       const lastNumber = lastBill ? parseInt(lastBill.billNumber.split('-').pop() || '0') : 0

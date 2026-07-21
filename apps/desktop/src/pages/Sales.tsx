@@ -65,6 +65,12 @@ const Sales = () => {
   const [customStart, setCustomStart] = useState('')
   const [customEnd, setCustomEnd] = useState('')
   const [bulkDownloading, setBulkDownloading] = useState(false)
+  // "Reverse with credit note" confirm screen (for paid invoices)
+  const [showReverseModal, setShowReverseModal] = useState(false)
+  const [reverseInvoice, setReverseInvoice] = useState<SalesInvoice | null>(null)
+  const [reverseNoteNumber, setReverseNoteNumber] = useState('')
+  const [reverseReason, setReverseReason] = useState('')
+  const [reverseSubmitting, setReverseSubmitting] = useState(false)
   const toast = useToast()
   const confirm = useConfirm()
   const { company } = useStore()
@@ -354,15 +360,56 @@ const Sales = () => {
     }
   }
 
-  const handleDelete = async (id: string) => {
-    const confirmed = await confirm({ message: 'Are you sure you want to delete this invoice?', danger: true })
+  const handleCancel = async (invoice: SalesInvoice) => {
+    // Paid (or part-paid) invoices can't just be voided — money has changed hands
+    // and the sale may already sit in a GST return. Reverse them the professional
+    // way: issue a full credit note (the customer is left in credit to adjust
+    // against a future bill). Only a fully-unpaid invoice gets the plain void.
+    if ((invoice.amountPaid || 0) > 0) {
+      await openReverseModal(invoice)
+      return
+    }
+    const confirmed = await confirm({
+      message: 'Cancel this invoice? The customer balance and any stock it moved are reversed, and it is marked Cancelled for your records. This cannot be undone.',
+      danger: true,
+    })
     if (confirmed) {
-      const result = await window.electronAPI.sales.delete(id)
+      const result = await window.electronAPI.sales.cancel(invoice.id)
       if (result.success) {
         loadInvoices()
       } else {
-        toast.error('Failed to delete invoice: ' + (result.error || 'Unknown error'))
+        toast.error('Failed to cancel invoice: ' + (result.error || 'Unknown error'))
       }
+    }
+  }
+
+  // Open the "reverse with credit note" confirm screen, pre-filled from the invoice.
+  const openReverseModal = async (invoice: SalesInvoice) => {
+    const full = await window.electronAPI.sales.getById(invoice.id)
+    const inv = full.success && full.data ? full.data : invoice
+    const numRes = await window.electronAPI.creditNote.generateNoteNumber('CREDIT_NOTE')
+    setReverseInvoice(inv)
+    setReverseNoteNumber(numRes.success && numRes.data ? numRes.data : '')
+    setReverseReason('')
+    setShowReverseModal(true)
+  }
+
+  const confirmReverse = async () => {
+    if (!reverseInvoice || reverseSubmitting) return
+    setReverseSubmitting(true)
+    const result = await window.electronAPI.sales.cancelWithCreditNote(reverseInvoice.id, {
+      noteNumber: reverseNoteNumber,
+      noteDate: new Date().toISOString(),
+      reason: reverseReason.trim() || 'Invoice cancelled',
+    })
+    setReverseSubmitting(false)
+    if (result.success) {
+      setShowReverseModal(false)
+      setReverseInvoice(null)
+      loadInvoices()
+      toast.success(`Credit note ${reverseNoteNumber} issued — invoice reversed`)
+    } else {
+      toast.error('Failed to reverse invoice: ' + (result.error || 'Unknown error'))
     }
   }
 
@@ -388,7 +435,7 @@ const Sales = () => {
         dueDate: fullInvoice.dueDate ? new Date(fullInvoice.dueDate).toISOString().split('T')[0] : '',
         notes: fullInvoice.notes || '',
         termsConditions: fullInvoice.termsConditions || '',
-        amountPaid: 0,
+        amountPaid: fullInvoice.amountPaid || 0,
         paymentMode: 'CASH',
         poNumber: fullInvoice.poNumber || '',
         ewayBillNo: fullInvoice.ewayBillNo || '',
@@ -493,6 +540,20 @@ const Sales = () => {
 
     const { subtotal, taxAmount, total } = calculateTotals()
 
+    // The Status drives the paid amount: Paid = full total, Partial = the entered
+    // amount (validated), Unpaid/Overdue = nothing paid. Computing it here means the
+    // stored amount can never contradict the chosen status — on create AND edit.
+    let amountPaid = 0
+    if (formData.status === 'PAID') {
+      amountPaid = total
+    } else if (formData.status === 'PARTIAL') {
+      amountPaid = formData.amountPaid || 0
+      if (amountPaid <= 0 || amountPaid >= total) {
+        toast.info('For a Partial invoice, enter an amount between 0 and the total')
+        return
+      }
+    }
+
     if (editingInvoice) {
       // Update existing invoice
       const invoiceData = {
@@ -512,7 +573,9 @@ const Sales = () => {
         items: invoiceItems,
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
-        totalAmount: total
+        totalAmount: total,
+        amountPaid,
+        paymentMode: formData.paymentMode,
       }
 
       const result = await window.electronAPI.sales.update(editingInvoice.id, invoiceData)
@@ -533,8 +596,8 @@ const Sales = () => {
         subtotalAmount: subtotal,
         taxAmount: taxAmount,
         totalAmount: total,
-        balanceDue: total - (formData.amountPaid || 0),
-        amountPaid: formData.amountPaid || 0,
+        balanceDue: total - amountPaid,
+        amountPaid,
         paymentMode: formData.paymentMode,
         status: formData.status
       }
@@ -737,35 +800,45 @@ const Sales = () => {
               </thead>
               <tbody>
                 {sortedInvoices.map((invoice, index) => (
-                  <tr key={invoice.id} className="border-t">
+                  <tr key={invoice.id} className={`border-t ${invoice.cancelledAt || invoice.status === 'REVERSED' ? 'opacity-60' : ''}`}>
                     <td className="table-cell">{index + 1}</td>
                     <td className="table-cell font-medium">{invoice.invoiceNumber}</td>
                     <td className="table-cell">{new Date(invoice.invoiceDate).toLocaleDateString('en-GB')}</td>
                     <td className="table-cell">{invoice.customer?.name}</td>
                     <td className="table-cell">{formatCurrency(invoice.totalAmount)}</td>
                     <td className="table-cell">
-                      <div className="flex flex-col items-start gap-1">
+                      {invoice.cancelledAt || invoice.status === 'REVERSED' ? (
                         <span className={`px-2 py-1 rounded-full text-xs ${
-                          invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
-                          invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
-                          'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                          invoice.status === 'REVERSED'
+                            ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300'
+                            : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
                         }`}>
-                          {formatInvoiceStatus(invoice.status)}
+                          {invoice.cancelledAt ? 'Cancelled' : 'Reversed'}
                         </span>
-                        {(() => {
-                          const cd = getDueCountdown(
-                            invoice.dueDate,
-                            invoice.status,
-                            invoice.amountPaid,
-                            invoice.totalAmount
-                          )
-                          return cd ? (
-                            <span className={`text-xs font-medium ${dueCountdownColorClass[cd.tone]}`}>
-                              {cd.text}
-                            </span>
-                          ) : null
-                        })()}
-                      </div>
+                      ) : (
+                        <div className="flex flex-col items-start gap-1">
+                          <span className={`px-2 py-1 rounded-full text-xs ${
+                            invoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
+                            invoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
+                            'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
+                          }`}>
+                            {formatInvoiceStatus(invoice.status)}
+                          </span>
+                          {(() => {
+                            const cd = getDueCountdown(
+                              invoice.dueDate,
+                              invoice.status,
+                              invoice.amountPaid,
+                              invoice.totalAmount
+                            )
+                            return cd ? (
+                              <span className={`text-xs font-medium ${dueCountdownColorClass[cd.tone]}`}>
+                                {cd.text}
+                              </span>
+                            ) : null
+                          })()}
+                        </div>
+                      )}
                     </td>
                     <td className="table-cell">
                       <div className="flex items-center space-x-2">
@@ -775,12 +848,14 @@ const Sales = () => {
                         >
                           View
                         </button>
-                        <button
-                          onClick={() => handleEdit(invoice)}
-                          className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
-                        >
-                          Edit
-                        </button>
+                        {!invoice.cancelledAt && invoice.status !== 'REVERSED' && (
+                          <button
+                            onClick={() => handleEdit(invoice)}
+                            className="text-green-600 hover:text-green-700 dark:text-green-400 dark:hover:text-green-300"
+                          >
+                            Edit
+                          </button>
+                        )}
                         <DownloadMenu getOpts={() => buildDownloadOpts(invoice.id)} />
                         <ShareMenu
                           onShare={(target) => handleShare(invoice.id, target)}
@@ -788,9 +863,11 @@ const Sales = () => {
                           email={invoice.customer?.email}
                           partyName={invoice.customer?.name}
                         />
-                        <button onClick={() => handleDelete(invoice.id)} className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
-                          Delete
-                        </button>
+                        {!invoice.cancelledAt && invoice.status !== 'REVERSED' && (
+                          <button onClick={() => handleCancel(invoice)} className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300">
+                            Cancel
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -820,12 +897,17 @@ const Sales = () => {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="label">Invoice Number *</label>
+                    {/* Immutable once issued (D13): GST Rule 46 numbering must
+                        never fork after a document exists — and sync renumbers
+                        collisions itself, so a hand-edited number would fight it. */}
                     <input
                       type="text"
-                      className="input"
+                      className="input disabled:opacity-60 disabled:cursor-not-allowed"
                       value={formData.invoiceNumber}
                       onChange={(e) => setFormData({...formData, invoiceNumber: e.target.value})}
                       placeholder="Auto-generated"
+                      disabled={!!editingInvoice}
+                      title={editingInvoice ? 'The invoice number is locked once the invoice exists' : undefined}
                       required
                     />
                   </div>
@@ -846,7 +928,16 @@ const Sales = () => {
                     <select
                       className="input"
                       value={formData.status}
-                      onChange={(e) => setFormData({...formData, status: e.target.value})}
+                      onChange={(e) => {
+                        // Status drives the amount: Paid/Unpaid/Overdue lock it, Partial
+                        // lets the user enter it — so the label can't contradict the money.
+                        const status = e.target.value
+                        setFormData({
+                          ...formData,
+                          status,
+                          amountPaid: status === 'PARTIAL' ? formData.amountPaid : 0,
+                        })
+                      }}
                     >
                       <option value="DRAFT">Unpaid</option>
                       <option value="PAID">Paid</option>
@@ -897,17 +988,13 @@ const Sales = () => {
                         <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                           <div className="flex-1">
                             <label className="label text-xs">Item</label>
-                            <select
-                              className="input"
+                            <SearchableSelect
                               value={item.itemId}
-                              onChange={(e) => updateInvoiceItem(index, 'itemId', e.target.value)}
+                              onChange={(id) => updateInvoiceItem(index, 'itemId', id)}
+                              options={items.map((i) => ({ id: i.id, name: i.name, subtitle: i.hsnCode || i.skuHsn || undefined }))}
+                              placeholder="Select Item"
                               required
-                            >
-                              <option value="">Select Item</option>
-                              {items.map(i => (
-                                <option key={i.id} value={i.id}>{i.name}</option>
-                              ))}
-                            </select>
+                            />
                           </div>
 
                           <div className="w-32">
@@ -1006,34 +1093,51 @@ const Sales = () => {
                   </div>
                 )}
 
-                {/* Payment Fields (only when creating, not editing) */}
-                {!editingInvoice && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="label">Amount Paid</label>
+                {/* Payment Fields. Amount Paid is driven by the Status above: editable
+                    only for Partial; for Paid it shows the full total, for Unpaid/Overdue
+                    it shows zero — both locked, so the amount can never disagree with the
+                    status. Shown on create AND edit (editing the amount updates the
+                    invoice's up-front payment). */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Amount Paid</label>
+                    {formData.status === 'PARTIAL' ? (
                       <NumberInput
                         className="input"
                         value={formData.amountPaid}
                         onChange={(val) => setFormData({...formData, amountPaid: val})}
                         min={0}
                       />
-                    </div>
-                    <div>
-                      <label className="label">Payment Mode</label>
-                      <select
-                        className="input"
-                        value={formData.paymentMode}
-                        onChange={(e) => setFormData({...formData, paymentMode: e.target.value})}
-                      >
-                        <option value="CASH">Cash</option>
-                        <option value="BANK_TRANSFER">Bank Transfer</option>
-                        <option value="CARD">Card</option>
-                        <option value="UPI">UPI</option>
-                        <option value="CHEQUE">Cheque</option>
-                      </select>
-                    </div>
+                    ) : (
+                      <input
+                        className="input bg-gray-100 dark:bg-gray-700 cursor-not-allowed"
+                        value={formatCurrency(formData.status === 'PAID' ? totals.total : 0)}
+                        disabled
+                        readOnly
+                      />
+                    )}
+                    {formData.status === 'PARTIAL' && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                        Enter an amount between 0 and {formatCurrency(totals.total)}
+                      </p>
+                    )}
                   </div>
-                )}
+                  <div>
+                    <label className="label">Payment Mode</label>
+                    <select
+                      className="input"
+                      value={formData.paymentMode}
+                      onChange={(e) => setFormData({...formData, paymentMode: e.target.value})}
+                      disabled={formData.status !== 'PAID' && formData.status !== 'PARTIAL'}
+                    >
+                      <option value="CASH">Cash</option>
+                      <option value="BANK_TRANSFER">Bank Transfer</option>
+                      <option value="CARD">Card</option>
+                      <option value="UPI">UPI</option>
+                      <option value="CHEQUE">Cheque</option>
+                    </select>
+                  </div>
+                </div>
 
                 {/* Notes */}
                 <div className="grid grid-cols-2 gap-4">
@@ -1169,6 +1273,7 @@ const Sales = () => {
                       : '—'}
                   </p>
                   {(() => {
+                    if (viewingInvoice.cancelledAt || viewingInvoice.status === 'REVERSED') return null
                     const cd = getDueCountdown(
                       viewingInvoice.dueDate,
                       viewingInvoice.status,
@@ -1185,11 +1290,13 @@ const Sales = () => {
                 <div>
                   <p className="text-sm text-gray-500 dark:text-gray-400">Status</p>
                   <span className={`px-2 py-1 rounded-full text-xs ${
+                    viewingInvoice.cancelledAt ? 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300' :
+                    viewingInvoice.status === 'REVERSED' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300' :
                     viewingInvoice.status === 'PAID' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' :
                     viewingInvoice.status === 'PARTIAL' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300' :
                     'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300'
                   }`}>
-                    {formatInvoiceStatus(viewingInvoice.status)}
+                    {viewingInvoice.cancelledAt ? 'Cancelled' : formatInvoiceStatus(viewingInvoice.status)}
                   </span>
                 </div>
               </div>
@@ -1291,6 +1398,106 @@ const Sales = () => {
                   variant="button"
                   getOpts={() => buildDownloadOpts(viewingInvoice.id)}
                 />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Reverse-with-Credit-Note confirm screen (paid invoices) */}
+      {showReverseModal && reverseInvoice && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="p-6">
+              <div className="flex justify-between items-center mb-2">
+                <h2 className="text-2xl font-bold">Reverse with Credit Note</h2>
+                <button onClick={() => { setShowReverseModal(false); setReverseInvoice(null); }} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl">
+                  ×
+                </button>
+              </div>
+              <p className="text-sm text-gray-500 dark:text-gray-400 mb-5">
+                {reverseInvoice.invoiceNumber} has a payment on it, so it can't just be voided.
+                Issuing this credit note reverses the sale, returns its stock, and leaves the
+                customer in credit to adjust against a future bill. The invoice stays on record.
+              </p>
+
+              <div className="grid grid-cols-2 gap-4 mb-5">
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Customer</p>
+                  <p className="font-semibold">{reverseInvoice.customer?.name}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Credit Note No.</p>
+                  <p className="font-semibold">{reverseNoteNumber || '—'}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Against Invoice</p>
+                  <p className="font-medium">{reverseInvoice.invoiceNumber}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Already Paid</p>
+                  <p className="font-medium text-green-600 dark:text-green-400">{formatCurrency(reverseInvoice.amountPaid || 0)}</p>
+                </div>
+              </div>
+
+              <div className="mb-5">
+                <table className="table w-full">
+                  <thead>
+                    <tr>
+                      <th className="table-header">Item</th>
+                      <th className="table-header">Qty</th>
+                      <th className="table-header">Rate</th>
+                      <th className="table-header">Tax %</th>
+                      <th className="table-header">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reverseInvoice.items?.map((item, index) => (
+                      <tr key={index} className="border-t">
+                        <td className="table-cell">{item.item?.name}</td>
+                        <td className="table-cell">{item.quantity}</td>
+                        <td className="table-cell">{formatCurrency(item.rate)}</td>
+                        <td className="table-cell">{item.taxRate}%</td>
+                        <td className="table-cell">{formatCurrency(item.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg mb-5">
+                <div className="flex justify-between text-lg font-bold">
+                  <span>Credit Note Total:</span>
+                  <span>{formatCurrency(reverseInvoice.totalAmount)}</span>
+                </div>
+              </div>
+
+              <div className="mb-6">
+                <label className="block text-sm text-gray-500 dark:text-gray-400 mb-1">Reason (optional)</label>
+                <input
+                  type="text"
+                  className="input w-full"
+                  placeholder="e.g. order cancelled, wrong invoice…"
+                  value={reverseReason}
+                  onChange={(e) => setReverseReason(e.target.value)}
+                />
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <button
+                  onClick={() => { setShowReverseModal(false); setReverseInvoice(null); }}
+                  className="btn btn-secondary"
+                  disabled={reverseSubmitting}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={confirmReverse}
+                  className="btn btn-primary"
+                  disabled={reverseSubmitting || !reverseNoteNumber}
+                >
+                  {reverseSubmitting ? 'Issuing…' : 'Issue Credit Note'}
+                </button>
               </div>
             </div>
           </div>

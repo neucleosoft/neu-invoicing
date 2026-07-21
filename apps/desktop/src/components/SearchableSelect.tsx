@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Search as SearchIcon, ChevronDown, Check, X } from 'lucide-react'
+import { filterPickerOptions } from '@neu/shared'
 
 export type SearchableOption = {
   id: string
@@ -50,15 +51,13 @@ const SearchableSelect = ({
 
   const selected = useMemo(() => options.find((o) => o.id === value), [options, value])
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    if (!q) return options
-    return options.filter((o) => {
-      if (o.name.toLowerCase().includes(q)) return true
-      if (o.subtitle && o.subtitle.toLowerCase().includes(q)) return true
-      return false
-    })
-  }, [options, query])
+  // The SHARED matching/ranking brain (packages/shared/src/pickerSearch.ts) —
+  // the same code mobile's picker modal runs, so both apps find and rank
+  // "raj cem" → "Rajshree Cement" identically.
+  const filtered = useMemo(
+    () => filterPickerOptions(options.map((o) => ({ ...o, extra: [o.subtitle] })), query),
+    [options, query],
+  )
 
   // Reset highlight when filter list changes
   useEffect(() => {

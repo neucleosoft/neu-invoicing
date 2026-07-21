@@ -54,10 +54,14 @@ export default function CustomersScreen() {
   // list (marked) but never count toward a number.
   const activeCount = useMemo(() => customers.filter((c) => !c.deletedAt).length, [customers])
 
+  // Multi-field search (mirrors desktop): name, phone, email, GSTIN — a
+  // bookkeeper often has the phone number or GSTIN handy, not the exact name.
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     if (!q) return customers
-    return customers.filter((c) => c.name.toLowerCase().includes(q))
+    return customers.filter((c) =>
+      `${c.name} ${c.phone ?? ''} ${c.email ?? ''} ${c.taxId ?? ''}`.toLowerCase().includes(q),
+    )
   }, [customers, search])
 
   const renderItem = useCallback<ListRenderItem<Customer>>(

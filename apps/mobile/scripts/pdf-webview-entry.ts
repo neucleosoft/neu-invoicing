@@ -6,7 +6,7 @@
 // "draw all lines" layout — the extra grid lines bug.) The app sends only plain
 // JSON data; the WebView turns it into the full docDefinition + renders it.
 
-import { buildInvoiceDocDefinition } from '../../../packages/shared/src/pdf/invoice'
+import { buildInvoiceDocDefinitionForTemplate } from '../../../packages/shared/src/pdf/invoiceTemplates'
 import { buildPurchaseBillDocDefinition } from '../../../packages/shared/src/pdf/purchaseBill'
 import { buildPurchaseOrderDocDefinition } from '../../../packages/shared/src/pdf/purchaseOrder'
 import { buildCreditNoteDocDefinition } from '../../../packages/shared/src/pdf/creditNote'
@@ -14,9 +14,10 @@ import { buildChallanDocDefinition } from '../../../packages/shared/src/pdf/chal
 import { buildStatementDocDefinition } from '../../../packages/shared/src/pdf/statement'
 
 // Keyed by builder name; the bridge calls __neuPdfBuilders[name](data).
-// 'invoice' also serves quotations + proformas (data.type drives the branch).
+// 'invoice' also serves quotations + proformas (data.type drives the branch)
+// and all five visual templates (data.template drives the dispatch).
 ;(globalThis as Record<string, unknown>).__neuPdfBuilders = {
-  invoice: buildInvoiceDocDefinition,
+  invoice: buildInvoiceDocDefinitionForTemplate,
   purchaseBill: buildPurchaseBillDocDefinition,
   purchaseOrder: buildPurchaseOrderDocDefinition,
   creditNote: buildCreditNoteDocDefinition,

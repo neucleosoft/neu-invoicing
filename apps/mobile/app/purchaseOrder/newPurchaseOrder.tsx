@@ -3,7 +3,6 @@ import { router } from 'expo-router'
 import { useEffect, useState } from 'react'
 import {
   Alert,
-  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -15,11 +14,13 @@ import {
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { formatCurrency } from '@/utils/currency'
 import { generatePoNumber } from '@/utils/poNumber'
 import { createPurchaseOrder, type PoLineInput } from '@/utils/poSave'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Supplier = typeof schema.supplier.$inferSelect
 type SupplierItem = typeof schema.supplierItem.$inferSelect
@@ -47,7 +48,16 @@ export default function NewPurchaseOrderScreen() {
   const [orderDate, setOrderDate] = useState(todayStr())
   const [expectedDate, setExpectedDate] = useState('')
   const [notes, setNotes] = useState('')
+  const [vendorQuotationRef, setVendorQuotationRef] = useState('')
+  const [billingAddress, setBillingAddress] = useState('')
+  const [shippingAddress, setShippingAddress] = useState('')
+  const [termsConditions, setTermsConditions] = useState('')
   const [lines, setLines] = useState<OrderLine[]>([])
+
+  // Rage-guard: Android back / swipe must never silently eat a half-typed
+  // document (see hooks/use-unsaved-guard.ts).
+  const dirty = lines.length > 0 || supplierId !== '' || notes.trim() !== ''
+  const { markClean } = useUnsavedGuard(dirty)
 
   const [saving, setSaving] = useState(false)
   const [showSupplierPicker, setShowSupplierPicker] = useState(false)
@@ -91,10 +101,14 @@ export default function NewPurchaseOrderScreen() {
         orderDate: isNaN(parsed.getTime()) ? new Date() : parsed,
         expectedDate: expectedDate.trim() ? new Date(expectedDate) : null,
         notes: notes.trim() || null,
-        termsConditions: null,
+        termsConditions: termsConditions.trim() || null,
+        vendorQuotationRef: vendorQuotationRef.trim() || null,
+        billingAddress: billingAddress.trim() || null,
+        shippingAddress: shippingAddress.trim() || null,
       }
       const lineInputs: PoLineInput[] = lines.map((l) => ({ supplierItemId: l.supplierItemId, name: l.name.trim(), hsnCode: l.hsnCode.trim(), quantity: l.qty, rate: l.rate, discount: l.discount, taxRate: l.taxRate }))
       await createPurchaseOrder(db, header, lineInputs)
+      markClean()
       router.back()
     } catch (e) {
       Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save order')
@@ -127,6 +141,10 @@ export default function NewPurchaseOrderScreen() {
 
       <Field label="Order Date (YYYY-MM-DD)" value={orderDate} onChangeText={setOrderDate} placeholder="2026-06-01" />
       <Field label="Expected Date" value={expectedDate} onChangeText={setExpectedDate} placeholder="YYYY-MM-DD (optional)" />
+      <Field label="Vendor Quotation Ref" value={vendorQuotationRef} onChangeText={setVendorQuotationRef} placeholder="Their quote number (optional)" />
+      <Field label="Billing Address" value={billingAddress} onChangeText={setBillingAddress} placeholder="Optional" multiline />
+      <Field label="Shipping Address" value={shippingAddress} onChangeText={setShippingAddress} placeholder="Optional" multiline />
+      <Field label="Terms & Conditions" value={termsConditions} onChangeText={setTermsConditions} placeholder="Optional" multiline />
 
       <View style={styles.linesHeader}><ThemedText type="defaultSemiBold">Items</ThemedText></View>
       {lines.length === 0 ? (
@@ -176,7 +194,7 @@ export default function NewPurchaseOrderScreen() {
       <Modal visible={showSupplierPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}><ThemedView style={styles.modalContent}>
           <ThemedText type="title" style={styles.modalTitle}>Select Supplier</ThemedText>
-          <FlatList data={suppliers} keyExtractor={(s) => s.id} renderItem={({ item }) => (
+          <PickerSearchList data={suppliers} getName={(x) => x.name} getExtra={(x) => [x.phone]} keyExtractor={(s) => s.id} renderItem={({ item }) => (
             <Pressable style={styles.modalRow} onPress={() => pickSupplier(item.id)}><ThemedText type={item.id === supplierId ? 'defaultSemiBold' : undefined}>{item.id === supplierId ? `✓ ${item.name}` : item.name}</ThemedText></Pressable>
           )} />
           <Pressable style={styles.modalClose} onPress={() => setShowSupplierPicker(false)}><ThemedText style={styles.modalCloseText}>Cancel</ThemedText></Pressable>
@@ -189,7 +207,7 @@ export default function NewPurchaseOrderScreen() {
           {catalog.length === 0 ? (
             <ThemedText style={styles.emptyCatalog}>This supplier has no catalog items yet. Close this and use “+ New item”.</ThemedText>
           ) : (
-            <FlatList data={catalog} keyExtractor={(c) => c.id} renderItem={({ item }) => (
+            <PickerSearchList data={catalog} getName={(x) => x.name} getExtra={(x) => [x.hsnCode]} keyExtractor={(c) => c.id} renderItem={({ item }) => (
               <Pressable style={styles.modalRow} onPress={() => addFromCatalog(item)}>
                 <ThemedText type="defaultSemiBold">{item.name}</ThemedText>
                 <ThemedText style={styles.catalogMeta}>{formatCurrency(item.lastPurchasePrice)} · {item.defaultTaxRate}% · {item.unit}</ThemedText>

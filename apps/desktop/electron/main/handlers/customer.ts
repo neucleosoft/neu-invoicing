@@ -1,19 +1,27 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
-import { notCancelled, notDeleted, notDeletedWhere } from './softDelete'
+import { and, asc, desc, eq, lte } from '@neu/shared'
+import { getDb, schema } from '../db'
+import { notCancelled, notDeleted } from './softDelete'
+
+// Renderer payloads cross IPC as structured clones: Date objects survive, but
+// an ISO string (which Prisma used to coerce silently) must become a Date
+// before drizzle's prismaDate type writes it.
+const asDate = (v: unknown): Date | null =>
+  v == null ? null : v instanceof Date ? v : new Date(v as string)
 
 export const setupCustomerHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
-  // Get all customers. The Customer Prisma model maps to the legacy `Party`
-  // table, which historically also stored suppliers (`type='SUPPLIER'`). Filter
-  // those out so they don't pollute the Customers UI.
+  // Get all customers. The customer table is the legacy `Party` table, which
+  // historically also stored suppliers (`type='SUPPLIER'`). Filter those out
+  // so they don't pollute the Customers UI.
   ipcMain.handle('customer:getAll', async () => {
     try {
-      const customers = await prisma.customer.findMany({
-        where: { type: 'CUSTOMER' },
-        orderBy: { name: 'asc' }
-      })
+      const customers = await db
+        .select()
+        .from(schema.customer)
+        .where(eq(schema.customer.type, 'CUSTOMER'))
+        .orderBy(asc(schema.customer.name))
       return { success: true, data: customers }
     } catch (error) {
       return {
@@ -26,16 +34,15 @@ export const setupCustomerHandlers = () => {
   // Get customer by ID (with recent sales)
   ipcMain.handle('customer:getById', async (_, id: string) => {
     try {
-      const customer = await prisma.customer.findUnique({
-        where: { id },
-        include: {
-          salesInvoices: {
-            orderBy: { invoiceDate: 'desc' },
-            take: 10
-          }
-        }
-      })
-      return { success: true, data: customer }
+      const [customer] = await db.select().from(schema.customer).where(eq(schema.customer.id, id)).limit(1)
+      if (!customer) return { success: true, data: null }
+      const salesInvoices = await db
+        .select()
+        .from(schema.salesInvoice)
+        .where(eq(schema.salesInvoice.customerId, id))
+        .orderBy(desc(schema.salesInvoice.invoiceDate))
+        .limit(10)
+      return { success: true, data: { ...customer, salesInvoices } }
     } catch (error) {
       return {
         success: false,
@@ -47,8 +54,9 @@ export const setupCustomerHandlers = () => {
   // Create customer
   ipcMain.handle('customer:create', async (_, data) => {
     try {
-      const customer = await prisma.customer.create({
-        data: {
+      const [customer] = await db
+        .insert(schema.customer)
+        .values({
           name: data.name,
           type: data.type || 'CUSTOMER',
           phone: data.phone,
@@ -68,9 +76,9 @@ export const setupCustomerHandlers = () => {
           district: data.district,
           pincode: data.pincode,
           fetchedFromGst: data.fetchedFromGst || false,
-          lastGstFetch: data.lastGstFetch
-        }
-      })
+          lastGstFetch: asDate(data.lastGstFetch),
+        })
+        .returning()
 
       return { success: true, data: customer }
     } catch (error) {
@@ -84,9 +92,9 @@ export const setupCustomerHandlers = () => {
   // Update customer
   ipcMain.handle('customer:update', async (_, id: string, data) => {
     try {
-      const customer = await prisma.customer.update({
-        where: { id },
-        data: {
+      const [customer] = await db
+        .update(schema.customer)
+        .set({
           name: data.name,
           type: data.type,
           phone: data.phone,
@@ -104,9 +112,10 @@ export const setupCustomerHandlers = () => {
           district: data.district,
           pincode: data.pincode,
           fetchedFromGst: data.fetchedFromGst,
-          lastGstFetch: data.lastGstFetch
-        }
-      })
+          lastGstFetch: asDate(data.lastGstFetch),
+        })
+        .where(eq(schema.customer.id, id))
+        .returning()
 
       return { success: true, data: customer }
     } catch (error) {
@@ -120,21 +129,15 @@ export const setupCustomerHandlers = () => {
   // Delete customer (soft-delete)
   ipcMain.handle('customer:delete', async (_, id: string) => {
     try {
-      const customer = await prisma.customer.findUnique({
-        where: { id }
-      })
-
+      const [customer] = await db.select({ id: schema.customer.id }).from(schema.customer).where(eq(schema.customer.id, id)).limit(1)
       if (!customer) {
         return { success: false, error: 'Customer not found' }
       }
 
-      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The row and its
-      // invoices/payments/balance stay put so a restore brings the customer back
-      // intact.
-      await prisma.customer.update({
-        where: { id },
-        data: { deletedAt: new Date() }
-      })
+      // Soft-delete: stamp deletedAt (updatedAt + hlc auto-bump via the schema
+      // hooks). The row and its invoices/payments/balance stay put so a
+      // restore brings the customer back intact.
+      await db.update(schema.customer).set({ deletedAt: new Date() }).where(eq(schema.customer.id, id))
 
       return { success: true }
     } catch (error) {
@@ -148,18 +151,12 @@ export const setupCustomerHandlers = () => {
   // Restore a soft-deleted customer
   ipcMain.handle('customer:restore', async (_, id: string) => {
     try {
-      const customer = await prisma.customer.findUnique({
-        where: { id }
-      })
-
+      const [customer] = await db.select({ id: schema.customer.id }).from(schema.customer).where(eq(schema.customer.id, id)).limit(1)
       if (!customer) {
         return { success: false, error: 'Customer not found' }
       }
 
-      await prisma.customer.update({
-        where: { id },
-        data: { deletedAt: null }
-      })
+      await db.update(schema.customer).set({ deletedAt: null }).where(eq(schema.customer.id, id))
 
       return { success: true }
     } catch (error) {
@@ -176,7 +173,7 @@ export const setupCustomerHandlers = () => {
     'customer:getStatement',
     async (_, args: { customerId: string; fromDate: string; toDate: string }) => {
       try {
-        const customer = await prisma.customer.findUnique({ where: { id: args.customerId } })
+        const [customer] = await db.select().from(schema.customer).where(eq(schema.customer.id, args.customerId)).limit(1)
         if (!customer) {
           return { success: false, error: 'Customer not found' }
         }
@@ -186,48 +183,54 @@ export const setupCustomerHandlers = () => {
         to.setHours(23, 59, 59, 999)
 
         const [invoices, payments, notes] = await Promise.all([
-          prisma.salesInvoice.findMany({
-            where: {
-              customerId: args.customerId,
-              type: 'INVOICE',
-              invoiceDate: { lte: to },
-              ...notDeleted,
-            },
-            select: { id: true, invoiceNumber: true, invoiceDate: true, totalAmount: true },
-          }),
-          prisma.paymentTransaction.findMany({
-            where: {
-              customerId: args.customerId,
-              type: 'PAYMENT_IN',
-              paymentDate: { lte: to },
-              ...notDeleted,
-              ...notCancelled,
-            },
-            select: {
-              id: true,
-              paymentDate: true,
-              amount: true,
-              paymentMode: true,
-              salesInvoiceId: true,
-            },
-          }),
-          prisma.creditDebitNote.findMany({
-            where: {
-              customerId: args.customerId,
-              status: 'ACTIVE',
-              noteDate: { lte: to },
-              ...notDeleted,
-              ...notCancelled,
-            },
-            select: {
-              id: true,
-              noteNumber: true,
-              noteDate: true,
-              type: true,
-              totalAmount: true,
-              referenceInvoiceId: true,
-            },
-          }),
+          db
+            .select({
+              id: schema.salesInvoice.id,
+              invoiceNumber: schema.salesInvoice.invoiceNumber,
+              invoiceDate: schema.salesInvoice.invoiceDate,
+              totalAmount: schema.salesInvoice.totalAmount,
+            })
+            .from(schema.salesInvoice)
+            .where(and(
+              eq(schema.salesInvoice.customerId, args.customerId),
+              eq(schema.salesInvoice.type, 'INVOICE'),
+              lte(schema.salesInvoice.invoiceDate, to),
+              notDeleted(schema.salesInvoice.deletedAt),
+              notCancelled(schema.salesInvoice.cancelledAt),
+            )),
+          db
+            .select({
+              id: schema.paymentTransaction.id,
+              paymentDate: schema.paymentTransaction.paymentDate,
+              amount: schema.paymentTransaction.amount,
+              paymentMode: schema.paymentTransaction.paymentMode,
+              salesInvoiceId: schema.paymentTransaction.salesInvoiceId,
+            })
+            .from(schema.paymentTransaction)
+            .where(and(
+              eq(schema.paymentTransaction.customerId, args.customerId),
+              eq(schema.paymentTransaction.type, 'PAYMENT_IN'),
+              lte(schema.paymentTransaction.paymentDate, to),
+              notDeleted(schema.paymentTransaction.deletedAt),
+              notCancelled(schema.paymentTransaction.cancelledAt),
+            )),
+          db
+            .select({
+              id: schema.creditDebitNote.id,
+              noteNumber: schema.creditDebitNote.noteNumber,
+              noteDate: schema.creditDebitNote.noteDate,
+              type: schema.creditDebitNote.type,
+              totalAmount: schema.creditDebitNote.totalAmount,
+              referenceInvoiceId: schema.creditDebitNote.referenceInvoiceId,
+            })
+            .from(schema.creditDebitNote)
+            .where(and(
+              eq(schema.creditDebitNote.customerId, args.customerId),
+              eq(schema.creditDebitNote.status, 'ACTIVE'),
+              lte(schema.creditDebitNote.noteDate, to),
+              notDeleted(schema.creditDebitNote.deletedAt),
+              notCancelled(schema.creditDebitNote.cancelledAt),
+            )),
         ])
 
         type Entry = {
@@ -330,21 +333,22 @@ export const setupCustomerHandlers = () => {
 
   ipcMain.handle('customer:getLedger', async (_, id: string) => {
     try {
-      const customer = await prisma.customer.findUnique({
-        where: { id },
-        include: {
-          salesInvoices: {
-            ...notDeletedWhere,
-            orderBy: { invoiceDate: 'desc' }
-          },
-          payments: {
-            ...notDeletedWhere,
-            orderBy: { paymentDate: 'desc' }
-          }
-        }
-      })
+      const [customer] = await db.select().from(schema.customer).where(eq(schema.customer.id, id)).limit(1)
+      if (!customer) return { success: true, data: null }
+      const [salesInvoices, payments] = await Promise.all([
+        db
+          .select()
+          .from(schema.salesInvoice)
+          .where(and(eq(schema.salesInvoice.customerId, id), notDeleted(schema.salesInvoice.deletedAt)))
+          .orderBy(desc(schema.salesInvoice.invoiceDate)),
+        db
+          .select()
+          .from(schema.paymentTransaction)
+          .where(and(eq(schema.paymentTransaction.customerId, id), notDeleted(schema.paymentTransaction.deletedAt)))
+          .orderBy(desc(schema.paymentTransaction.paymentDate)),
+      ])
 
-      return { success: true, data: customer }
+      return { success: true, data: { ...customer, salesInvoices, payments } }
     } catch (error) {
       return {
         success: false,

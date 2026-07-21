@@ -1,6 +1,6 @@
-import { eq, sql } from 'drizzle-orm'
+import { and, asc, eq, isNull, sql } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   FlatList,
@@ -13,12 +13,14 @@ import {
   type TextInputProps,
 } from 'react-native'
 
-import { computeGstValues } from '@neu/shared'
+import { computeGstValues, computePaymentStatus } from '@neu/shared'
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Customer = typeof schema.customer.$inferSelect
 type Item = typeof schema.item.$inferSelect
@@ -44,6 +46,12 @@ const STATUS_LABELS: Record<(typeof STATUS_OPTIONS)[number], string> = {
 }
 
 type StatusOption = (typeof STATUS_OPTIONS)[number]
+
+const PAYMENT_MODE_OPTIONS = ['CASH', 'BANK_TRANSFER', 'CARD', 'CHEQUE', 'UPI', 'OTHER'] as const
+
+// Marks the up-front payment auto-managed by the invoice form (matches the create
+// screen + desktop's INLINE_PAYMENT_NOTE), so we re-sync exactly that row on edit.
+const INLINE_PAYMENT_NOTE = 'Paid with invoice'
 
 function toIsoDate(d: Date | string | null | undefined): string {
   if (!d) return ''
@@ -78,10 +86,27 @@ export default function EditInvoiceScreen() {
   const [invoiceNumber, setInvoiceNumber] = useState('')
   const [customerId, setCustomerId] = useState<string | null>(null)
   const [status, setStatus] = useState<StatusOption>('DRAFT')
+  const [amountPaidInput, setAmountPaidInput] = useState('0')
+  const [paymentMode, setPaymentMode] = useState<string>('CASH')
   const [invoiceDate, setInvoiceDate] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [lines, setLines] = useState<LineRow[]>([])
+  // Document-level discount (totalAmount = subtotal + tax − discount, mirrors
+  // desktop). Loaded from the stored invoice so an edit never silently drops a
+  // discount that was applied on the other device.
+  const [docDiscount, setDocDiscount] = useState('0')
   const [notes, setNotes] = useState('')
+
+  // Rage-guard: Android back / swipe must never silently eat unsaved edits.
+  // The baseline snapshots the loaded document once; any drift = dirty
+  // (see hooks/use-unsaved-guard.ts).
+  const editSnapshot = JSON.stringify([customerId, lines, notes])
+  const baselineRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loading && baselineRef.current === null) baselineRef.current = editSnapshot
+  }, [loading, editSnapshot])
+  const dirty = !loading && baselineRef.current !== null && editSnapshot !== baselineRef.current
+  const { markClean } = useUnsavedGuard(dirty)
   const [termsConditions, setTermsConditions] = useState('')
 
   const [showAdditional, setShowAdditional] = useState(false)
@@ -95,6 +120,7 @@ export default function EditInvoiceScreen() {
   const [showCustomerPicker, setShowCustomerPicker] = useState(false)
   const [showItemPicker, setShowItemPicker] = useState(false)
   const [showStatusPicker, setShowStatusPicker] = useState(false)
+  const [showPaymentModePicker, setShowPaymentModePicker] = useState(false)
 
   useEffect(() => {
     if (!id) {
@@ -134,6 +160,8 @@ export default function EditInvoiceScreen() {
       setStatus(
         allowed.includes(inv.status) ? (inv.status as StatusOption) : 'DRAFT',
       )
+      setAmountPaidInput(String(inv.amountPaid ?? 0))
+      setDocDiscount(String(inv.discount ?? 0))
       setInvoiceDate(toIsoDate(inv.invoiceDate))
       setDueDate(toIsoDate(inv.dueDate))
       setNotes(inv.notes ?? '')
@@ -180,11 +208,18 @@ export default function EditInvoiceScreen() {
     (s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100),
     0,
   )
-  const total = subtotal + taxAmount
-  // Preserve amountPaid — editing the invoice doesn't change cash received.
-  // Recompute balanceDue against the new total. Mirrors desktop sales.ts:183.
-  const amountPaid = originalInvoice?.amountPaid ?? 0
-  const balanceDue = total - amountPaid
+  const discount = parseFloat(docDiscount) || 0
+  const total = subtotal + taxAmount - discount
+  // Amount Paid is editable, driven by the Status (mirrors desktop): Paid = full
+  // total, Partial = the entered amount, Unpaid/Overdue = nothing paid — so the label
+  // can never contradict the money.
+  const paid =
+    status === 'PAID'
+      ? total
+      : status === 'PARTIAL'
+      ? parseFloat(amountPaidInput) || 0
+      : 0
+  const balanceDue = total - paid
 
   function pickItem(it: Item) {
     setLines([
@@ -211,6 +246,12 @@ export default function EditInvoiceScreen() {
 
   async function handleSave() {
     if (!id || !originalInvoice) return
+    // Reversed / cancelled invoices are terminal — editing them would un-reverse the
+    // balance/stock. The detail screen hides Edit for these; this is the safety net.
+    if (originalInvoice.status === 'REVERSED' || originalInvoice.cancelledAt) {
+      Alert.alert('Locked', 'This invoice has been reversed or cancelled and can no longer be edited.')
+      return
+    }
     if (!customerId) {
       Alert.alert('Validation', 'Please select a customer')
       return
@@ -222,6 +263,10 @@ export default function EditInvoiceScreen() {
     const invDate = parseDate(invoiceDate)
     if (!invDate) {
       Alert.alert('Validation', 'Invalid invoice date (use YYYY-MM-DD)')
+      return
+    }
+    if (status === 'PARTIAL' && (paid <= 0 || paid >= total)) {
+      Alert.alert('Validation', 'For a Partial invoice, enter an amount between 0 and the total')
       return
     }
     const due = parseDate(dueDate)
@@ -262,6 +307,7 @@ export default function EditInvoiceScreen() {
           catalogSkuHsn: cat?.skuHsn,
         }
       }),
+      docDiscount: discount,
     })
 
     setSaving(true)
@@ -306,13 +352,16 @@ export default function EditInvoiceScreen() {
           .set({
             invoiceNumber,
             customerId,
-            status,
+            // Status follows the money (OVERDUE preserved — it's about the due date).
+            status: status === 'OVERDUE' ? 'OVERDUE' : computePaymentStatus(gst.totalAmount, paid),
             invoiceDate: invDate,
             dueDate: due,
             subtotal: gst.subtotal,
+            discount,
             taxAmount: gst.taxAmount,
             totalAmount: gst.totalAmount,
-            balanceDue: gst.totalAmount - amountPaid,
+            amountPaid: paid,
+            balanceDue: gst.totalAmount - paid,
             placeOfSupply: gst.placeOfSupply || null,
             placeOfSupplyName: gst.placeOfSupplyName || null,
             isInterState: gst.isInterState,
@@ -358,7 +407,85 @@ export default function EditInvoiceScreen() {
               .where(eq(schema.customer.id, customerId))
           }
         }
+
+        // Re-sync the invoice's up-front payment row to the edited amount, so the
+        // customer's statement always agrees with the invoice. Only the tagged inline
+        // row is touched — payments from the Payments screen are left alone. The
+        // customer balance was already handled by the delta above, so this row is the
+        // ledger record only (NOT re-applied). Updating an existing row keeps its mode.
+        let inline: typeof schema.paymentTransaction.$inferSelect | null =
+          (
+            await tx
+              .select()
+              .from(schema.paymentTransaction)
+              .where(
+                and(
+                  eq(schema.paymentTransaction.salesInvoiceId, id),
+                  eq(schema.paymentTransaction.notes, INLINE_PAYMENT_NOTE),
+                  isNull(schema.paymentTransaction.cancelledAt),
+                ),
+              )
+              .limit(1)
+          )[0] ?? null
+        // Fallback for invoices made before this feature: the up-front payment isn't
+        // tagged, so find the untagged payment created in the SAME transaction as the
+        // invoice (their createdAt timestamps are essentially identical; a payment
+        // added later from the Payments screen is seconds+ apart). We adjust & tag that
+        // row instead of leaving a stale duplicate. Read + tag only — never deletes.
+        if (!inline) {
+          const invCreated = originalInvoice.createdAt
+            ? new Date(originalInvoice.createdAt as any).getTime()
+            : 0
+          const candidates = await tx
+            .select()
+            .from(schema.paymentTransaction)
+            .where(
+              and(
+                eq(schema.paymentTransaction.salesInvoiceId, id),
+                eq(schema.paymentTransaction.type, 'PAYMENT_IN'),
+                isNull(schema.paymentTransaction.notes),
+                isNull(schema.paymentTransaction.cancelledAt),
+              ),
+            )
+            .orderBy(asc(schema.paymentTransaction.createdAt))
+          inline =
+            candidates.find(
+              (p) =>
+                !!invCreated &&
+                Math.abs(new Date(p.createdAt as any).getTime() - invCreated) < 5000,
+            ) ?? null
+        }
+        if (paid > 0) {
+          if (inline) {
+            // Tag it on touch so future edits find it directly.
+            await tx
+              .update(schema.paymentTransaction)
+              .set({ amount: paid, paymentDate: invDate, customerId, notes: INLINE_PAYMENT_NOTE })
+              .where(eq(schema.paymentTransaction.id, inline.id))
+          } else if (paid !== (originalInvoice.amountPaid ?? 0)) {
+            // No up-front payment row at all (e.g. a desktop-origin invoice) AND the
+            // paid amount changed → record it. Unchanged amount does nothing.
+            await tx.insert(schema.paymentTransaction).values({
+              type: 'PAYMENT_IN',
+              customerId,
+              amount: paid,
+              paymentMode,
+              paymentDate: invDate,
+              referenceType: 'INVOICE',
+              referenceId: id,
+              salesInvoiceId: id,
+              notes: INLINE_PAYMENT_NOTE,
+            })
+          }
+        } else if (inline) {
+          await tx
+            .update(schema.paymentTransaction)
+            .set({ cancelledAt: new Date(), cancelReason: 'Invoice marked unpaid' })
+            .where(eq(schema.paymentTransaction.id, inline.id))
+        }
       })
+
+      markClean()
 
       router.back()
     } catch (e) {
@@ -396,13 +523,14 @@ export default function EditInvoiceScreen() {
 
       <SectionHeader>Invoice Details</SectionHeader>
 
-      <Field
-        label="Invoice # *"
-        value={invoiceNumber}
-        onChangeText={setInvoiceNumber}
-        placeholder="Invoice number"
-        autoCapitalize="characters"
-      />
+      {/* Immutable once issued (D13): GST numbering must never fork after a
+          document exists — and sync renumbers collisions itself, so a
+          hand-edited number would fight it. Mirrors the purchase edit screen. */}
+      <ThemedText style={styles.label}>Invoice #</ThemedText>
+      <View style={styles.lockedField}>
+        <ThemedText style={styles.lockedText}>{invoiceNumber}</ThemedText>
+        <ThemedText style={styles.lockedHint}>locked</ThemedText>
+      </View>
 
       <ThemedText style={styles.label}>Customer *</ThemedText>
       <Pressable style={styles.picker} onPress={() => setShowCustomerPicker(true)}>
@@ -514,14 +642,25 @@ export default function EditInvoiceScreen() {
           <ThemedText>₹{taxAmount.toFixed(2)}</ThemedText>
         </View>
         <View style={styles.totalsRow}>
+          <ThemedText>Discount</ThemedText>
+          <TextInput
+            style={styles.discountInput}
+            value={docDiscount}
+            onChangeText={setDocDiscount}
+            keyboardType="numeric"
+            placeholder="0"
+            placeholderTextColor="#999"
+          />
+        </View>
+        <View style={styles.totalsRow}>
           <ThemedText type="defaultSemiBold">Total</ThemedText>
           <ThemedText type="defaultSemiBold">₹{total.toFixed(2)}</ThemedText>
         </View>
-        {amountPaid > 0 && (
+        {paid > 0 && (
           <>
             <View style={styles.totalsRow}>
-              <ThemedText>Already Paid</ThemedText>
-              <ThemedText>₹{amountPaid.toFixed(2)}</ThemedText>
+              <ThemedText>Amount Paid</ThemedText>
+              <ThemedText>₹{paid.toFixed(2)}</ThemedText>
             </View>
             <View style={styles.totalsRow}>
               <ThemedText>Balance Due</ThemedText>
@@ -530,6 +669,36 @@ export default function EditInvoiceScreen() {
           </>
         )}
       </ThemedView>
+
+      <SectionHeader>Payment</SectionHeader>
+      {/* Amount Paid is driven by the Status: editable only for Partial; Paid uses the
+          full total, Unpaid/Overdue zero — both locked, so it can't disagree with the
+          status. */}
+      {status === 'PARTIAL' ? (
+        <Field
+          label="Amount Paid (₹)"
+          value={amountPaidInput}
+          onChangeText={setAmountPaidInput}
+          keyboardType="numeric"
+        />
+      ) : (
+        <>
+          <ThemedText style={styles.label}>Amount Paid (₹)</ThemedText>
+          <View style={styles.picker}>
+            <ThemedText style={styles.placeholder}>
+              ₹{(status === 'PAID' ? total : 0).toFixed(2)} — set by status
+            </ThemedText>
+          </View>
+        </>
+      )}
+      {(status === 'PAID' || status === 'PARTIAL') && (
+        <>
+          <ThemedText style={styles.label}>Payment Mode</ThemedText>
+          <Pressable style={styles.picker} onPress={() => setShowPaymentModePicker(true)}>
+            <ThemedText>{paymentMode}</ThemedText>
+          </Pressable>
+        </>
+      )}
 
       <SectionHeader>Notes & Terms</SectionHeader>
       <Field
@@ -604,8 +773,10 @@ export default function EditInvoiceScreen() {
             <ThemedText type="title" style={styles.modalTitle}>
               Select Customer
             </ThemedText>
-            <FlatList
+            <PickerSearchList
               data={customers}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.phone]}
               keyExtractor={(c) => c.id}
               ListEmptyComponent={
                 <ThemedText style={styles.modalEmpty}>
@@ -638,8 +809,10 @@ export default function EditInvoiceScreen() {
             <ThemedText type="title" style={styles.modalTitle}>
               Select Item
             </ThemedText>
-            <FlatList
+            <PickerSearchList
               data={items}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.hsnCode, x.skuHsn]}
               keyExtractor={(it) => it.id}
               ListEmptyComponent={
                 <ThemedText style={styles.modalEmpty}>
@@ -686,6 +859,36 @@ export default function EditInvoiceScreen() {
               )}
             />
             <Pressable style={styles.modalClose} onPress={() => setShowStatusPicker(false)}>
+              <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
+            </Pressable>
+          </ThemedView>
+        </View>
+      </Modal>
+
+      <Modal visible={showPaymentModePicker} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <ThemedView style={styles.modalContent}>
+            <ThemedText type="title" style={styles.modalTitle}>
+              Payment Mode
+            </ThemedText>
+            <FlatList
+              data={PAYMENT_MODE_OPTIONS}
+              keyExtractor={(opt) => opt}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={styles.modalRow}
+                  onPress={() => {
+                    setPaymentMode(item)
+                    setShowPaymentModePicker(false)
+                  }}
+                >
+                  <ThemedText type={item === paymentMode ? 'defaultSemiBold' : undefined}>
+                    {item === paymentMode ? `✓ ${item}` : item}
+                  </ThemedText>
+                </Pressable>
+              )}
+            />
+            <Pressable style={styles.modalClose} onPress={() => setShowPaymentModePicker(false)}>
               <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
             </Pressable>
           </ThemedView>
@@ -772,6 +975,31 @@ const styles = StyleSheet.create({
     color: '#000',
     backgroundColor: '#fff',
   },
+  discountInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    fontSize: 15,
+    color: '#000',
+    backgroundColor: '#fff',
+    minWidth: 90,
+    textAlign: 'right',
+  },
+  lockedField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    backgroundColor: '#f0f0f0',
+  },
+  lockedText: { fontSize: 16, color: '#111827' },
+  lockedHint: { fontSize: 12, opacity: 0.5 },
   lineAmountRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

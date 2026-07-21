@@ -127,7 +127,7 @@ export interface SupplierItem {
 }
 
 export type SalesDocumentType = 'INVOICE'
-export type InvoiceStatus = 'DRAFT' | 'PAID' | 'PARTIAL' | 'OVERDUE'
+export type InvoiceStatus = 'DRAFT' | 'PAID' | 'PARTIAL' | 'OVERDUE' | 'REVERSED'
 export type QuotationStatus = 'DRAFT' | 'SENT' | 'ACCEPTED' | 'REJECTED' | 'EXPIRED'
 export type ProformaInvoiceStatus = QuotationStatus
 export type SalesDocumentStatus = InvoiceStatus | QuotationStatus
@@ -171,6 +171,7 @@ export interface SalesInvoice {
   items: SalesInvoiceItem[]
   createdAt: string
   updatedAt: string
+  cancelledAt?: string | null
 }
 
 export interface SalesInvoiceItem {
@@ -608,6 +609,34 @@ declare global {
         }>
         upload: () => Promise<{ success: boolean; error?: string }>
         download: () => Promise<{ success: boolean; error?: string }>
+        rowSyncNow: (confirmRemovals?: boolean) => Promise<{
+          success: boolean
+          error?: string
+          needsConfirmation?: boolean
+          removalsPending?: number
+          pushedPackets?: number
+          applied?: number
+          skipped?: number
+          localRenumbers?: number
+          removalsApplied?: number
+          recomputeChanges?: number
+          photosPushed?: number
+          log?: { kind: string; table: string; rowId: string; detail: string }[]
+        }>
+        getSyncActivityLog: () => Promise<{
+          at: number
+          kind: string
+          table?: string
+          rowId?: string
+          detail: string
+        }[]>
+        getRowSyncStatus: () => Promise<{
+          lastSyncAt: number | null
+          pendingRemovals: number | null
+        }>
+        fetchBillImage: (billId: string) => Promise<{ success: boolean; error?: string }>
+        getLadderInfo: () => Promise<{ name: string; modifiedTime: string | null; size: number | null }[]>
+        restoreFromLadder: (slotName: string) => Promise<{ success: boolean; error?: string }>
         getBackupInfo: () => Promise<{
           cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
           thisDeviceLastUpload: string | null
@@ -615,6 +644,10 @@ declare global {
         }>
         setBackupFrequency: (freq: 'off' | 'daily' | 'weekly' | 'monthly') => Promise<{ success: boolean }>
         onSyncStatusChange: (callback: (status: SyncStatus) => void) => void
+      }
+      log: {
+        openFolder: () => Promise<{ success: boolean }>
+        send: (level: string, message: string) => Promise<{ success: boolean }>
       }
       company: {
         get: () => Promise<{ success: boolean; data?: Company; error?: string }>
@@ -667,7 +700,8 @@ declare global {
         getById: (id: string) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         create: (data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
         update: (id: string, data: any) => Promise<{ success: boolean; data?: SalesInvoice; error?: string }>
-        delete: (id: string) => Promise<{ success: boolean; error?: string }>
+        cancel: (id: string) => Promise<{ success: boolean; error?: string }>
+        cancelWithCreditNote: (id: string, payload: { noteNumber: string; noteDate?: string; reason?: string }) => Promise<{ success: boolean; data?: any; error?: string }>
         generateInvoiceNumber: () => Promise<{ success: boolean; data?: string; error?: string }>
         generatePDF: (id: string) => Promise<{ success: boolean; message?: string; error?: string }>
       }

@@ -930,17 +930,13 @@ const CreditNotes = () => {
                         <div key={index} className="flex gap-3 items-end p-4 bg-gray-50 dark:bg-gray-900/40 rounded-lg">
                           <div className="flex-1">
                             <label className="label text-xs">Item</label>
-                            <select
-                              className="input"
+                            <SearchableSelect
                               value={item.itemId}
-                              onChange={(e) => updateNoteItem(index, 'itemId', e.target.value)}
+                              onChange={(id) => updateNoteItem(index, 'itemId', id)}
+                              options={items.map((i) => ({ id: i.id, name: i.name, subtitle: i.hsnCode || i.skuHsn || undefined }))}
+                              placeholder="Select Item"
                               required
-                            >
-                              <option value="">Select Item</option>
-                              {items.map(i => (
-                                <option key={i.id} value={i.id}>{i.name}</option>
-                              ))}
-                            </select>
+                            />
                           </div>
 
                           <div className="w-32">

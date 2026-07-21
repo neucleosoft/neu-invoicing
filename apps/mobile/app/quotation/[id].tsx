@@ -78,6 +78,7 @@ export default function QuotationDetailScreen() {
                 await createInvoiceFromSource(
                   tx,
                   {
+                    id: quote!.id,
                     customerId: quote!.customerId,
                     subtotal: quote!.subtotal,
                     discount: quote!.discount,
@@ -174,7 +175,7 @@ export default function QuotationDetailScreen() {
         {isDeleted ? (
           <ThemedView style={styles.deletedBanner}>
             <ThemedText style={styles.deletedBannerText}>
-              This quotation is deleted — it's left out of totals and reports. Restore it to use it again.
+              This quotation is deleted — it&apos;s left out of totals and reports. Restore it to use it again.
             </ThemedText>
           </ThemedView>
         ) : null}

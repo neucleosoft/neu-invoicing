@@ -58,6 +58,7 @@ export default function ProformaDetailScreen() {
             const sourceLines: SourceLine[] = its.map((l) => ({ itemId: l.itemId, quantity: l.quantity, rate: l.rate, discount: l.discount, taxRate: l.taxRate, total: l.total, hsnCode: l.hsnCode, taxableAmount: l.taxableAmount }))
             await db.transaction(async (tx) => {
               await createInvoiceFromSource(tx, {
+                id: doc!.id,
                 customerId: doc!.customerId,
                 subtotal: doc!.subtotal,
                 discount: doc!.discount,
@@ -125,7 +126,7 @@ export default function ProformaDetailScreen() {
         {isDeleted ? (
           <ThemedView style={styles.deletedBanner}>
             <ThemedText style={styles.deletedBannerText}>
-              This proforma is deleted — it's left out of totals and reports. Restore it to use it again.
+              This proforma is deleted — it&apos;s left out of totals and reports. Restore it to use it again.
             </ThemedText>
           </ThemedView>
         ) : null}

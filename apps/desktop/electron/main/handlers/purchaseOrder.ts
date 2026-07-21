@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { and, desc, eq, inArray, notInArray } from '@neu/shared'
+import { getDb, schema } from '../db'
 import { notDeleted } from './softDelete'
 
 // Mirrors normalizeItemName in purchase.ts so dedupe behavior is consistent
@@ -14,35 +15,86 @@ function normalizeItemName(name: string): string {
     .trim()
 }
 
-const purchaseOrderInclude = {
-  supplier: true,
-  items: {
-    include: {
-      supplierItem: { include: { linkedItem: true } },
-    },
-  },
-  // Bills referencing this PO. The frontend uses .length to decide whether the PO
-  // can be edited/closed/deleted, and to surface "X bills against this PO" hints.
-  bills: { select: { id: true, billNumber: true, billDate: true, totalAmount: true, status: true } },
-} as const
+type Db = ReturnType<typeof getDb>
+
+// The drizzle replacement for the old purchaseOrderInclude: supplier + items
+// (each with supplierItem + its linkedItem) + the bills referencing the PO
+// (the frontend uses bills.length to gate edit/close/delete).
+async function attachPORelations(db: Db, orders: any[]): Promise<any[]> {
+  if (orders.length === 0) return []
+
+  const supplierIds = [...new Set(orders.map((o) => o.supplierId).filter(Boolean))]
+  const suppliers = supplierIds.length
+    ? await db.select().from(schema.supplier).where(inArray(schema.supplier.id, supplierIds))
+    : []
+  const supplierById = new Map(suppliers.map((s: any) => [s.id, s]))
+
+  const orderIds = orders.map((o) => o.id)
+  const lines: any[] = await db
+    .select()
+    .from(schema.purchaseOrderItem)
+    .where(inArray(schema.purchaseOrderItem.purchaseOrderId, orderIds))
+
+  const supplierItemIds = [...new Set(lines.map((l) => l.supplierItemId).filter(Boolean))]
+  const supplierItems: any[] = supplierItemIds.length
+    ? await db.select().from(schema.supplierItem).where(inArray(schema.supplierItem.id, supplierItemIds))
+    : []
+  const linkedItemIds = [...new Set(supplierItems.map((si) => si.linkedItemId).filter(Boolean))]
+  const linkedItems: any[] = linkedItemIds.length
+    ? await db.select().from(schema.item).where(inArray(schema.item.id, linkedItemIds))
+    : []
+  const linkedById = new Map(linkedItems.map((i) => [i.id, i]))
+  const supplierItemById = new Map(
+    supplierItems.map((si) => [si.id, { ...si, linkedItem: si.linkedItemId ? (linkedById.get(si.linkedItemId) ?? null) : null }]),
+  )
+
+  const bills: any[] = await db
+    .select({
+      id: schema.purchaseBill.id,
+      billNumber: schema.purchaseBill.billNumber,
+      billDate: schema.purchaseBill.billDate,
+      totalAmount: schema.purchaseBill.totalAmount,
+      status: schema.purchaseBill.status,
+      purchaseOrderId: schema.purchaseBill.purchaseOrderId,
+    })
+    .from(schema.purchaseBill)
+    .where(inArray(schema.purchaseBill.purchaseOrderId, orderIds))
+
+  const linesByOrder = new Map<string, any[]>()
+  for (const l of lines) {
+    const withSupplierItem = { ...l, supplierItem: l.supplierItemId ? (supplierItemById.get(l.supplierItemId) ?? null) : null }
+    if (!linesByOrder.has(l.purchaseOrderId)) linesByOrder.set(l.purchaseOrderId, [])
+    linesByOrder.get(l.purchaseOrderId)!.push(withSupplierItem)
+  }
+  const billsByOrder = new Map<string, any[]>()
+  for (const b of bills) {
+    if (!billsByOrder.has(b.purchaseOrderId)) billsByOrder.set(b.purchaseOrderId, [])
+    billsByOrder.get(b.purchaseOrderId)!.push(b)
+  }
+
+  return orders.map((o) => ({
+    ...o,
+    supplier: o.supplierId ? (supplierById.get(o.supplierId) ?? null) : null,
+    items: linesByOrder.get(o.id) ?? [],
+    bills: billsByOrder.get(o.id) ?? [],
+  }))
+}
 
 async function resolveSupplierItem(tx: any, supplierId: string, item: any) {
   if (item.supplierItemId) {
-    const supplierItem = await tx.supplierItem.findUnique({
-      where: { id: item.supplierItemId },
-      include: { linkedItem: true },
-    })
+    const [supplierItem] = await tx.select().from(schema.supplierItem).where(eq(schema.supplierItem.id, item.supplierItemId)).limit(1)
     if (!supplierItem) throw new Error('Supplier item not found')
-    return supplierItem
+    return await withLinkedItem(tx, supplierItem)
   }
 
   if (item.itemId) {
     // itemId from the form's per-supplier dropdown — same id-space as supplierItem.id
-    const byId = await tx.supplierItem.findFirst({
-      where: { id: item.itemId, supplierId },
-      include: { linkedItem: true },
-    })
-    if (byId) return byId
+    const [byId] = await tx
+      .select()
+      .from(schema.supplierItem)
+      .where(and(eq(schema.supplierItem.id, item.itemId), eq(schema.supplierItem.supplierId, supplierId)))
+      .limit(1)
+    if (byId) return await withLinkedItem(tx, byId)
   }
 
   const extractedName: string = item._extractedName || item.name || ''
@@ -51,25 +103,29 @@ async function resolveSupplierItem(tx: any, supplierId: string, item: any) {
   }
 
   // Fuzzy dedupe on the supplier's catalog
-  const candidates = await tx.supplierItem.findMany({
-    where: { supplierId },
-    include: { linkedItem: true },
-  })
+  const candidates: any[] = await tx.select().from(schema.supplierItem).where(eq(schema.supplierItem.supplierId, supplierId))
   const target = normalizeItemName(extractedName)
   const existing = candidates.find((c: any) => normalizeItemName(c.name) === target)
-  if (existing) return existing
+  if (existing) return await withLinkedItem(tx, existing)
 
-  return tx.supplierItem.create({
-    data: {
+  const [created] = await tx
+    .insert(schema.supplierItem)
+    .values({
       supplierId,
       name: extractedName,
       hsnCode: item.hsnCode || null,
       unit: 'pcs',
       lastPurchasePrice: item.rate || 0,
       defaultTaxRate: item.taxRate || 0,
-    },
-    include: { linkedItem: true },
-  })
+    })
+    .returning()
+  return { ...created, linkedItem: null }
+}
+
+async function withLinkedItem(tx: any, supplierItem: any) {
+  if (!supplierItem.linkedItemId) return { ...supplierItem, linkedItem: null }
+  const [linked] = await tx.select().from(schema.item).where(eq(schema.item.id, supplierItem.linkedItemId)).limit(1)
+  return { ...supplierItem, linkedItem: linked ?? null }
 }
 
 async function normalizeOrderItems(tx: any, supplierId: string, items: any[]) {
@@ -92,15 +148,20 @@ async function normalizeOrderItems(tx: any, supplierId: string, items: any[]) {
 }
 
 export const setupPurchaseOrderHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
+
+  const loadOrderFull = async (id: string) => {
+    const [header] = await db.select().from(schema.purchaseOrder).where(eq(schema.purchaseOrder.id, id)).limit(1)
+    if (!header) return null
+    const [order] = await attachPORelations(db, [header])
+    return order
+  }
 
   // List all POs (most-recent first)
   ipcMain.handle('purchaseOrder:getAll', async () => {
     try {
-      const orders = await prisma.purchaseOrder.findMany({
-        include: purchaseOrderInclude,
-        orderBy: { orderDate: 'desc' },
-      })
+      const headers = await db.select().from(schema.purchaseOrder).orderBy(desc(schema.purchaseOrder.orderDate))
+      const orders = await attachPORelations(db, headers)
       return { success: true, data: orders }
     } catch (error) {
       return {
@@ -112,10 +173,7 @@ export const setupPurchaseOrderHandlers = () => {
 
   ipcMain.handle('purchaseOrder:getById', async (_, id: string) => {
     try {
-      const order = await prisma.purchaseOrder.findUnique({
-        where: { id },
-        include: purchaseOrderInclude,
-      })
+      const order = await loadOrderFull(id)
       return { success: true, data: order }
     } catch (error) {
       return {
@@ -127,7 +185,7 @@ export const setupPurchaseOrderHandlers = () => {
 
   ipcMain.handle('purchaseOrder:create', async (_, data) => {
     try {
-      const order = await prisma.$transaction(async (tx: any) => {
+      const createdId = await db.transaction(async (tx) => {
         const supplierId = data.supplierId
         const normalizedItems = await normalizeOrderItems(tx, supplierId, data.items)
 
@@ -145,8 +203,9 @@ export const setupPurchaseOrderHandlers = () => {
         const taxAmount = taxOverrideProvided ? data.taxAmount : computedTax
         const totalAmount = subtotal + taxAmount - (data.discount || 0)
 
-        return tx.purchaseOrder.create({
-          data: {
+        const [order] = await tx
+          .insert(schema.purchaseOrder)
+          .values({
             orderNumber: data.orderNumber,
             orderDate: new Date(data.orderDate),
             expectedDate: data.expectedDate ? new Date(data.expectedDate) : null,
@@ -164,23 +223,18 @@ export const setupPurchaseOrderHandlers = () => {
             status: data.status || 'DRAFT',
             notes: data.notes,
             termsConditions: data.termsConditions,
-            items: {
-              create: normalizedItems.map((it) => ({
-                supplierItemId: it.supplierItemId,
-                hsnCode: it.hsnCode,
-                quantity: it.quantity,
-                rate: it.rate,
-                discount: it.discount,
-                taxRate: it.taxRate,
-                total: it.total,
-                taxableAmount: it.taxableAmount,
-              })),
-            },
-          },
-          include: purchaseOrderInclude,
-        })
+          })
+          .returning({ id: schema.purchaseOrder.id })
+
+        if (normalizedItems.length) {
+          await tx
+            .insert(schema.purchaseOrderItem)
+            .values(normalizedItems.map((it) => ({ ...it, purchaseOrderId: order.id })))
+        }
+        return order.id
       })
 
+      const order = await loadOrderFull(createdId)
       return { success: true, data: order }
     } catch (error) {
       return {
@@ -192,8 +246,8 @@ export const setupPurchaseOrderHandlers = () => {
 
   ipcMain.handle('purchaseOrder:update', async (_, id: string, data) => {
     try {
-      const order = await prisma.$transaction(async (tx: any) => {
-        const existing = await tx.purchaseOrder.findUnique({ where: { id }, include: { items: true } })
+      await db.transaction(async (tx) => {
+        const [existing] = await tx.select().from(schema.purchaseOrder).where(eq(schema.purchaseOrder.id, id)).limit(1)
         if (!existing) throw new Error('Purchase order not found')
 
         const supplierId = data.supplierId
@@ -213,11 +267,11 @@ export const setupPurchaseOrderHandlers = () => {
         const totalAmount = subtotal + taxAmount - (data.discount || 0)
 
         // Wipe + recreate items (same approach as PurchaseBill update)
-        await tx.purchaseOrderItem.deleteMany({ where: { purchaseOrderId: id } })
+        await tx.delete(schema.purchaseOrderItem).where(eq(schema.purchaseOrderItem.purchaseOrderId, id))
 
-        return tx.purchaseOrder.update({
-          where: { id },
-          data: {
+        await tx
+          .update(schema.purchaseOrder)
+          .set({
             orderDate: new Date(data.orderDate),
             expectedDate: data.expectedDate ? new Date(data.expectedDate) : null,
             supplierId,
@@ -234,23 +288,17 @@ export const setupPurchaseOrderHandlers = () => {
             status: data.status ?? existing.status,
             notes: data.notes,
             termsConditions: data.termsConditions,
-            items: {
-              create: normalizedItems.map((it) => ({
-                supplierItemId: it.supplierItemId,
-                hsnCode: it.hsnCode,
-                quantity: it.quantity,
-                rate: it.rate,
-                discount: it.discount,
-                taxRate: it.taxRate,
-                total: it.total,
-                taxableAmount: it.taxableAmount,
-              })),
-            },
-          },
-          include: purchaseOrderInclude,
-        })
+          })
+          .where(eq(schema.purchaseOrder.id, id))
+
+        if (normalizedItems.length) {
+          await tx
+            .insert(schema.purchaseOrderItem)
+            .values(normalizedItems.map((it) => ({ ...it, purchaseOrderId: id })))
+        }
       })
 
+      const order = await loadOrderFull(id)
       return { success: true, data: order }
     } catch (error) {
       return {
@@ -262,18 +310,14 @@ export const setupPurchaseOrderHandlers = () => {
 
   ipcMain.handle('purchaseOrder:delete', async (_, id: string) => {
     try {
-      const order = await prisma.purchaseOrder.findUnique({ where: { id } })
-
+      const [order] = await db.select({ id: schema.purchaseOrder.id }).from(schema.purchaseOrder).where(eq(schema.purchaseOrder.id, id)).limit(1)
       if (!order) {
         throw new Error('Purchase order not found')
       }
 
-      // Soft-delete: stamp deletedAt (updatedAt auto-bumps). The header and its
-      // line items stay put so a restore brings the whole document back intact.
-      await prisma.purchaseOrder.update({
-        where: { id },
-        data: { deletedAt: new Date() },
-      })
+      // Soft-delete: stamp deletedAt (updatedAt + hlc auto-bump). The header and
+      // its line items stay put so a restore brings the whole document back intact.
+      await db.update(schema.purchaseOrder).set({ deletedAt: new Date() }).where(eq(schema.purchaseOrder.id, id))
 
       return { success: true }
     } catch (error) {
@@ -286,16 +330,12 @@ export const setupPurchaseOrderHandlers = () => {
 
   ipcMain.handle('purchaseOrder:restore', async (_, id: string) => {
     try {
-      const order = await prisma.purchaseOrder.findUnique({ where: { id } })
-
+      const [order] = await db.select({ id: schema.purchaseOrder.id }).from(schema.purchaseOrder).where(eq(schema.purchaseOrder.id, id)).limit(1)
       if (!order) {
         throw new Error('Purchase order not found')
       }
 
-      await prisma.purchaseOrder.update({
-        where: { id },
-        data: { deletedAt: null },
-      })
+      await db.update(schema.purchaseOrder).set({ deletedAt: null }).where(eq(schema.purchaseOrder.id, id))
 
       return { success: true }
     } catch (error) {
@@ -309,9 +349,11 @@ export const setupPurchaseOrderHandlers = () => {
   // Auto-numbering: PO-YYYY-NNN
   ipcMain.handle('purchaseOrder:generateOrderNumber', async () => {
     try {
-      const last = await prisma.purchaseOrder.findFirst({
-        orderBy: { orderNumber: 'desc' },
-      })
+      const [last] = await db
+        .select({ orderNumber: schema.purchaseOrder.orderNumber })
+        .from(schema.purchaseOrder)
+        .orderBy(desc(schema.purchaseOrder.orderNumber))
+        .limit(1)
       const year = new Date().getFullYear()
       const lastNum = last ? parseInt(last.orderNumber.split('-').pop() || '0') : 0
       return { success: true, data: `PO-${year}-${String(lastNum + 1).padStart(3, '0')}` }
@@ -331,42 +373,40 @@ export const setupPurchaseOrderHandlers = () => {
     'purchaseOrder:markAsReceived',
     async (_, id: string, lineUpdates: Array<{ lineId: string; receivedQuantity: number }>) => {
       try {
-        const order = await prisma.$transaction(async (tx: any) => {
-          const existing = await tx.purchaseOrder.findUnique({
-            where: { id },
-            include: { items: true },
-          })
+        await db.transaction(async (tx) => {
+          const [existing] = await tx.select().from(schema.purchaseOrder).where(eq(schema.purchaseOrder.id, id)).limit(1)
           if (!existing) throw new Error('Purchase order not found')
+          const items: any[] = await tx
+            .select()
+            .from(schema.purchaseOrderItem)
+            .where(eq(schema.purchaseOrderItem.purchaseOrderId, id))
 
           // Apply each line update. Clamp received to [0, ordered] so a fat-finger
           // doesn't show "received 1000 of 10."
           const updateMap = new Map(lineUpdates.map((u) => [u.lineId, u.receivedQuantity]))
-          for (const line of existing.items) {
+          for (const line of items) {
             if (!updateMap.has(line.id)) continue
             const requested = updateMap.get(line.id) || 0
             const clamped = Math.max(0, Math.min(requested, line.quantity))
-            await tx.purchaseOrderItem.update({
-              where: { id: line.id },
-              data: { receivedQuantity: clamped },
-            })
+            await tx
+              .update(schema.purchaseOrderItem)
+              .set({ receivedQuantity: clamped })
+              .where(eq(schema.purchaseOrderItem.id, line.id))
           }
 
           // Re-read items so the status math sees the updated values
-          const refreshed = await tx.purchaseOrder.findUnique({
-            where: { id },
-            include: { items: true },
-          })
-          const allReceived = refreshed.items.every((it: any) => it.receivedQuantity >= it.quantity)
-          const anyReceived = refreshed.items.some((it: any) => it.receivedQuantity > 0)
-          const newStatus = allReceived ? 'RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : refreshed.status
+          const refreshed: any[] = await tx
+            .select()
+            .from(schema.purchaseOrderItem)
+            .where(eq(schema.purchaseOrderItem.purchaseOrderId, id))
+          const allReceived = refreshed.every((it: any) => it.receivedQuantity >= it.quantity)
+          const anyReceived = refreshed.some((it: any) => it.receivedQuantity > 0)
+          const newStatus = allReceived ? 'RECEIVED' : anyReceived ? 'PARTIALLY_RECEIVED' : existing.status
 
-          return tx.purchaseOrder.update({
-            where: { id },
-            data: { status: newStatus },
-            include: purchaseOrderInclude,
-          })
+          await tx.update(schema.purchaseOrder).set({ status: newStatus }).where(eq(schema.purchaseOrder.id, id))
         })
 
+        const order = await loadOrderFull(id)
         return { success: true, data: order }
       } catch (error) {
         return {
@@ -381,15 +421,16 @@ export const setupPurchaseOrderHandlers = () => {
   // Used by the Purchase Bill form to let users link a new bill to an existing PO.
   ipcMain.handle('purchaseOrder:listOpenForSupplier', async (_, supplierId: string) => {
     try {
-      const orders = await prisma.purchaseOrder.findMany({
-        where: {
-          supplierId,
-          status: { notIn: ['CLOSED', 'CANCELLED'] },
-          ...notDeleted,
-        },
-        include: purchaseOrderInclude,
-        orderBy: { orderDate: 'desc' },
-      })
+      const headers = await db
+        .select()
+        .from(schema.purchaseOrder)
+        .where(and(
+          eq(schema.purchaseOrder.supplierId, supplierId),
+          notInArray(schema.purchaseOrder.status, ['CLOSED', 'CANCELLED']),
+          notDeleted(schema.purchaseOrder.deletedAt),
+        ))
+        .orderBy(desc(schema.purchaseOrder.orderDate))
+      const orders = await attachPORelations(db, headers)
       return { success: true, data: orders }
     } catch (error) {
       return {

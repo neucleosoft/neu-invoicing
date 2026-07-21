@@ -2,17 +2,22 @@ import { eq } from 'drizzle-orm'
 import { Image } from 'expo-image'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { Alert, Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 
 import { PdfActions } from '@/components/PdfActions'
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { useAuth } from '@/auth'
 import { schema, useDb } from '@/db'
+import { ensureBillAttachment } from '@/sync/imageStore'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
+import { createPayment } from '@/utils/paymentSave'
 import { buildPurchaseBillPdfPayload } from '@/utils/purchaseBillPdf'
 import { cancelPurchaseBill } from '@/utils/purchaseSave'
+
+const PAY_MODES = ['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE'] as const
 
 type PurchaseBill = typeof schema.purchaseBill.$inferSelect
 type PurchaseBillItem = typeof schema.purchaseBillItem.$inferSelect
@@ -28,6 +33,7 @@ type LineWithName = PurchaseBillItem & { name: string }
 export default function PurchaseDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const db = useDb()
+  const { getFreshAccessToken } = useAuth()
   const onEdit = () => router.push({ pathname: '/purchase/edit/[id]', params: { id } })
 
   const [bill, setBill] = useState<PurchaseBill | null>(null)
@@ -37,6 +43,16 @@ export default function PurchaseDetailScreen() {
   // Data URI of the attached bill photo, built once from the stored blob.
   const [photoUri, setPhotoUri] = useState<string | null>(null)
   const [showPhoto, setShowPhoto] = useState(false)
+  const [linkedPoNumber, setLinkedPoNumber] = useState<string | null>(null)
+
+  // Record-payment-against-THIS-bill (mirrors desktop's bill-detail action).
+  // Goes through the shared payment logic, so the bill's amountPaid/balanceDue/
+  // status and the supplier balance all move together.
+  const [showPayModal, setShowPayModal] = useState(false)
+  const [payAmountStr, setPayAmountStr] = useState('')
+  const [payMode, setPayMode] = useState<string>('CASH')
+  const [paySaving, setPaySaving] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     if (!id) {
@@ -61,6 +77,27 @@ export default function PurchaseDetailScreen() {
         const buf = b.attachmentData as unknown as { toString: (enc: string) => string }
         const base64 = buf.toString('base64')
         setPhotoUri(`data:${b.attachmentMimeType};base64,${base64}`)
+      } else if (b.attachmentMimeType && !b.attachmentData) {
+        // Synced-in bill: the photo lives on Drive as its own file (S4 image
+        // split) — fetch it lazily on first view, then it's local forever.
+        void (async () => {
+          const token = await getFreshAccessToken()
+          if (!token) return
+          if (await ensureBillAttachment(db, token, id)) {
+            const [fresh] = await db
+              .select({
+                attachmentData: schema.purchaseBill.attachmentData,
+                attachmentMimeType: schema.purchaseBill.attachmentMimeType,
+              })
+              .from(schema.purchaseBill)
+              .where(eq(schema.purchaseBill.id, id))
+              .limit(1)
+            if (fresh?.attachmentData && fresh.attachmentMimeType) {
+              const buf = fresh.attachmentData as unknown as { toString: (enc: string) => string }
+              setPhotoUri(`data:${fresh.attachmentMimeType};base64,${buf.toString('base64')}`)
+            }
+          }
+        })()
       }
 
       const [sup] = await db
@@ -69,6 +106,15 @@ export default function PurchaseDetailScreen() {
         .where(eq(schema.supplier.id, b.supplierId))
         .limit(1)
       setSupplierName(sup?.name ?? 'Unknown supplier')
+
+      if (b.purchaseOrderId) {
+        const [po] = await db
+          .select({ orderNumber: schema.purchaseOrder.orderNumber })
+          .from(schema.purchaseOrder)
+          .where(eq(schema.purchaseOrder.id, b.purchaseOrderId))
+          .limit(1)
+        setLinkedPoNumber(po?.orderNumber ?? null)
+      }
 
       const billItems = await db
         .select()
@@ -83,7 +129,40 @@ export default function PurchaseDetailScreen() {
       setLoading(false)
     }
     load()
-  }, [id, db])
+  }, [id, db, getFreshAccessToken, refreshKey])
+
+  async function handleRecordPayment() {
+    if (!bill) return
+    const amount = parseFloat(payAmountStr) || 0
+    if (amount <= 0) {
+      Alert.alert('Validation', 'Enter a payment amount')
+      return
+    }
+    if (amount > bill.balanceDue + 0.005) {
+      Alert.alert('Validation', `Amount exceeds the balance due (${formatCurrency(bill.balanceDue)})`)
+      return
+    }
+    setPaySaving(true)
+    try {
+      await createPayment(db, {
+        type: 'PAYMENT_OUT',
+        customerId: null,
+        supplierId: bill.supplierId,
+        amount,
+        paymentMode: payMode,
+        paymentDate: new Date(),
+        notes: `Payment for ${bill.billNumber}`,
+        purchaseBillId: bill.id,
+        referenceType: 'BILL',
+      })
+      setShowPayModal(false)
+      setRefreshKey((k) => k + 1)
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to record payment')
+    } finally {
+      setPaySaving(false)
+    }
+  }
 
   function handleCancel() {
     if (!id) return
@@ -140,7 +219,7 @@ export default function PurchaseDetailScreen() {
         {isCancelled ? (
           <ThemedView style={styles.cancelledBanner}>
             <ThemedText style={styles.cancelledBannerText}>
-              This bill is cancelled — its supplier balance and stock were reversed and it's left out of reports. It can't be restored.
+              This bill is cancelled — its supplier balance and stock were reversed and it&apos;s left out of reports. It can&apos;t be restored.
             </ThemedText>
           </ThemedView>
         ) : null}
@@ -171,6 +250,7 @@ export default function PurchaseDetailScreen() {
         <Section title="Bill">
           <Row label="Bill Date" value={formatDate(bill.billDate)} />
           <Row label="Supplier Inv. #" value={bill.supplierInvoiceNumber || '—'} />
+          {linkedPoNumber ? <Row label="Linked PO" value={linkedPoNumber} /> : null}
           {bill.supplierInvoiceDate ? (
             <Row label="Supplier Inv. Date" value={formatDate(bill.supplierInvoiceDate)} />
           ) : null}
@@ -202,6 +282,19 @@ export default function PurchaseDetailScreen() {
           <Row label="Balance Due" value={formatCurrency(bill.balanceDue)} />
         </Section>
 
+        {!isCancelled && bill.balanceDue > 0.005 ? (
+          <Pressable
+            style={styles.payButton}
+            onPress={() => {
+              setPayAmountStr(String(bill.balanceDue))
+              setPayMode('CASH')
+              setShowPayModal(true)
+            }}
+          >
+            <ThemedText style={styles.payButtonText}>Record Payment</ThemedText>
+          </Pressable>
+        ) : null}
+
         {bill.notes ? (
           <Section title="Notes">
             <ThemedText style={styles.notesText}>{bill.notes}</ThemedText>
@@ -229,6 +322,50 @@ export default function PurchaseDetailScreen() {
           </Pressable>
         </Modal>
       ) : null}
+
+      <Modal visible={showPayModal} transparent animationType="slide">
+        <View style={styles.payOverlay}>
+          <ThemedView style={styles.payCard}>
+            <ThemedText type="subtitle">Record Payment</ThemedText>
+            <ThemedText style={styles.payHint}>
+              Pays down this bill and the supplier&apos;s balance together.
+            </ThemedText>
+            <ThemedText style={styles.payLabel}>Amount (due {formatCurrency(bill.balanceDue)})</ThemedText>
+            <TextInput
+              value={payAmountStr}
+              onChangeText={setPayAmountStr}
+              keyboardType="decimal-pad"
+              style={styles.payInput}
+              placeholderTextColor="#999"
+            />
+            <View style={styles.payModes}>
+              {PAY_MODES.map((m) => (
+                <Pressable
+                  key={m}
+                  onPress={() => setPayMode(m)}
+                  style={[styles.payModeChip, payMode === m && styles.payModeChipActive]}
+                >
+                  <ThemedText style={payMode === m ? styles.payModeTextActive : styles.payModeText}>
+                    {m === 'BANK_TRANSFER' ? 'Bank' : m[0] + m.slice(1).toLowerCase()}
+                  </ThemedText>
+                </Pressable>
+              ))}
+            </View>
+            <View style={styles.payActions}>
+              <Pressable style={styles.payCancel} onPress={() => setShowPayModal(false)} disabled={paySaving}>
+                <ThemedText>Cancel</ThemedText>
+              </Pressable>
+              <Pressable
+                style={[styles.paySave, paySaving && styles.paySaveDisabled]}
+                onPress={handleRecordPayment}
+                disabled={paySaving}
+              >
+                <ThemedText style={styles.paySaveText}>{paySaving ? 'Saving…' : 'Save payment'}</ThemedText>
+              </Pressable>
+            </View>
+          </ThemedView>
+        </View>
+      </Modal>
     </ThemedView>
   )
 }
@@ -263,6 +400,58 @@ function Header({
 
 const styles = StyleSheet.create({
   container: { flex: 1, paddingTop: 60 },
+  payButton: {
+    backgroundColor: '#16a34a',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  payButtonText: { color: 'white', fontWeight: '600' },
+  payOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'flex-end',
+  },
+  payCard: {
+    borderTopLeftRadius: 16,
+    borderTopRightRadius: 16,
+    padding: 20,
+    paddingBottom: 36,
+    gap: 10,
+  },
+  payHint: { fontSize: 13, opacity: 0.7 },
+  payLabel: { fontSize: 13, opacity: 0.8, marginTop: 4 },
+  payInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    color: '#111827',
+    backgroundColor: '#f9fafb',
+  },
+  payModes: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  payModeChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
+  payModeChipActive: { backgroundColor: '#16a34a', borderColor: '#16a34a' },
+  payModeText: { fontSize: 13 },
+  payModeTextActive: { fontSize: 13, color: 'white', fontWeight: '600' },
+  payActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 16, marginTop: 8, alignItems: 'center' },
+  payCancel: { paddingVertical: 10, paddingHorizontal: 12 },
+  paySave: {
+    backgroundColor: '#16a34a',
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+  },
+  paySaveDisabled: { opacity: 0.5 },
+  paySaveText: { color: 'white', fontWeight: '600' },
   header: {
     flexDirection: 'row',
     alignItems: 'center',

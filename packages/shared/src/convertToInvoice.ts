@@ -26,6 +26,8 @@ import {
 import type { DrizzleTx } from './paymentLogic'
 
 // A source line as read from quotationItem / proformaInvoiceItem (same shape).
+// The GST-split fields are optional: pass the full source line through and the
+// new invoice line keeps the split; omit them and they default like a fresh line.
 export interface SourceLine {
   itemId: string
   quantity: number
@@ -35,9 +37,19 @@ export interface SourceLine {
   total: number
   hsnCode?: string | null
   taxableAmount?: number
+  cgstRate?: number | null
+  cgstAmount?: number | null
+  sgstRate?: number | null
+  sgstAmount?: number | null
+  igstRate?: number | null
+  igstAmount?: number | null
+  cessRate?: number | null
+  cessAmount?: number | null
 }
 
 export interface SourceDoc {
+  /** Source doc's primary key — seeds the new invoice's deterministic id. */
+  id: string
   customerId: string
   subtotal: number
   discount: number
@@ -48,9 +60,18 @@ export interface SourceDoc {
   placeOfSupply?: string | null
   placeOfSupplyName?: string | null
   isInterState?: boolean
+  reverseCharge?: boolean
   cgstAmount?: number
   sgstAmount?: number
   igstAmount?: number
+  cessAmount?: number
+  supplyType?: string | null
+  ecommerceGstin?: string | null
+  poNumber?: string | null
+  ewayBillNo?: string | null
+  vehicleNumber?: string | null
+  warrantyPeriod?: string | null
+  dispatchedThrough?: string | null
   lines: SourceLine[]
 }
 
@@ -106,6 +127,9 @@ export async function createInvoiceFromSource(
   const [created] = await tx
     .insert(salesInvoice)
     .values({
+      // Deterministic id: both devices converting this source doc offline
+      // mint the SAME invoice row — sync converges to one invoice, not two.
+      id: `conv-${source.id}`,
       invoiceNumber,
       invoiceDate: now,
       type: 'INVOICE',
@@ -122,9 +146,18 @@ export async function createInvoiceFromSource(
       placeOfSupply: source.placeOfSupply ?? null,
       placeOfSupplyName: source.placeOfSupplyName ?? null,
       isInterState: source.isInterState ?? false,
+      reverseCharge: source.reverseCharge ?? false,
       cgstAmount: source.cgstAmount ?? 0,
       sgstAmount: source.sgstAmount ?? 0,
       igstAmount: source.igstAmount ?? 0,
+      cessAmount: source.cessAmount ?? 0,
+      supplyType: source.supplyType ?? null,
+      ecommerceGstin: source.ecommerceGstin ?? null,
+      poNumber: source.poNumber ?? null,
+      ewayBillNo: source.ewayBillNo ?? null,
+      vehicleNumber: source.vehicleNumber ?? null,
+      warrantyPeriod: source.warrantyPeriod ?? null,
+      dispatchedThrough: source.dispatchedThrough ?? null,
       ...('convertedFromQuotationId' in ref
         ? { convertedFromQuotationId: ref.convertedFromQuotationId }
         : { convertedFromProformaId: ref.convertedFromProformaId }),
@@ -142,6 +175,14 @@ export async function createInvoiceFromSource(
       total: l.total,
       hsnCode: l.hsnCode ?? null,
       taxableAmount: l.taxableAmount ?? l.quantity * l.rate - l.discount,
+      cgstRate: l.cgstRate ?? 0,
+      cgstAmount: l.cgstAmount ?? 0,
+      sgstRate: l.sgstRate ?? 0,
+      sgstAmount: l.sgstAmount ?? 0,
+      igstRate: l.igstRate ?? 0,
+      igstAmount: l.igstAmount ?? 0,
+      cessRate: l.cessRate ?? 0,
+      cessAmount: l.cessAmount ?? 0,
     })
   }
 

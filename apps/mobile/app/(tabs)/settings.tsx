@@ -1,6 +1,8 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, DevSettings, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import * as SecureStore from 'expo-secure-store';
+import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
 
 import { ThemedText } from '@/components/themed-text';
@@ -15,10 +17,31 @@ import {
   restoreFromCloud,
   type CloudBackupInfo,
 } from '@/sync/drive';
-import { getOpenRouterKey, setOpenRouterKey } from '@/utils/billOcr';
+import { appendSyncActivity, getSyncActivity, type SyncActivityEntry } from '@/sync/activityLog';
+import { reloadDb } from '@/db/reload';
+import { setRestoreNotice } from '@/sync/restoreNotice';
+import { LAST_ROW_SYNC_KEY } from '@/sync/AutoSync';
+import { getLadderInfo, restoreFromLadder, type LadderRungInfo } from '@/sync/ladder';
+import { rowSyncNow } from '@/sync/rowSync';
+import { getBackupFrequency, setBackupFrequency, type BackupFrequency } from '@/sync/scheduledBackup';
+import { recomputeAll, type RecomputeReport } from '@/utils/recompute';
+import { clearPin, isPinSet, setPin, verifyPin } from '@/utils/appLock';
+import { getLogFileUri } from '@/utils/appLog';
+import { getSetting, setSetting } from '@/utils/appSettings';
+import { INVOICE_TEMPLATE_INFO, type InvoiceTemplate } from '@neu/shared';
+import {
+  PO_GENERAL_TERMS_DEFAULT,
+  PO_SETTINGS_KEYS,
+  PO_SPECIAL_INSTRUCTIONS_DEFAULT,
+} from '@/utils/poDefaults';
+import {
+  getThemePreference,
+  setThemePreference,
+  type ThemePreference,
+} from '@/hooks/theme-preference';
 
 export default function SettingsScreen() {
-  const { user, accessToken, signOut, signIn } = useAuth();
+  const { user, accessToken, getFreshAccessToken, signOut, signIn } = useAuth();
   const liveDb = useSQLiteContext();
   const db = useDb();
 
@@ -26,7 +49,119 @@ export default function SettingsScreen() {
   const [backupLoading, setBackupLoading] = useState(true);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
+  // Download progress (0-100) while restoring; null before the stream starts.
+  const [restorePct, setRestorePct] = useState<number | null>(null);
   const [backingUp, setBackingUp] = useState(false);
+  const [ladderInfo, setLadderInfo] = useState<LadderRungInfo[]>([]);
+  const [ladderRestoring, setLadderRestoring] = useState<string | null>(null);
+
+  // App lock (PIN). The PIN is stored as a salted hash in SecureStore; the
+  // lock screen itself lives in components/AppLockGate.tsx.
+  const [pinSet, setPinSet] = useState(false);
+  const [lockCurrent, setLockCurrent] = useState('');
+  const [lockNew, setLockNew] = useState('');
+  const [lockConfirm, setLockConfirm] = useState('');
+  const [lockBusy, setLockBusy] = useState(false);
+  useEffect(() => {
+    isPinSet().then(setPinSet);
+  }, []);
+
+  async function handleSavePin() {
+    if (lockNew.length < 4) {
+      Alert.alert('Validation', 'PIN must be at least 4 digits.');
+      return;
+    }
+    if (lockNew !== lockConfirm) {
+      Alert.alert('Validation', 'The two PINs do not match.');
+      return;
+    }
+    setLockBusy(true);
+    try {
+      if (pinSet && !(await verifyPin(lockCurrent))) {
+        Alert.alert('Wrong PIN', 'Enter your current PIN to change it.');
+        return;
+      }
+      await setPin(lockNew);
+      setPinSet(true);
+      setLockCurrent('');
+      setLockNew('');
+      setLockConfirm('');
+      Alert.alert('App lock on', 'The app now asks for this PIN on open and after 5 minutes in the background.');
+    } finally {
+      setLockBusy(false);
+    }
+  }
+
+  async function handleDisablePin() {
+    setLockBusy(true);
+    try {
+      if (!(await verifyPin(lockCurrent))) {
+        Alert.alert('Wrong PIN', 'Enter your current PIN to turn the lock off.');
+        return;
+      }
+      await clearPin();
+      setPinSet(false);
+      setLockCurrent('');
+      setLockNew('');
+      setLockConfirm('');
+      Alert.alert('App lock off', 'The app opens without a PIN now.');
+    } finally {
+      setLockBusy(false);
+    }
+  }
+
+  // Theme override (Appearance): light / dark / system, applied app-wide by
+  // the use-color-scheme hook.
+  const [themePref, setThemePrefState] = useState<ThemePreference>(getThemePreference());
+  function handleThemeChange(p: ThemePreference) {
+    setThemePrefState(p);
+    void setThemePreference(p);
+  }
+
+  // PO boilerplate (mirrors desktop Settings → Purchase Order Defaults) —
+  // stored in the Settings table, printed on every PO PDF.
+  const [poSpecial, setPoSpecial] = useState('');
+  const [poTerms, setPoTerms] = useState('');
+  const [poSaving, setPoSaving] = useState(false);
+
+  // Invoice template choice — same Settings-table key desktop uses
+  // ('invoiceTemplate'), so the pick follows the synced database.
+  const [invTemplate, setInvTemplate] = useState<InvoiceTemplate>('classic');
+  async function handleTemplateChange(t: InvoiceTemplate) {
+    setInvTemplate(t);
+    await setSetting(db, 'invoiceTemplate', t);
+  }
+
+  useEffect(() => {
+    (async () => {
+      setPoSpecial((await getSetting(db, PO_SETTINGS_KEYS.specialInstructions)) ?? PO_SPECIAL_INSTRUCTIONS_DEFAULT);
+      setPoTerms((await getSetting(db, PO_SETTINGS_KEYS.generalTerms)) ?? PO_GENERAL_TERMS_DEFAULT);
+      const t = await getSetting(db, 'invoiceTemplate');
+      if (t && t in INVOICE_TEMPLATE_INFO) setInvTemplate(t as InvoiceTemplate);
+    })();
+  }, [db]);
+  async function handleSavePoDefaults() {
+    setPoSaving(true);
+    try {
+      await setSetting(db, PO_SETTINGS_KEYS.specialInstructions, poSpecial);
+      await setSetting(db, PO_SETTINGS_KEYS.generalTerms, poTerms);
+      Alert.alert('Saved', 'These notes now print on every Purchase Order PDF.');
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Failed to save');
+    } finally {
+      setPoSaving(false);
+    }
+  }
+
+  // Automatic full-backup cadence (mirrors desktop's Automatic backup select).
+  const [backupFreq, setBackupFreqState] = useState<BackupFrequency>('off');
+  useEffect(() => {
+    getBackupFrequency().then(setBackupFreqState);
+  }, []);
+  async function handleFreqChange(freq: BackupFrequency) {
+    setBackupFreqState(freq);
+    await setBackupFrequency(freq);
+  }
 
   // Company name shown in the Business section. null = still loading, '' = no
   // company yet. Reloaded on focus so it updates after editing the profile.
@@ -41,35 +176,10 @@ export default function SettingsScreen() {
     }, [db]),
   );
 
-  // AI Bill Scan key. We show whether a key is saved (not the key itself), and
-  // let the user paste a new one or clear it. Stored in SecureStore by billOcr.
-  const [apiKeySaved, setApiKeySaved] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState('');
-  const [savingKey, setSavingKey] = useState(false);
-
-  useEffect(() => {
-    getOpenRouterKey().then((k) => setApiKeySaved(!!k));
-  }, []);
-
-  async function handleSaveKey() {
-    setSavingKey(true);
-    try {
-      await setOpenRouterKey(apiKeyInput);
-      setApiKeySaved(!!apiKeyInput.trim());
-      setApiKeyInput('');
-      Alert.alert(
-        apiKeyInput.trim() ? 'Key saved' : 'Key cleared',
-        apiKeyInput.trim()
-          ? 'You can now scan bill photos when creating a purchase bill.'
-          : 'AI bill scan is now turned off.',
-      );
-    } finally {
-      setSavingKey(false);
-    }
-  }
-
   // Auto-load cloud backup status when the screen opens so the user sees
   // "Last cloud backup: <date>" without having to tap anything first.
+  // getFreshAccessToken silently renews an expired badge, so this works days
+  // after sign-in instead of only within the first hour.
   useEffect(() => {
     if (!accessToken) {
       setBackupLoading(false);
@@ -78,8 +188,16 @@ export default function SettingsScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const info = await checkCloudBackup(accessToken);
+        const fresh = await getFreshAccessToken();
+        if (!fresh) throw new Error('Session expired — sign in again.');
+        const info = await checkCloudBackup(fresh);
         if (!cancelled) setBackupInfo(info);
+        // Time-machine rungs, best-effort — a ladder listing failure must not
+        // hide the main backup status.
+        try {
+          const rungs = await getLadderInfo(fresh);
+          if (!cancelled) setLadderInfo(rungs);
+        } catch { /* rung list stays empty */ }
       } catch (e) {
         if (!cancelled) setBackupError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -89,7 +207,7 @@ export default function SettingsScreen() {
     return () => {
       cancelled = true;
     };
-  }, [accessToken]);
+  }, [accessToken, getFreshAccessToken]);
 
   function formatBackupDate(iso: string): string {
     return new Date(iso).toLocaleString(undefined, {
@@ -123,11 +241,65 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: async () => {
             setRestoring(true);
+            setRestorePct(null);
             try {
-              await restoreFromCloud(accessToken, liveDb);
-              DevSettings.reload();
+              const fresh = await getFreshAccessToken();
+              if (!fresh) throw new Error('Session expired — sign in again.');
+              const info = await restoreFromCloud(fresh, liveDb, (f) => {
+                const pct = Math.round(f * 100);
+                // Functional set: same-percent updates skip the re-render, so
+                // the byte-level callback stream stays cheap.
+                setRestorePct((prev) => (prev === pct ? prev : pct));
+              });
+              const label = info.modifiedTime ? formatBackupDate(info.modifiedTime) : 'the cloud backup';
+              await appendSyncActivity([{ kind: 'RESTORE', detail: `Restored cloud backup from ${label}` }]);
+              // Soft reboot: remounts the tree onto the restored DB. AutoSync
+              // picks up the notice — success alert + immediate sync. This
+              // screen unmounts here, so no state updates after this line.
+              setRestoreNotice(label);
+              reloadDb();
             } catch (e) {
               setRestoring(false);
+              setRestorePct(null);
+              Alert.alert('Restore failed', e instanceof Error ? e.message : String(e));
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  // Time-machine restore: same destructive flow as handleRestore, but from an
+  // older ladder rung. Rungs are photo-stripped — bill photos re-download
+  // lazily after the reload.
+  const LADDER_LABELS: Record<string, string> = {
+    'backup-daily.db': 'Daily (freshest)',
+    'backup-weekly.db': 'Weekly (kept ~7 days old on purpose)',
+    'backup-monthly.db': 'Monthly (kept ~30 days old on purpose)',
+  };
+
+  function handleLadderRestore(rung: LadderRungInfo) {
+    if (!rung.modifiedTime) return;
+    Alert.alert(
+      'Go back in time?',
+      `This will REPLACE all your local data with the ${LADDER_LABELS[rung.name] ?? rung.name} copy from ${formatBackupDate(rung.modifiedTime)}. Bill photos re-download when you open them. The next sync re-merges anything newer from your other device.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Replace local data',
+          style: 'destructive',
+          onPress: async () => {
+            setLadderRestoring(rung.name);
+            try {
+              const fresh = await getFreshAccessToken();
+              if (!fresh) throw new Error('Session expired — sign in again.');
+              await restoreFromLadder(fresh, liveDb, rung.name);
+              const label = formatBackupDate(rung.modifiedTime!);
+              await appendSyncActivity([{ kind: 'RESTORE', detail: `Restored ${LADDER_LABELS[rung.name] ?? rung.name} copy from ${label}` }]);
+              setRestoreNotice(label);
+              reloadDb();
+            } catch (e) {
+              setLadderRestoring(null);
               Alert.alert('Restore failed', e instanceof Error ? e.message : String(e));
             }
           },
@@ -142,7 +314,9 @@ export default function SettingsScreen() {
     if (!accessToken) return;
     setBackingUp(true);
     try {
-      const info = await backupToCloud(accessToken, liveDb);
+      const fresh = await getFreshAccessToken();
+      if (!fresh) throw new Error('Session expired — sign in again.');
+      const info = await backupToCloud(fresh, liveDb);
       setBackupInfo(info);
       setBackupError(null);
       Alert.alert('Backed up', 'Your data is safely in Google Drive.');
@@ -164,7 +338,9 @@ export default function SettingsScreen() {
     }
     setBackingUp(true);
     try {
-      const fresh = await checkCloudBackup(accessToken);
+      const token = await getFreshAccessToken();
+      if (!token) throw new Error('Session expired — sign in again.');
+      const fresh = await checkCloudBackup(token);
       const cloudAhead = await cloudIsAheadOfThisDevice(fresh);
       setBackingUp(false);
 
@@ -186,6 +362,140 @@ export default function SettingsScreen() {
       Alert.alert('Backup failed', e instanceof Error ? e.message : String(e));
     }
   }
+
+  // Device Sync — exchanges individual document changes with the desktop via
+  // per-device Drive diaries (S2 row-sync). Idempotent; safe to re-tap.
+  const [rowSyncing, setRowSyncing] = useState(false);
+  const [rowSyncSummary, setRowSyncSummary] = useState<string | null>(null);
+  const [syncActivity, setSyncActivity] = useState<SyncActivityEntry[]>([]);
+  const [lastRowSyncAt, setLastRowSyncAt] = useState<number | null>(null);
+
+  const refreshSyncInfo = useCallback(() => {
+    getSyncActivity().then(setSyncActivity);
+    SecureStore.getItemAsync(LAST_ROW_SYNC_KEY).then((v) =>
+      setLastRowSyncAt(v ? Number(v) : null),
+    );
+  }, []);
+
+  useEffect(() => {
+    refreshSyncInfo();
+  }, [refreshSyncInfo]);
+
+  function finishRowSync(r: Awaited<ReturnType<typeof rowSyncNow>>) {
+    if (!r.success) {
+      setRowSyncSummary(`Sync failed: ${r.error ?? 'unknown error'}`);
+      return;
+    }
+    const bits = [`pulled ${r.applied ?? 0}`, `pushed ${r.pushedPackets ?? 0}`];
+    if (r.localRenumbers) bits.push(`${r.localRenumbers} renumbered`);
+    if (r.recomputeChanges) bits.push(`${r.recomputeChanges} totals corrected`);
+    if (r.photosPushed) bits.push(`${r.photosPushed} photo${r.photosPushed === 1 ? '' : 's'} uploaded`);
+    setRowSyncSummary(`Synced ✓ — ${bits.join(' · ')}`);
+  }
+
+  async function handleRowSync() {
+    setRowSyncing(true);
+    setRowSyncSummary(null);
+    try {
+      const fresh = await getFreshAccessToken();
+      if (!fresh) throw new Error('Session expired — sign in again.');
+      const r = await rowSyncNow(db, fresh);
+
+      // D6 tripwire: the pull wants to remove many live records — a human
+      // decides before anything is applied.
+      if (r.needsConfirmation) {
+        setRowSyncing(false);
+        Alert.alert(
+          'Large removal incoming',
+          `The other device wants to archive or cancel ${r.removalsPending} records here. Apply them? (Cancel keeps everything so you can investigate first.)`,
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: () =>
+                setRowSyncSummary(`Sync paused — ${r.removalsPending} incoming removals were NOT applied.`),
+            },
+            {
+              text: 'Apply removals',
+              style: 'destructive',
+              onPress: async () => {
+                setRowSyncing(true);
+                try {
+                  finishRowSync(await rowSyncNow(db, fresh, { confirmRemovals: true }));
+                } catch (e) {
+                  setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+                } finally {
+                  setRowSyncing(false);
+                  refreshSyncInfo();
+                }
+              },
+            },
+          ],
+        );
+        return;
+      }
+
+      finishRowSync(r);
+    } catch (e) {
+      setRowSyncSummary(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRowSyncing(false);
+      refreshSyncInfo();
+    }
+  }
+
+  // Data Health — run the shared recompute engine as a dry run and show what differs.
+  // Checking never writes; "Fix now" applies the rebuilt numbers after a confirm.
+  const [healthReport, setHealthReport] = useState<RecomputeReport | null>(null);
+  const [checking, setChecking] = useState(false);
+  const [fixing, setFixing] = useState(false);
+
+  async function handleHealthCheck() {
+    setChecking(true);
+    try {
+      setHealthReport(await recomputeAll(db));
+    } catch (e) {
+      Alert.alert('Check failed', e instanceof Error ? e.message : String(e));
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  function handleHealthFix() {
+    const n = healthReport?.totalChanges ?? 0;
+    if (n === 0) return;
+    Alert.alert(
+      'Fix these numbers?',
+      `${n} stored ${n === 1 ? 'number' : 'numbers'} will be rewritten to match your documents. Your invoices, payments and notes themselves are never touched.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Fix now',
+          onPress: async () => {
+            setFixing(true);
+            try {
+              await recomputeAll(db, { apply: true });
+              // Re-check so the box below reflects the fresh state, not the stale diff.
+              setHealthReport(await recomputeAll(db));
+              Alert.alert('Fixed', `${n} ${n === 1 ? 'number' : 'numbers'} corrected.`);
+            } catch (e) {
+              Alert.alert('Fix failed', e instanceof Error ? e.message : String(e));
+            } finally {
+              setFixing(false);
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  // Stock counts are quantities, not rupees.
+  function fmtHealthValue(v: number | string, sectionTitle: string): string {
+    if (typeof v !== 'number') return v;
+    return sectionTitle === 'Item stock' ? String(v) : `₹${v.toFixed(2)}`;
+  }
+
+  const healthChecked = healthReport?.sections.reduce((sum, s) => sum + s.checked, 0) ?? 0;
 
   function handleSignOut() {
     Alert.alert('Sign out?', 'You will need to sign in again to use the app.', [
@@ -242,6 +552,41 @@ export default function SettingsScreen() {
       </ThemedView>
 
       <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Device Sync (beta)</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Exchanges individual changes with your desktop through your Google Drive — nothing
+          is wiped wholesale, and every total is rebuilt from the documents after the merge.
+        </ThemedText>
+        <Button
+          title="Sync changes now"
+          variant="primary"
+          onPress={handleRowSync}
+          loading={rowSyncing}
+          disabled={!accessToken || backingUp || restoring || ladderRestoring != null}
+        />
+        {lastRowSyncAt ? (
+          <ThemedText style={styles.businessHint}>
+            Last synced {new Date(lastRowSyncAt).toLocaleString()} · auto-syncs every minute while the app is open
+          </ThemedText>
+        ) : null}
+        {rowSyncSummary ? (
+          <ThemedText style={styles.businessHint}>{rowSyncSummary}</ThemedText>
+        ) : null}
+        {syncActivity.length > 0 && (
+          <View style={styles.statusBox}>
+            <ThemedText style={styles.activityTitle}>
+              Sync activity — every renumber, conflict and pause gets a receipt
+            </ThemedText>
+            {syncActivity.slice(0, 10).map((e, i) => (
+              <ThemedText key={i} style={styles.activityRow}>
+                {new Date(e.at).toLocaleString()} — {e.detail}
+              </ThemedText>
+            ))}
+          </View>
+        )}
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Backup & Restore</ThemedText>
 
         {!accessToken && (
@@ -274,12 +619,33 @@ export default function SettingsScreen() {
           )
         )}
 
+        {accessToken && (
+          <View style={styles.freqRow}>
+            <ThemedText style={styles.statusLabel}>Automatic backup</ThemedText>
+            <View style={styles.freqChips}>
+              {(['off', 'daily', 'weekly', 'monthly'] as BackupFrequency[]).map((f) => (
+                <Pressable
+                  key={f}
+                  onPress={() => handleFreqChange(f)}
+                  style={[styles.freqChip, backupFreq === f && styles.freqChipActive]}
+                >
+                  <ThemedText
+                    style={[styles.freqChipText, backupFreq === f && styles.freqChipTextActive]}
+                  >
+                    {f === 'off' ? 'Off' : f[0].toUpperCase() + f.slice(1)}
+                  </ThemedText>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+
         <Button
           title="Back up to Google Drive"
           variant="primary"
           onPress={handleBackup}
           loading={backingUp}
-          disabled={!accessToken || restoring}
+          disabled={!accessToken || restoring || rowSyncing || ladderRestoring != null}
         />
 
         <View style={styles.warningBox}>
@@ -291,49 +657,291 @@ export default function SettingsScreen() {
 
         <Pressable
           onPress={handleRestore}
-          disabled={restoring || backupLoading || !backupInfo?.exists}
+          disabled={restoring || backupLoading || rowSyncing || ladderRestoring != null || !backupInfo?.exists}
           style={[
             styles.dangerButton,
-            (restoring || backupLoading || !backupInfo?.exists) && styles.disabledButton,
+            (restoring || backupLoading || rowSyncing || ladderRestoring != null || !backupInfo?.exists) && styles.disabledButton,
           ]}
         >
           <ThemedText style={styles.dangerButtonText}>
-            {restoring ? 'Restoring & reloading…' : 'Restore from cloud'}
+            {restoring
+              ? restorePct != null && restorePct < 100
+                ? `Downloading backup… ${restorePct}%`
+                : 'Restoring…'
+              : 'Restore from cloud'}
           </ThemedText>
         </Pressable>
+
+        {ladderInfo.some((l) => l.modifiedTime) && (
+          <>
+            <ThemedText style={styles.businessHint}>
+              Time machine — older automatic copies, kept at different ages on purpose so a
+              mistake noticed late can still be undone. Photos are not inside these copies;
+              they re-download when you open a bill.
+            </ThemedText>
+            {ladderInfo
+              .filter((l) => l.modifiedTime)
+              .map((rung) => (
+                <View key={rung.name} style={styles.statusBox}>
+                  {/* Stacked, not side-by-side: the long rung label would squeeze
+                      the date into a one-word-per-line vertical column. */}
+                  <ThemedText style={styles.statusLabel}>
+                    {LADDER_LABELS[rung.name] ?? rung.name}
+                  </ThemedText>
+                  <ThemedText style={styles.ladderWhen}>
+                    {rung.modifiedTime ? formatBackupDate(rung.modifiedTime) : '—'}
+                    {rung.size ? ` · ${(rung.size / 1048576).toFixed(1)} MB` : ''}
+                  </ThemedText>
+                  <Pressable
+                    onPress={() => handleLadderRestore(rung)}
+                    disabled={restoring || backingUp || rowSyncing || ladderRestoring != null}
+                    style={[
+                      styles.dangerButton,
+                      (restoring || backingUp || rowSyncing || ladderRestoring != null) &&
+                        styles.disabledButton,
+                    ]}
+                  >
+                    <ThemedText style={styles.dangerButtonText}>
+                      {ladderRestoring === rung.name ? 'Restoring & reloading…' : 'Restore this copy…'}
+                    </ThemedText>
+                  </Pressable>
+                </View>
+              ))}
+          </>
+        )}
       </ThemedView>
 
       <ThemedView style={styles.section}>
-        <ThemedText type="subtitle">AI Bill Scan</ThemedText>
-        <ThemedText style={styles.aiHint}>
-          Optional. Add a free OpenRouter API key to scan a photo of a supplier
-          bill and auto-fill the purchase form. Get one at openrouter.ai.
+        <ThemedText type="subtitle">Data Health</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Rebuilds every balance, invoice status and stock count from your documents and
+          compares them to what&apos;s stored. Checking changes nothing.
         </ThemedText>
-        <View style={styles.statusRow}>
-          <ThemedText style={styles.statusLabel}>Status</ThemedText>
-          <ThemedText style={styles.statusValue}>
-            {apiKeySaved ? 'Key saved ✓' : 'Not set'}
-          </ThemedText>
-        </View>
-        <TextInput
-          value={apiKeyInput}
-          onChangeText={setApiKeyInput}
-          placeholder={apiKeySaved ? 'Paste a new key to replace' : 'sk-or-…'}
-          placeholderTextColor="#9ca3af"
-          autoCapitalize="none"
-          autoCorrect={false}
-          secureTextEntry
-          style={styles.keyInput}
+
+        <Button
+          title="Check my numbers"
+          variant="secondary"
+          onPress={handleHealthCheck}
+          loading={checking}
+          disabled={fixing}
         />
-        <Pressable
-          onPress={handleSaveKey}
-          disabled={savingKey}
-          style={[styles.keyButton, savingKey && styles.disabledButton]}
-        >
-          <ThemedText style={styles.keyButtonText}>
-            {savingKey ? 'Saving…' : apiKeyInput.trim() ? 'Save key' : 'Clear key'}
+
+        {healthReport && !healthReport.stockAvailable && (
+          <ThemedText style={styles.businessHint}>
+            Stock was skipped — this database hasn&apos;t been migrated yet.
           </ThemedText>
-        </Pressable>
+        )}
+
+        {healthReport && healthReport.totalChanges === 0 && (
+          <View style={styles.healthOkBox}>
+            <ThemedText style={styles.healthOkText}>
+              ✓ All {healthChecked} numbers match your documents.
+            </ThemedText>
+          </View>
+        )}
+
+        {healthReport && healthReport.totalChanges > 0 && (
+          <>
+            <View style={styles.healthDriftBox}>
+              {healthReport.sections
+                .filter((s) => s.changes.length > 0)
+                .map((s) => (
+                  <View key={s.title} style={styles.healthSection}>
+                    <ThemedText style={styles.healthSectionTitle}>{s.title}</ThemedText>
+                    {s.changes.slice(0, 5).map((ch) => (
+                      <ThemedText key={ch.id} style={styles.healthChange}>
+                        {ch.name}: {fmtHealthValue(ch.stored, s.title)} →{' '}
+                        {fmtHealthValue(ch.rebuilt, s.title)}
+                      </ThemedText>
+                    ))}
+                    {s.changes.length > 5 && (
+                      <ThemedText style={styles.healthChange}>
+                        …and {s.changes.length - 5} more
+                      </ThemedText>
+                    )}
+                  </View>
+                ))}
+              <ThemedText style={styles.healthSummary}>
+                {healthReport.totalChanges}{' '}
+                {healthReport.totalChanges === 1 ? 'difference' : 'differences'} found. Fixing
+                rewrites only these stored totals — never your documents.
+              </ThemedText>
+            </View>
+            <Button
+              title="Fix now"
+              variant="danger"
+              onPress={handleHealthFix}
+              loading={fixing}
+              disabled={checking}
+            />
+          </>
+        )}
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">App Lock</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          {pinSet
+            ? 'PIN is ON — asked on open and after 5 minutes in the background. Enter the current PIN to change or turn it off.'
+            : 'Set a PIN so a stolen or borrowed phone can’t open your books.'}
+        </ThemedText>
+        {pinSet ? (
+          <TextInput
+            value={lockCurrent}
+            onChangeText={(v) => setLockCurrent(v.replace(/[^0-9]/g, '').slice(0, 6))}
+            keyboardType="number-pad"
+            secureTextEntry
+            placeholder="Current PIN"
+            placeholderTextColor="#9ca3af"
+            style={styles.pinInput}
+          />
+        ) : null}
+        <TextInput
+          value={lockNew}
+          onChangeText={(v) => setLockNew(v.replace(/[^0-9]/g, '').slice(0, 6))}
+          keyboardType="number-pad"
+          secureTextEntry
+          placeholder={pinSet ? 'New PIN (4–6 digits)' : 'PIN (4–6 digits)'}
+          placeholderTextColor="#9ca3af"
+          style={styles.pinInput}
+        />
+        <TextInput
+          value={lockConfirm}
+          onChangeText={(v) => setLockConfirm(v.replace(/[^0-9]/g, '').slice(0, 6))}
+          keyboardType="number-pad"
+          secureTextEntry
+          placeholder="Confirm PIN"
+          placeholderTextColor="#9ca3af"
+          style={styles.pinInput}
+        />
+        <Button
+          title={lockBusy ? 'Working…' : pinSet ? 'Change PIN' : 'Turn on App Lock'}
+          variant="primary"
+          onPress={handleSavePin}
+          disabled={lockBusy}
+        />
+        {pinSet ? (
+          <Pressable onPress={handleDisablePin} disabled={lockBusy} style={styles.lockOff}>
+            <ThemedText style={styles.lockOffText}>Turn off App Lock</ThemedText>
+          </Pressable>
+        ) : null}
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Diagnostics</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Every error the app hits is written to a log file. If something
+          misbehaves, share it from here.
+        </ThemedText>
+        <Button
+          title="Share logs"
+          variant="secondary"
+          onPress={async () => {
+            try {
+              const uri = await getLogFileUri();
+              if (!uri) {
+                Alert.alert('No logs yet', 'Nothing has been logged on this device.');
+                return;
+              }
+              if (await Sharing.isAvailableAsync()) {
+                await Sharing.shareAsync(uri, { mimeType: 'text/plain', dialogTitle: 'Share app logs' });
+              }
+            } catch (e) {
+              Alert.alert('Error', e instanceof Error ? e.message : 'Failed to share logs');
+            }
+          }}
+        />
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Appearance</ThemedText>
+        <View style={styles.freqChips}>
+          {(['light', 'dark', 'system'] as ThemePreference[]).map((p) => (
+            <Pressable
+              key={p}
+              onPress={() => handleThemeChange(p)}
+              style={[styles.freqChip, themePref === p && styles.freqChipActive]}
+            >
+              <ThemedText style={themePref === p ? styles.freqChipTextActive : styles.freqChipText}>
+                {p[0].toUpperCase() + p.slice(1)}
+              </ThemedText>
+            </Pressable>
+          ))}
+        </View>
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Invoice Template</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Used when you share or save an invoice PDF. Quotations and proforma
+          invoices always use the classic GST layout.
+        </ThemedText>
+        {(Object.keys(INVOICE_TEMPLATE_INFO) as InvoiceTemplate[]).map((t) => (
+          <Pressable
+            key={t}
+            onPress={() => handleTemplateChange(t)}
+            style={[styles.templateRow, invTemplate === t && styles.templateRowActive]}
+          >
+            <ThemedText style={styles.templateEmoji}>{INVOICE_TEMPLATE_INFO[t].preview}</ThemedText>
+            <View style={styles.templateText}>
+              <ThemedText type={invTemplate === t ? 'defaultSemiBold' : undefined}>
+                {INVOICE_TEMPLATE_INFO[t].name}
+                {invTemplate === t ? '  ✓' : ''}
+              </ThemedText>
+              <ThemedText style={styles.businessHint}>{INVOICE_TEMPLATE_INFO[t].description}</ThemedText>
+            </View>
+          </Pressable>
+        ))}
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Tax Settings</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Tax rates are configured per item — open an item to set its GST rate.
+          Common GST rates in India: essential goods 0%/5%, standard goods
+          12%/18%, luxury goods 28%, services 18%.
+        </ThemedText>
+      </ThemedView>
+
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Purchase Order Defaults</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          These notes print on every Purchase Order PDF — special instructions
+          below the items table, general terms on the last page.
+        </ThemedText>
+        <ThemedText style={styles.statusLabel}>Special Instructions</ThemedText>
+        <TextInput
+          value={poSpecial}
+          onChangeText={setPoSpecial}
+          multiline
+          style={styles.poInput}
+          placeholderTextColor="#9ca3af"
+        />
+        <ThemedText style={styles.statusLabel}>General Terms &amp; Conditions</ThemedText>
+        <TextInput
+          value={poTerms}
+          onChangeText={setPoTerms}
+          multiline
+          style={[styles.poInput, styles.poInputTall]}
+          placeholderTextColor="#9ca3af"
+        />
+        <View style={styles.poActions}>
+          <Pressable
+            onPress={() => {
+              setPoSpecial(PO_SPECIAL_INSTRUCTIONS_DEFAULT);
+              setPoTerms(PO_GENERAL_TERMS_DEFAULT);
+            }}
+            style={styles.poReset}
+          >
+            <ThemedText>Reset to defaults</ThemedText>
+          </Pressable>
+          <Button
+            title={poSaving ? 'Saving…' : 'Save PO defaults'}
+            variant="primary"
+            onPress={handleSavePoDefaults}
+            disabled={poSaving}
+          />
+        </View>
       </ThemedView>
 
       {user && (
@@ -377,6 +985,7 @@ const styles = StyleSheet.create({
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   statusLabel: { opacity: 0.7 },
   statusValue: { fontWeight: '500', textAlign: 'right', flexShrink: 1 },
+  ladderWhen: { fontWeight: '500' },
   warningBox: {
     backgroundColor: '#fef2f2',
     borderLeftWidth: 3,
@@ -404,17 +1013,82 @@ const styles = StyleSheet.create({
   },
   signOutText: { color: '#dc2626', fontWeight: '600' },
   error: { color: 'red' },
-  aiHint: { fontSize: 13, opacity: 0.7, lineHeight: 19 },
-  keyInput: {
+  healthOkBox: {
+    backgroundColor: '#f0fdf4',
+    borderLeftWidth: 3,
+    borderLeftColor: '#16a34a',
+    padding: 12,
+    borderRadius: 4,
+  },
+  healthOkText: { color: '#14532d', fontSize: 13 },
+  healthDriftBox: {
+    backgroundColor: '#fffbeb',
+    borderLeftWidth: 3,
+    borderLeftColor: '#d97706',
+    padding: 12,
+    borderRadius: 4,
+    gap: 10,
+  },
+  healthSection: { gap: 2 },
+  activityTitle: { fontSize: 12, fontWeight: '600', opacity: 0.7 },
+  activityRow: { fontSize: 12, opacity: 0.7, lineHeight: 17 },
+  healthSectionTitle: { color: '#78350f', fontSize: 13, fontWeight: '600' },
+  healthChange: { color: '#92400e', fontSize: 13, lineHeight: 18 },
+  healthSummary: { color: '#78350f', fontSize: 13, fontWeight: '600' },
+  freqRow: { gap: 6 },
+  freqChips: { flexDirection: 'row', gap: 8 },
+  freqChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#ccc',
+    borderColor: '#d1d5db',
+  },
+  freqChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  // Same trap as ListControls: override lineHeight along with fontSize or the
+  // 21px body line box bloats the chip vertically.
+  freqChipText: { fontSize: 13, lineHeight: 17 },
+  freqChipTextActive: { fontSize: 13, lineHeight: 17, color: 'white', fontWeight: '600' },
+  poInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
     borderRadius: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    fontSize: 15,
+    fontSize: 13,
     color: '#111827',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f9fafb',
+    minHeight: 120,
+    textAlignVertical: 'top',
   },
+  poInputTall: { minHeight: 180 },
+  pinInput: {
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    letterSpacing: 6,
+    color: '#111827',
+    backgroundColor: '#f9fafb',
+  },
+  lockOff: { paddingVertical: 10, alignItems: 'center' },
+  lockOffText: { color: '#dc2626', fontWeight: '600' },
+  templateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#e5e7eb',
+  },
+  templateRowActive: { borderColor: '#007AFF', backgroundColor: '#eff6ff' },
+  templateEmoji: { fontSize: 20 },
+  templateText: { flex: 1, gap: 2 },
+  poActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
+  poReset: { paddingVertical: 10 },
   keyButton: {
     backgroundColor: '#007AFF',
     paddingVertical: 12,

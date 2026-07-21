@@ -1,8 +1,14 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import { google } from 'googleapis'
+import { createClient } from '@libsql/client'
 import { getOAuth2Client, isAuthError, clearStoredCredentials } from './auth'
-import { getDatabasePath, getPrisma, ensureTablesExist, reconnectDatabase } from './database'
+import { eq, syncMetadata } from '@neu/shared'
+import { getDatabasePath, reconnectDatabase } from './database'
+import { ensureTablesExist } from './bootMigrate'
+import { closeDrizzle, getDb } from './db'
+import { snapshotDatabaseTo, withDbFileLock } from './dbLock'
 import fs from 'fs'
+import path from 'path'
 import Store from 'electron-store'
 import { randomUUID } from 'crypto'
 
@@ -16,7 +22,10 @@ const store = new Store()
 // mobile getDeviceId() in apps/mobile/sync/deviceId.ts.
 const DEVICE_ID_KEY = 'device_id'
 
-const getDeviceId = (): string => {
+// Exported: rowSync.ts must use THIS minting version — reading the store key
+// directly returns undefined on a device that never ran a whole-file backup,
+// which produced an unreadable `changes-undefined.json` diary (review 2026-07-11).
+export const getDeviceId = (): string => {
   const existing = store.get(DEVICE_ID_KEY) as string | undefined
   if (existing) return existing
   const minted = `desktop-${randomUUID()}`
@@ -83,6 +92,14 @@ export const resetSyncBaseline = () => {
   store.delete(LAST_KNOWN_LOCAL_MTIME_KEY)
   store.delete(LAST_UPLOAD_TIMESTAMP_KEY)
   store.delete(LAST_SCHEDULED_SYNC_KEY)
+  // A pending-tripwire flag describes the PRE-restore database — surviving the
+  // restore it would show a stale "removals pending" banner until the next
+  // successful sync. (Key literal matches rowSync.ts's PENDING_REMOVALS_KEY.)
+  store.delete('row_sync_pending_removals')
+  // The pushed-diary fingerprint also describes the pre-restore database —
+  // clearing it forces the next sync to re-upload unconditionally. (Key
+  // literal matches rowSync.ts's LAST_PUSHED_DIARY_HASH_KEY.)
+  store.delete('last_pushed_diary_hash')
 }
 
 // Scheduled-backup configuration. Per-device (electron-store, not synced).
@@ -184,6 +201,13 @@ export const setupSyncHandlers = () => {
     void runIfScheduledSyncDue()
     return { success: true }
   })
+
+  // Backup ladder (S4): rung metadata + the destructive time-machine restore.
+  ipcMain.handle('sync:getLadderInfo', async () => getLadderInfo())
+  ipcMain.handle('sync:restoreFromLadder', async (_, slotName: string) => {
+    if (!isSignedIn()) return { success: false, error: 'OFFLINE' }
+    return await restoreFromLadder(slotName)
+  })
 }
 
 // Looks for the backup file in the user's Drive appDataFolder without
@@ -282,13 +306,16 @@ export const syncState = async (): Promise<{
   const lastKnownCloud = getLastKnownCloudMtime()
   const lastKnownLocal = getLastKnownLocalMtime()
   if (!lastKnownCloud || !lastKnownLocal) {
-    // Either tracker missing → this device hasn't completed a conflict-aware
-    // sync yet (brand-new install, or pre-fix existing user). Don't surface a
-    // fake conflict; caller uploads and primes both trackers in lockstep.
+    // Either tracker missing → this device has no baseline for THIS account's
+    // cloud file (brand-new install, or trackers wiped by sign-out/switch). A
+    // cloud backup EXISTS and we cannot prove it's ours — so report it as
+    // cloudChanged and let the caller put a human in the loop. Reporting the
+    // old all-clear here was the exact gap that let a re-signed-in desktop
+    // silently overwrite a newer mobile backup (the May data-loss incident).
     return {
       cloudExists: true,
       localChanged: false,
-      cloudChanged: false,
+      cloudChanged: true,
       isConflict: false,
       firstSync: true,
       ...cloudInfo,
@@ -329,27 +356,40 @@ export const syncUpload = async (): Promise<{ success: boolean; error?: string }
     const drive = google.drive({ version: 'v3', auth })
     const dbPath = getDatabasePath()
 
-    const response = await drive.files.list({
-      spaces: 'appDataFolder',
-      q: `name='${CLOUD_DB_FILENAME}'`,
-      fields: 'files(id)',
-      pageSize: 1,
-    })
-    const files = response.data.files || []
+    // Never stream the LIVE file — a write transaction mid-stream (row-sync
+    // merge, a user saving an invoice) would upload torn pages. The snapshot
+    // is consistent by construction and holds the DB lock only while it's
+    // being written, not for the whole (slow) upload.
+    const snapshotPath = `${dbPath}.upload`
+    await snapshotDatabaseTo(snapshotPath)
 
     let updated
-    if (files.length > 0) {
-      updated = await drive.files.update({
-        fileId: files[0].id!,
-        media: { mimeType: 'application/x-sqlite3', body: fs.createReadStream(dbPath) },
-        fields: 'modifiedTime',
+    try {
+      const response = await drive.files.list({
+        spaces: 'appDataFolder',
+        q: `name='${CLOUD_DB_FILENAME}'`,
+        fields: 'files(id)',
+        pageSize: 1,
       })
-    } else {
-      updated = await drive.files.create({
-        requestBody: { name: CLOUD_DB_FILENAME, parents: ['appDataFolder'] },
-        media: { mimeType: 'application/x-sqlite3', body: fs.createReadStream(dbPath) },
-        fields: 'id, modifiedTime',
-      })
+      const files = response.data.files || []
+
+      if (files.length > 0) {
+        updated = await drive.files.update({
+          fileId: files[0].id!,
+          media: { mimeType: 'application/x-sqlite3', body: fs.createReadStream(snapshotPath) },
+          fields: 'modifiedTime',
+        })
+      } else {
+        updated = await drive.files.create({
+          requestBody: { name: CLOUD_DB_FILENAME, parents: ['appDataFolder'] },
+          media: { mimeType: 'application/x-sqlite3', body: fs.createReadStream(snapshotPath) },
+          fields: 'id, modifiedTime',
+        })
+      }
+    } finally {
+      try {
+        if (fs.existsSync(snapshotPath)) fs.unlinkSync(snapshotPath)
+      } catch { /* best-effort cleanup */ }
     }
 
     if (updated.data.modifiedTime) {
@@ -359,13 +399,14 @@ export const syncUpload = async (): Promise<{ success: boolean; error?: string }
     // shared "Last cloud backup" stamp in SyncMetadata.
     store.set(LAST_UPLOAD_TIMESTAMP_KEY, new Date().toISOString())
 
-    const prisma = getPrisma()
     const deviceId = getDeviceId()
-    await prisma.syncMetadata.upsert({
-      where: { id: 'main' },
-      update: { lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
-      create: { id: 'main', lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
-    })
+    await getDb()
+      .insert(syncMetadata)
+      .values({ id: 'main', lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId })
+      .onConflictDoUpdate({
+        target: syncMetadata.id,
+        set: { lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
+      })
 
     // Capture local mtime AFTER our own writes so the next syncState's
     // localChanged check excludes this bookkeeping bump.
@@ -377,6 +418,93 @@ export const syncUpload = async (): Promise<{ success: boolean; error?: string }
   } catch (error) {
     return handleSyncError(error, 'Upload')
   }
+}
+
+// The ONE safe way to replace the local DB with a Drive file: download to a
+// TEMP file (a dropped connection must leave the live DB untouched), resolve
+// on the WRITE stream's 'finish' (the source's 'end' fires before bytes hit
+// disk), verify the size, then swap — Prisma disconnected first (Windows file
+// locks), stale WAL/SHM/journal sidecars cleared, the outgoing DB parked as a
+// .pre-restore-<stamp> sibling (rename it back to undo a wrong restore), and
+// the temp file renamed into place with a copy fallback. Once the old DB is
+// parked, the temp file is the ONLY copy of the restored data and must never
+// be deleted on failure. Used by both the whole-file restore and the ladder
+// time-machine restore.
+const replaceLocalDbFromDrive = async (
+  drive: any,
+  fileId: string,
+  expectedSize: number | null,
+): Promise<void> => {
+  const dbPath = getDatabasePath()
+  const tmpPath = `${dbPath}.download`
+
+  // PHASE 1 — download + verify; failure leaves the live DB untouched.
+  try {
+    const fileResponse = await drive.files.get(
+      { fileId, alt: 'media' },
+      { responseType: 'stream' }
+    )
+
+    await new Promise<void>((resolve, reject) => {
+      const dest = fs.createWriteStream(tmpPath)
+      fileResponse.data.on('error', reject)
+      dest.on('error', reject)
+      dest.on('finish', () => resolve())
+      fileResponse.data.pipe(dest)
+    })
+
+    const gotSize = fs.statSync(tmpPath).size
+    if (gotSize === 0 || (expectedSize != null && gotSize !== expectedSize)) {
+      throw new Error(`Download incomplete (${gotSize} of ${expectedSize ?? 'unknown'} bytes) — local data untouched.`)
+    }
+  } catch (e) {
+    try {
+      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+    } catch { /* best-effort cleanup */ }
+    throw e
+  }
+
+  // PHASE 2 — swap; no tmp cleanup on failure past this point. Runs under the
+  // DB-file lock so it WAITS for an in-flight row-sync merge or snapshot to
+  // finish instead of killing it mid-transaction via $disconnect.
+  await withDbFileLock(async () => {
+    closeDrizzle() // the libsql handle would block the rename on Windows
+    for (const suffix of ['-wal', '-shm', '-journal']) {
+      const sidecar = `${dbPath}${suffix}`
+      if (fs.existsSync(sidecar)) fs.unlinkSync(sidecar)
+    }
+    // PARK the outgoing DB instead of deleting it — restore must be the only
+    // undoable-by-rename "destructive" action in the app (a wrong-direction
+    // restore is recovered by renaming this file back to neuinvoicing.db).
+    // Only the newest parked copy is kept, bounding disk cost to one extra DB.
+    if (fs.existsSync(dbPath)) {
+      const dir = path.dirname(dbPath)
+      const parkedPrefix = `${path.basename(dbPath)}.pre-restore-`
+      for (const name of fs.readdirSync(dir)) {
+        if (name.startsWith(parkedPrefix)) {
+          try { fs.unlinkSync(path.join(dir, name)) } catch { /* best-effort */ }
+        }
+      }
+      const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+      try {
+        fs.renameSync(dbPath, `${dbPath}.pre-restore-${stamp}`)
+      } catch {
+        // Parking is a safety net, not a correctness requirement — the download
+        // is already verified, so fall back to the plain delete rather than
+        // failing the whole restore.
+        fs.unlinkSync(dbPath)
+      }
+    }
+    try {
+      fs.renameSync(tmpPath, dbPath)
+    } catch {
+      fs.copyFileSync(tmpPath, dbPath)
+      try { fs.unlinkSync(tmpPath) } catch { /* keep the spare copy */ }
+    }
+
+    await ensureTablesExist(dbPath)
+    await reconnectDatabase()
+  })
 }
 
 // Explicit download — replaces local DB with cloud. Caller MUST have user
@@ -396,7 +524,7 @@ export const syncDownload = async (): Promise<{ success: boolean; error?: string
     const response = await drive.files.list({
       spaces: 'appDataFolder',
       q: `name='${CLOUD_DB_FILENAME}'`,
-      fields: 'files(id, modifiedTime)',
+      fields: 'files(id, modifiedTime, size)',
       pageSize: 1,
     })
     const files = response.data.files || []
@@ -407,30 +535,32 @@ export const syncDownload = async (): Promise<{ success: boolean; error?: string
     }
 
     const cloudFile = files[0]
-    const dest = fs.createWriteStream(dbPath)
-    const fileResponse = await drive.files.get(
-      { fileId: cloudFile.id!, alt: 'media' },
-      { responseType: 'stream' }
-    )
+    const expectedSize = cloudFile.size ? Number(cloudFile.size) : null
 
-    await new Promise((resolve, reject) => {
-      fileResponse.data.on('end', resolve).on('error', reject).pipe(dest)
-    })
+    // A 0-byte cloud file is the residue of a failed upload — restoring it
+    // would wipe the local data it was supposed to protect.
+    if (expectedSize === 0) {
+      updateSyncStatus({ status: 'idle', lastSync: new Date() })
+      return { success: false, error: 'The cloud backup file is empty (a previous upload failed). Back up again from the device that has your data.' }
+    }
 
-    ensureTablesExist(`file:${dbPath}`)
-    await reconnectDatabase()
+    await replaceLocalDbFromDrive(drive, cloudFile.id!, expectedSize)
+    // Same reasoning as resetSyncBaseline: a tripwire pause recorded against
+    // the replaced database is meaningless for the restored one.
+    store.delete('row_sync_pending_removals')
 
     if (cloudFile.modifiedTime) {
       setLastKnownCloudMtime(cloudFile.modifiedTime)
     }
 
-    const prisma = getPrisma()
     const deviceId = getDeviceId()
-    await prisma.syncMetadata.upsert({
-      where: { id: 'main' },
-      update: { lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
-      create: { id: 'main', lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
-    })
+    await getDb()
+      .insert(syncMetadata)
+      .values({ id: 'main', lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId })
+      .onConflictDoUpdate({
+        target: syncMetadata.id,
+        set: { lastSyncTimestamp: new Date(), syncStatus: 'idle', deviceId },
+      })
 
     // Same baseline-capture as syncUpload — the just-downloaded file's mtime
     // is "now" (when the local write finished), plus syncMetadata bumped it
@@ -456,8 +586,7 @@ export const getBackupInfo = async (): Promise<{
 }> => {
   let cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null = null
   try {
-    const prisma = getPrisma()
-    const metadata = await prisma.syncMetadata.findUnique({ where: { id: 'main' } })
+    const [metadata] = await getDb().select().from(syncMetadata).where(eq(syncMetadata.id, 'main')).limit(1)
     if (metadata) {
       cloudBackup = {
         lastSyncTimestamp: metadata.lastSyncTimestamp.toISOString(),
@@ -526,6 +655,152 @@ const runIfScheduledSyncDue = async () => {
   }
 }
 
+// ── Backup ladder (S4, D7) ───────────────────────────────────────────────────
+// Three additional slots beside the main backup: daily (freshest), weekly and
+// monthly (STALE ON PURPOSE — the time machine for disasters noticed late).
+// Ladder copies are BLOB-STRIPPED + VACUUMed (~10 MB instead of ~300 MB):
+// bill photos live once as img-bill-* files (S4 image split), and
+// previousInvoice PDFs stay in the live DB + the full manual backup.
+// Staleness is judged by the DRIVE file's own age, so two devices sharing the
+// slots can't thrash each other's cadence.
+
+const LADDER_SLOTS = [
+  { name: 'backup-daily.db', minAgeMs: 24 * 60 * 60 * 1000 },
+  { name: 'backup-weekly.db', minAgeMs: 7 * 24 * 60 * 60 * 1000 },
+  { name: 'backup-monthly.db', minAgeMs: 30 * 24 * 60 * 60 * 1000 },
+]
+
+const buildStrippedLedgerCopy = async (): Promise<string> => {
+  const dbPath = getDatabasePath()
+  const tmpPath = `${dbPath}.ladder`
+  // Consistent snapshot (VACUUM INTO under the DB-file lock) — a raw file
+  // copy could capture torn pages mid-transaction, and this also folds any
+  // WAL content in without a separate checkpoint.
+  await snapshotDatabaseTo(tmpPath)
+
+  const tmp = createClient({ url: `file:${tmpPath}` })
+  try {
+    await tmp.execute(`UPDATE "PurchaseBill" SET "attachmentData" = NULL`)
+    // fileData is NOT NULL — empty blob, not NULL.
+    await tmp.execute(`UPDATE "PreviousInvoice" SET "fileData" = X''`)
+    await tmp.execute(`VACUUM`)
+  } finally {
+    tmp.close()
+  }
+  return tmpPath
+}
+
+const runLadderIfDue = async () => {
+  if (store.get('demo_mode') || !store.get('google_tokens')) return
+  try {
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const now = Date.now()
+
+    // Decide which slots are due from the Drive files' own age.
+    const due: { name: string; fileId?: string }[] = []
+    for (const slot of LADDER_SLOTS) {
+      const res = await drive.files.list({
+        spaces: 'appDataFolder',
+        q: `name='${slot.name}' and trashed=false`,
+        fields: 'files(id,modifiedTime,size)',
+        pageSize: 1,
+      })
+      const f = res.data.files?.[0]
+      // A 0-byte slot (failed two-step upload from the phone) counts as missing.
+      const age =
+        f?.modifiedTime && Number(f.size ?? 0) > 0
+          ? now - new Date(f.modifiedTime).getTime()
+          : Infinity
+      if (age >= slot.minAgeMs) due.push({ name: slot.name, fileId: f?.id ?? undefined })
+    }
+    if (due.length === 0) return
+
+    const tmpPath = await buildStrippedLedgerCopy()
+    try {
+      for (const slot of due) {
+        const media = { mimeType: 'application/x-sqlite3', body: fs.createReadStream(tmpPath) }
+        if (slot.fileId) {
+          await drive.files.update({ fileId: slot.fileId, media })
+        } else {
+          await drive.files.create({ requestBody: { name: slot.name, parents: ['appDataFolder'] }, media })
+        }
+      }
+      console.log(`[ladder] refreshed ${due.map((s) => s.name).join(', ')}`)
+    } finally {
+      try {
+        if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath)
+      } catch { /* best-effort cleanup */ }
+    }
+  } catch (e) {
+    console.error('[ladder] failed, app continues:', e)
+  }
+}
+
+// Ladder metadata for the Settings "time machine" list.
+export const getLadderInfo = async (): Promise<
+  { name: string; modifiedTime: string | null; size: number | null }[]
+> => {
+  if (store.get('demo_mode') || !store.get('google_tokens')) return []
+  try {
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const out: { name: string; modifiedTime: string | null; size: number | null }[] = []
+    for (const slot of LADDER_SLOTS) {
+      const res = await drive.files.list({
+        spaces: 'appDataFolder',
+        q: `name='${slot.name}' and trashed=false`,
+        fields: 'files(id,modifiedTime,size)',
+        pageSize: 1,
+      })
+      const f = res.data.files?.[0]
+      out.push({
+        name: slot.name,
+        modifiedTime: f?.modifiedTime ?? null,
+        size: f?.size ? Number(f.size) : null,
+      })
+    }
+    return out
+  } catch (e) {
+    console.error('getLadderInfo error:', e)
+    return []
+  }
+}
+
+// Time-machine restore: replace the local DB with a ladder rung. Ladder copies
+// are BLOB-STRIPPED — bill photos and archive files refetch lazily from their
+// img-* Drive objects afterwards. Baselines reset so the device re-syncs
+// forward from the restored state (row-sync diaries replay the newer edits).
+export const restoreFromLadder = async (slotName: string): Promise<{ success: boolean; error?: string }> => {
+  if (!LADDER_SLOTS.some((s) => s.name === slotName)) {
+    return { success: false, error: 'Unknown backup slot.' }
+  }
+  if (!store.get('google_tokens')) return { success: false, error: 'Connect your Google account first.' }
+  try {
+    updateSyncStatus({ status: 'syncing', lastError: null })
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const res = await drive.files.list({
+      spaces: 'appDataFolder',
+      q: `name='${slotName}' and trashed=false`,
+      fields: 'files(id,modifiedTime,size)',
+      pageSize: 1,
+    })
+    const f = res.data.files?.[0]
+    if (!f) return { success: false, error: 'That backup slot does not exist yet.' }
+    const expected = f.size ? Number(f.size) : null
+    if (expected === 0) return { success: false, error: 'That backup slot is empty.' }
+
+    await replaceLocalDbFromDrive(drive, f.id!, expected)
+    resetSyncBaseline()
+
+    updateSyncStatus({ status: 'idle', lastSync: new Date() })
+    return { success: true }
+  } catch (error) {
+    return handleSyncError(error, 'Ladder restore')
+  }
+}
+
 let schedulerInterval: NodeJS.Timeout | null = null
 
 export const startBackupScheduler = () => {
@@ -533,8 +808,10 @@ export const startBackupScheduler = () => {
   // Run once on startup — catches "I had it set to Daily but closed my laptop
   // for 3 days" cases.
   void runIfScheduledSyncDue()
+  void runLadderIfDue()
   schedulerInterval = setInterval(() => {
     void runIfScheduledSyncDue()
+    void runLadderIfDue()
   }, SCHEDULER_TICK_MS)
 }
 

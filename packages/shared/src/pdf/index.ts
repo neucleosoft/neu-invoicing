@@ -7,6 +7,11 @@ export type { PDFDocumentData, InvoiceData } from './types'
 
 // Invoice builder also produces Quotation + Proforma (branched on data.type).
 export { buildInvoiceDocDefinition, buildInvoiceFilename } from './invoice'
+export {
+  buildInvoiceDocDefinitionForTemplate,
+  INVOICE_TEMPLATE_INFO,
+  type InvoiceTemplate,
+} from './invoiceTemplates'
 
 export { buildPurchaseBillDocDefinition, buildPurchaseBillFilename, type PurchaseBillData } from './purchaseBill'
 export { buildPurchaseOrderDocDefinition, buildPurchaseOrderFilename, type PurchaseOrderData } from './purchaseOrder'

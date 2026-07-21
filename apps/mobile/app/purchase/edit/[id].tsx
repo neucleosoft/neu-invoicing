@@ -1,6 +1,6 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   Alert,
   FlatList,
@@ -15,10 +15,19 @@ import {
 
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { PickerSearchList } from '@/components/PickerSearchList'
 import { schema, useDb } from '@/db'
 import { notDeleted } from '@/db/softDelete'
 import { formatCurrency } from '@/utils/currency'
+import type { PurchaseTaxOverride } from '@neu/shared'
+
+import {
+  listOpenPurchaseOrders,
+  loadPoLinesForBill,
+  type OpenPoSummary,
+} from '@/utils/poSave'
 import { updatePurchaseBill, type PurchaseLineInput } from '@/utils/purchaseSave'
+import { useUnsavedGuard } from '@/hooks/use-unsaved-guard'
 
 type Supplier = typeof schema.supplier.$inferSelect
 type SupplierItem = typeof schema.supplierItem.$inferSelect
@@ -51,9 +60,44 @@ export default function EditPurchaseScreen() {
   const [notes, setNotes] = useState('')
   const [lines, setLines] = useState<BillLine[]>([])
 
+  // Rage-guard: Android back / swipe must never silently eat unsaved edits.
+  // The baseline snapshots the loaded document once; any drift = dirty
+  // (see hooks/use-unsaved-guard.ts).
+  const editSnapshot = JSON.stringify([supplierId, lines, notes])
+  const baselineRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!loading && baselineRef.current === null) baselineRef.current = editSnapshot
+  }, [loading, editSnapshot])
+  const dirty = !loading && baselineRef.current !== null && editSnapshot !== baselineRef.current
+  const { markClean } = useUnsavedGuard(dirty)
+
   const [saving, setSaving] = useState(false)
   const [showSupplierPicker, setShowSupplierPicker] = useState(false)
   const [showCatalogPicker, setShowCatalogPicker] = useState(false)
+  // Bill-level tax recovered from a scanned bill (tax stored on the header while
+  // every line's taxRate is 0), including its stored CGST/SGST/IGST split so a
+  // re-save preserves it byte-for-byte. Deactivates if the user types a per-line
+  // tax rate.
+  const [taxOverride, setTaxOverride] = useState<PurchaseTaxOverride | null>(null)
+  // Document-level discount (totalAmount = subtotal + tax − discount). Loaded
+  // from the stored bill so an edit never silently drops a discount applied on
+  // the other device.
+  const [docDiscountStr, setDocDiscountStr] = useState('0')
+
+  // Reference PO (optional link, mirrors desktop). On edit, the linked PO may
+  // already be CLOSED (this bill's own create closed it) — the picker section
+  // stays visible so the link is at least shown and clearable.
+  const [openPOs, setOpenPOs] = useState<OpenPoSummary[]>([])
+  const [purchaseOrderId, setPurchaseOrderId] = useState('')
+  const [showPoPicker, setShowPoPicker] = useState(false)
+
+  useEffect(() => {
+    if (!supplierId) {
+      setOpenPOs([])
+      return
+    }
+    listOpenPurchaseOrders(db, supplierId).then(setOpenPOs)
+  }, [supplierId, db])
 
   useEffect(() => {
     db.select()
@@ -105,6 +149,7 @@ export default function EditPurchaseScreen() {
       setSupplierInvoiceNumber(bill.supplierInvoiceNumber ?? '')
       setBillDate(new Date(bill.billDate).toISOString().slice(0, 10))
       setNotes(bill.notes ?? '')
+      setPurchaseOrderId(bill.purchaseOrderId ?? '')
 
       // Resolve each line's name from this supplier's catalog.
       const billItems = await db
@@ -127,6 +172,25 @@ export default function EditPurchaseScreen() {
           taxRate: bi.taxRate,
         })),
       )
+
+      // Recover a bill-level tax override: tax stored on the header that the
+      // lines can't explain (all line taxRates 0). Without this, re-saving an
+      // OCR-scanned bill would recompute its tax from the lines — i.e. to zero.
+      // The stored split rides along so a re-save preserves it exactly.
+      const linesCarryTax = billItems.some((bi) => bi.taxRate > 0)
+      setTaxOverride(
+        !linesCarryTax && bill.taxAmount > 0.01
+          ? {
+              taxAmount: bill.taxAmount,
+              cgstAmount: bill.cgstAmount,
+              sgstAmount: bill.sgstAmount,
+              igstAmount: bill.igstAmount,
+            }
+          : null,
+      )
+
+      setDocDiscountStr(String(bill.discount ?? 0))
+
       setLoading(false)
     }
     load()
@@ -135,13 +199,53 @@ export default function EditPurchaseScreen() {
   const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? ''
 
   const subtotal = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount), 0)
-  const taxAmount = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100), 0)
-  const total = subtotal + taxAmount
+  const computedTax = lines.reduce((s, l) => s + (l.qty * l.rate - l.discount) * (l.taxRate / 100), 0)
+  const overrideActive = taxOverride != null && lines.every((l) => !l.taxRate)
+  const taxAmount = overrideActive ? (taxOverride?.taxAmount ?? 0) : computedTax
+  const docDiscount = parseFloat(docDiscountStr) || 0
+  const total = subtotal + taxAmount - docDiscount
 
   function pickSupplier(newId: string) {
-    if (newId !== supplierId) setLines([])
+    if (newId !== supplierId) {
+      setLines([])
+      setPurchaseOrderId('')
+    }
     setSupplierId(newId)
     setShowSupplierPicker(false)
+  }
+
+  async function applyPoPrefill(poId: string) {
+    const poLines = await loadPoLinesForBill(db, poId)
+    setLines(
+      poLines.map((l) => ({
+        supplierItemId: l.supplierItemId,
+        name: l.name ?? '',
+        hsnCode: l.hsnCode ?? '',
+        qty: l.quantity,
+        rate: l.rate,
+        discount: l.discount ?? 0,
+        taxRate: l.taxRate ?? 0,
+      })),
+    )
+  }
+
+  // Selecting a PO links it and offers to pre-fill the lines. Declining keeps
+  // just the link — same behavior as desktop's handleSelectPO.
+  function handleSelectPO(poId: string) {
+    setShowPoPicker(false)
+    if (!poId) {
+      setPurchaseOrderId('')
+      return
+    }
+    setPurchaseOrderId(poId)
+    if (lines.length === 0) {
+      void applyPoPrefill(poId)
+      return
+    }
+    Alert.alert('Pre-fill from PO?', "Replace the current line items with this PO's items?", [
+      { text: 'Keep my items', style: 'cancel' },
+      { text: 'Replace', onPress: () => void applyPoPrefill(poId) },
+    ])
   }
 
   function addFromCatalog(si: SupplierItem) {
@@ -195,10 +299,13 @@ export default function EditPurchaseScreen() {
       const header = {
         supplierId,
         billNumber,
+        purchaseOrderId: purchaseOrderId || null,
         billDate: isNaN(parsedDate.getTime()) ? new Date() : parsedDate,
         supplierInvoiceNumber: supplierInvoiceNumber.trim() || null,
         supplierInvoiceDate: null,
         notes: notes.trim() || null,
+        discount: docDiscount,
+        taxOverride: overrideActive ? taxOverride : null,
       }
       const lineInputs: PurchaseLineInput[] = lines.map((l) => ({
         supplierItemId: l.supplierItemId,
@@ -210,6 +317,7 @@ export default function EditPurchaseScreen() {
         taxRate: l.taxRate,
       }))
       await updatePurchaseBill(db, id, header, lineInputs)
+      markClean()
       router.back()
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to update bill'
@@ -254,6 +362,20 @@ export default function EditPurchaseScreen() {
           {supplierId ? supplierName : 'Pick a supplier'}
         </ThemedText>
       </Pressable>
+
+      {supplierId && (openPOs.length > 0 || purchaseOrderId) ? (
+        <>
+          <ThemedText style={styles.label}>Reference PO (optional)</ThemedText>
+          <Pressable style={styles.picker} onPress={() => setShowPoPicker(true)}>
+            <ThemedText style={purchaseOrderId ? undefined : styles.placeholder}>
+              {purchaseOrderId
+                ? openPOs.find((p) => p.id === purchaseOrderId)?.orderNumber ??
+                  'Linked PO (closed)'
+                : `Link one of ${openPOs.length} open PO${openPOs.length === 1 ? '' : 's'}`}
+            </ThemedText>
+          </Pressable>
+        </>
+      ) : null}
 
       <Field
         label="Bill Date (YYYY-MM-DD)"
@@ -335,9 +457,18 @@ export default function EditPurchaseScreen() {
 
       <Field label="Notes" value={notes} onChangeText={setNotes} placeholder="Optional" multiline />
 
+      <Field
+        label="Bill Discount (optional)"
+        value={docDiscountStr}
+        onChangeText={setDocDiscountStr}
+        placeholder="0"
+        keyboardType="numeric"
+      />
+
       <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.totals}>
         <TotalRow label="Subtotal" value={subtotal} />
-        <TotalRow label="Tax" value={taxAmount} />
+        <TotalRow label={overrideActive ? 'Tax (from scanned bill)' : 'Tax'} value={taxAmount} />
+        {docDiscount > 0 && <TotalRow label="Discount" value={-docDiscount} />}
         <TotalRow label="Total" value={total} bold />
       </ThemedView>
 
@@ -354,12 +485,41 @@ export default function EditPurchaseScreen() {
         </Pressable>
       </View>
 
+      <Modal visible={showPoPicker} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <ThemedView style={styles.modalContent}>
+            <ThemedText type="title" style={styles.modalTitle}>Link a Purchase Order</ThemedText>
+            <FlatList
+              data={[{ id: '', orderNumber: 'None — no PO link', orderDate: new Date(), totalAmount: 0 } as OpenPoSummary, ...openPOs]}
+              keyExtractor={(p) => p.id || 'none'}
+              renderItem={({ item }) => (
+                <Pressable style={styles.modalRow} onPress={() => handleSelectPO(item.id)}>
+                  <ThemedText type={item.id === purchaseOrderId ? 'defaultSemiBold' : undefined}>
+                    {item.id === purchaseOrderId ? `✓ ${item.orderNumber}` : item.orderNumber}
+                  </ThemedText>
+                  {item.id ? (
+                    <ThemedText style={styles.catalogMeta}>
+                      {new Date(item.orderDate).toLocaleDateString()} · {formatCurrency(item.totalAmount)}
+                    </ThemedText>
+                  ) : null}
+                </Pressable>
+              )}
+            />
+            <Pressable style={styles.modalClose} onPress={() => setShowPoPicker(false)}>
+              <ThemedText style={styles.modalCloseText}>Cancel</ThemedText>
+            </Pressable>
+          </ThemedView>
+        </View>
+      </Modal>
+
       <Modal visible={showSupplierPicker} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <ThemedView style={styles.modalContent}>
             <ThemedText type="title" style={styles.modalTitle}>Select Supplier</ThemedText>
-            <FlatList
+            <PickerSearchList
               data={suppliers}
+              getName={(x) => x.name}
+              getExtra={(x) => [x.phone]}
               keyExtractor={(s) => s.id}
               renderItem={({ item }) => (
                 <Pressable style={styles.modalRow} onPress={() => pickSupplier(item.id)}>
@@ -385,8 +545,10 @@ export default function EditPurchaseScreen() {
                 This supplier has no catalog items yet. Close this and use “+ New item”.
               </ThemedText>
             ) : (
-              <FlatList
+              <PickerSearchList
                 data={catalog}
+                getName={(x) => x.name}
+                getExtra={(x) => [x.hsnCode]}
                 keyExtractor={(c) => c.id}
                 renderItem={({ item }) => (
                   <Pressable style={styles.modalRow} onPress={() => addFromCatalog(item)}>

@@ -1,5 +1,9 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { and, asc, desc, eq, gte, lte, sql } from '@neu/shared'
+import { getDb, schema } from '../db'
+
+// Ported from the Prisma original (Nitesh, PR #65) during the drizzle merge —
+// same IPC names, same response shapes, the renderer is untouched.
 
 interface CreateExpenseInput {
   date: string
@@ -36,32 +40,32 @@ const toBuffer = (data: Uint8Array | Buffer | ArrayBuffer): Buffer => {
   return Buffer.from(new Uint8Array(data))
 }
 
-// Columns sent to the renderer — everything except the receiptData BLOB so
-// listing all expenses doesn't ship MB of file bytes over IPC. The renderer
-// fetches the bytes on demand via expense:getReceipt.
-const expenseSelectNoBlob = {
-  id: true,
-  date: true,
-  category: true,
-  description: true,
-  amount: true,
-  paymentMode: true,
-  notes: true,
-  receiptMimeType: true,
-  receiptFileName: true,
-  createdAt: true,
-  updatedAt: true,
-} as const
-
 export const setupExpenseHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
+
+  // Columns sent to the renderer — everything except the receiptData BLOB so
+  // listing all expenses doesn't ship MB of file bytes over IPC. The renderer
+  // fetches the bytes on demand via expense:getReceipt.
+  const expenseNoBlob = {
+    id: schema.expense.id,
+    date: schema.expense.date,
+    category: schema.expense.category,
+    description: schema.expense.description,
+    amount: schema.expense.amount,
+    paymentMode: schema.expense.paymentMode,
+    notes: schema.expense.notes,
+    receiptMimeType: schema.expense.receiptMimeType,
+    receiptFileName: schema.expense.receiptFileName,
+    createdAt: schema.expense.createdAt,
+    updatedAt: schema.expense.updatedAt,
+  }
 
   ipcMain.handle('expense:getAll', async () => {
     try {
-      const rows = await prisma.expense.findMany({
-        select: expenseSelectNoBlob,
-        orderBy: [{ date: 'desc' }, { createdAt: 'desc' }],
-      })
+      const rows = await db
+        .select(expenseNoBlob)
+        .from(schema.expense)
+        .orderBy(desc(schema.expense.date), desc(schema.expense.createdAt))
       return { success: true, data: rows }
     } catch (error) {
       return {
@@ -73,11 +77,12 @@ export const setupExpenseHandlers = () => {
 
   ipcMain.handle('expense:getById', async (_, id: string) => {
     try {
-      const row = await prisma.expense.findUnique({
-        where: { id },
-        select: expenseSelectNoBlob,
-      })
-      return { success: true, data: row }
+      const [row] = await db
+        .select(expenseNoBlob)
+        .from(schema.expense)
+        .where(eq(schema.expense.id, id))
+        .limit(1)
+      return { success: true, data: row ?? null }
     } catch (error) {
       return {
         success: false,
@@ -89,10 +94,15 @@ export const setupExpenseHandlers = () => {
   // Returns the receipt file bytes only — used by view / download actions.
   ipcMain.handle('expense:getReceipt', async (_, id: string) => {
     try {
-      const row = await prisma.expense.findUnique({
-        where: { id },
-        select: { receiptData: true, receiptMimeType: true, receiptFileName: true },
-      })
+      const [row] = await db
+        .select({
+          receiptData: schema.expense.receiptData,
+          receiptMimeType: schema.expense.receiptMimeType,
+          receiptFileName: schema.expense.receiptFileName,
+        })
+        .from(schema.expense)
+        .where(eq(schema.expense.id, id))
+        .limit(1)
       if (!row || !row.receiptData) {
         return { success: false, error: 'No receipt attached' }
       }
@@ -125,8 +135,9 @@ export const setupExpenseHandlers = () => {
         return { success: false, error: 'Amount must be a positive number' }
       }
 
-      const row = await prisma.expense.create({
-        data: {
+      const [row] = await db
+        .insert(schema.expense)
+        .values({
           date: expenseDate,
           category: data.category,
           description: data.description,
@@ -136,9 +147,8 @@ export const setupExpenseHandlers = () => {
           receiptData: data.receiptData ? toBuffer(data.receiptData) : null,
           receiptMimeType: data.receiptMimeType ?? null,
           receiptFileName: data.receiptFileName ?? null,
-        },
-        select: expenseSelectNoBlob,
-      })
+        })
+        .returning(expenseNoBlob)
       return { success: true, data: row }
     } catch (error) {
       return {
@@ -150,7 +160,7 @@ export const setupExpenseHandlers = () => {
 
   ipcMain.handle('expense:update', async (_, id: string, data: UpdateExpenseInput) => {
     try {
-      const patch: any = {}
+      const patch: Record<string, unknown> = {}
       if (data.date !== undefined) {
         const d = new Date(data.date)
         if (isNaN(d.getTime())) return { success: false, error: 'Invalid expense date' }
@@ -178,11 +188,11 @@ export const setupExpenseHandlers = () => {
           if (data.receiptFileName !== undefined) patch.receiptFileName = data.receiptFileName
         }
       }
-      const row = await prisma.expense.update({
-        where: { id },
-        data: patch,
-        select: expenseSelectNoBlob,
-      })
+      const [row] = await db
+        .update(schema.expense)
+        .set(patch)
+        .where(eq(schema.expense.id, id))
+        .returning(expenseNoBlob)
       return { success: true, data: row }
     } catch (error) {
       return {
@@ -194,7 +204,7 @@ export const setupExpenseHandlers = () => {
 
   ipcMain.handle('expense:delete', async (_, id: string) => {
     try {
-      await prisma.expense.delete({ where: { id } })
+      await db.delete(schema.expense).where(eq(schema.expense.id, id))
       return { success: true }
     } catch (error) {
       return {
@@ -208,33 +218,38 @@ export const setupExpenseHandlers = () => {
   // Used by the page's summary cards.
   ipcMain.handle('expense:getTotals', async (_, args?: { fromDate?: string; toDate?: string }) => {
     try {
-      const where: any = {}
-      if (args?.fromDate || args?.toDate) {
-        where.date = {}
-        if (args.fromDate) where.date.gte = new Date(args.fromDate)
-        if (args.toDate) where.date.lte = new Date(args.toDate)
+      const conds = []
+      if (args?.fromDate) conds.push(gte(schema.expense.date, new Date(args.fromDate)))
+      if (args?.toDate) conds.push(lte(schema.expense.date, new Date(args.toDate)))
+      const where = conds.length ? and(...conds) : undefined
+
+      const grouped = await db
+        .select({
+          category: schema.expense.category,
+          total: sql<number>`COALESCE(SUM(${schema.expense.amount}), 0)`,
+          count: sql<number>`COUNT(*)`,
+        })
+        .from(schema.expense)
+        .where(where)
+        .groupBy(schema.expense.category)
+        .orderBy(asc(schema.expense.category))
+
+      let grandTotal = 0
+      let totalCount = 0
+      for (const g of grouped) {
+        grandTotal += g.total
+        totalCount += Number(g.count)
       }
-      const grouped = await prisma.expense.groupBy({
-        by: ['category'],
-        where,
-        _sum: { amount: true },
-        _count: { _all: true },
-      })
-      const totalAgg = await prisma.expense.aggregate({
-        where,
-        _sum: { amount: true },
-        _count: { _all: true },
-      })
       return {
         success: true,
         data: {
           byCategory: grouped.map((g) => ({
             category: g.category,
-            total: g._sum.amount ?? 0,
-            count: g._count._all,
+            total: g.total,
+            count: Number(g.count),
           })),
-          grandTotal: totalAgg._sum.amount ?? 0,
-          totalCount: totalAgg._count._all,
+          grandTotal,
+          totalCount,
         },
       }
     } catch (error) {

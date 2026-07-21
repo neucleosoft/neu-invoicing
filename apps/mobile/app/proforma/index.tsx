@@ -4,6 +4,12 @@ import { memo, useCallback, useMemo, useState } from 'react'
 import { FlatList, type ListRenderItem, Pressable, StyleSheet, TextInput, View } from 'react-native'
 
 import EmptyState from '@/components/EmptyState'
+import {
+  applyListControls,
+  ListControls,
+  type DateRangeKey,
+  type SortKey,
+} from '@/components/ListControls'
 import Fab from '@/components/Fab'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
@@ -27,6 +33,8 @@ export default function ProformaScreen() {
   const [docs, setDocs] = useState<Proforma[]>([])
   const [customers, setCustomers] = useState<Customer[]>([])
   const [search, setSearch] = useState('')
+  const [range, setRange] = useState<DateRangeKey>('all')
+  const [sort, setSort] = useState<SortKey>('date_desc')
 
   const load = useCallback(() => {
     return Promise.all([
@@ -62,9 +70,11 @@ export default function ProformaScreen() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
-    if (!q) return docs
-    return docs.filter((x) => x.invoiceNumber.toLowerCase().includes(q) || customerName(x.customerId).toLowerCase().includes(q))
-  }, [docs, search, customerName])
+    const matches = q
+      ? docs.filter((x) => x.invoiceNumber.toLowerCase().includes(q) || customerName(x.customerId).toLowerCase().includes(q))
+      : docs
+    return applyListControls(matches, range, sort, (x) => x.invoiceDate, (x) => x.totalAmount)
+  }, [docs, search, customerName, range, sort])
 
   const renderItem = useCallback<ListRenderItem<Proforma>>(
     ({ item }) => (
@@ -88,6 +98,7 @@ export default function ProformaScreen() {
       <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.searchWrap}>
         <TextInput value={search} onChangeText={setSearch} placeholder="Search proforma…" placeholderTextColor="#9ca3af" style={styles.searchInput} />
       </ThemedView>
+      <ListControls range={range} onRange={setRange} sort={sort} onSort={setSort} />
       <FlatList
         data={filtered}
         keyExtractor={(d) => d.id}

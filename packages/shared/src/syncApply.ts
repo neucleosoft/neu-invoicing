@@ -1,0 +1,321 @@
+// Apply planner — the merge brain of sync (docs/sync-design.md §3, §7).
+//
+// PURE: takes peer packets + an index of local state and returns a PLAN — no
+// DB, no IO, no clock. The app executes the plan inside one transaction (upsert
+// headers, replace child sets, replace doc-scoped movements, renumber locals)
+// and then runs recomputeAll({ apply: true }). Keeping every merge rule here
+// means desktop and mobile can never resolve the same conflict differently —
+// and the whole brain is provable with plain-object tests.
+//
+// MERGE RULES, in priority order (P4: timestamp-free rules first):
+//  1. CANCEL is sticky. A locally-cancelled doc is never resurrected by an
+//     incoming edit, and an incoming cancel beats a newer local edit. One-way.
+//  2. REVERSED is sticky, exactly like cancel (D15).
+//  3. Otherwise newest-edit-wins — on the HLC stamp when BOTH sides carry one
+//     (P1: clock-skew-proof, device-suffix tie-break, see ./hlc.ts), falling
+//     back to the header's wall-clock updatedAt for rows born before the hlc
+//     column. In the fallback, ties keep local.
+//  4. deletedAt is NOT sticky — Archive is reversible by design, so restores
+//     ride plain newest-wins.
+//  5. Document-number collisions (D4): the LATER-CREATED doc is renumbered to
+//     the next free number in its own series; the earlier keeps its number.
+//     When the later one is LOCAL, the plan emits a local renumber.
+
+import {
+  SYNC_APPLY_ORDER,
+  SYNC_DOCUMENT_TABLES,
+  SYNC_SINGLE_TABLES,
+  toEpochMs,
+  type DocTableSpec,
+  type PacketRow,
+  type SyncPacket,
+} from './syncPackets'
+import { compareHlc, encodeHlc } from './hlc'
+
+export interface LocalHeaderState {
+  updatedAt: number | null
+  /** P1: the row's HLC stamp — null/absent for rows never written since the
+   *  hlc column landed. When both sides have one, it outranks updatedAt. */
+  hlc?: string | null
+  createdAt?: number | null
+  deletedAt?: number | null
+  cancelledAt?: number | null
+  status?: string | null
+}
+
+export interface LocalNumberOwner {
+  rowId: string
+  createdAt: number | null
+}
+
+export interface LocalIndex {
+  /** table → rowId → header state, for every row the packets reference. */
+  headers: Record<string, Record<string, LocalHeaderState>>
+  /** table → documentNumber (stringified) → owning row, for numbered tables. */
+  numbers?: Record<string, Record<string, LocalNumberOwner>>
+}
+
+export interface PlannedUpsert {
+  table: string
+  rowId: string
+  /** True when the header doesn't exist locally (insert vs update). */
+  insert: boolean
+  row: PacketRow
+  children?: { table: string; fk: string; rows: PacketRow[] }
+  /** Doc-scoped REPLACE-set: delete by reference, insert these. */
+  movements?: { referenceType: string; referenceId: string; rows: PacketRow[] }
+}
+
+export interface PlannedLocalRenumber {
+  table: string
+  rowId: string
+  column: string
+  to: string | number
+}
+
+export type SkipReason = 'NOT_NEWER' | 'CANCEL_STICKY' | 'REVERSED_STICKY' | 'UNKNOWN_TABLE'
+
+export interface SyncLogEntry {
+  kind: 'RENUMBER_INCOMING' | 'RENUMBER_LOCAL' | 'STICKY_SKIP' | 'STICKY_WIN'
+  table: string
+  rowId: string
+  detail: string
+}
+
+export interface ApplyPlan {
+  upserts: PlannedUpsert[]
+  localRenumbers: PlannedLocalRenumber[]
+  skipped: { table: string; rowId: string; reason: SkipReason }[]
+  log: SyncLogEntry[]
+  /** Incoming packets that newly archive or cancel a live local row — the
+   *  S3 tripwire pauses when this crosses its threshold (D6). */
+  incomingRemovals: number
+}
+
+// D6: when one pull would archive/cancel this many LIVE local rows, the app
+// pauses and asks before applying — mass destruction never spreads silently.
+export const TRIPWIRE_THRESHOLD = 10
+
+const DOC_SPEC_BY_TABLE = new Map<string, DocTableSpec>(SYNC_DOCUMENT_TABLES.map((s) => [s.table, s]))
+const SINGLE_TABLE_SET = new Set<string>(SYNC_SINGLE_TABLES)
+
+// Bump a document number to the next free value in its own series: increment
+// the trailing integer segment, preserving zero-padding ("NS/SL/26-27/07" →
+// "…/08", "BILL-2026-003" → "BILL-2026-004"). A number with no digits gets a
+// "-2" style suffix. Integers (previousInvoice.serialNumber) just increment.
+export function nextFreeNumber(
+  current: string | number,
+  isTaken: (candidate: string | number) => boolean,
+): string | number {
+  if (typeof current === 'number') {
+    let n = current + 1
+    while (isTaken(n)) n++
+    return n
+  }
+  const match = /^(.*?)(\d+)$/s.exec(current)
+  if (!match) {
+    let suffix = 2
+    while (isTaken(`${current}-${suffix}`)) suffix++
+    return `${current}-${suffix}`
+  }
+  const [, prefix, digits] = match
+  let n = parseInt(digits, 10)
+  for (;;) {
+    n++
+    const candidate = `${prefix}${String(n).padStart(digits.length, '0')}`
+    if (!isTaken(candidate)) return candidate
+  }
+}
+
+// The hlc stamp rides INSIDE the row (it's an ordinary synced column), not on
+// the packet envelope — so the diary format never changed for it.
+const rowHlc = (row: PacketRow): string | null =>
+  typeof row.hlc === 'string' && row.hlc.length > 0 ? row.hlc : null
+
+/**
+ * P1 comparator: is the incoming packet strictly newer than local state?
+ * HLC stamps win when BOTH sides carry one (clock-skew-proof, and the device
+ * suffix makes cross-device ties impossible). A null on either side means a
+ * pre-hlc row or peer — fall back to wall-clock updatedAt, which stays
+ * coherent because updatedAt is never ratcheted, only ever the real clock.
+ */
+export function incomingIsNewer(packet: SyncPacket, row: PacketRow, local: LocalHeaderState): boolean {
+  const inc = rowHlc(row)
+  const loc = local.hlc ?? null
+  if (inc != null && loc != null) return compareHlc(inc, loc) > 0
+  return packet.updatedAt > (local.updatedAt ?? -1)
+}
+
+// Deduplicate packets across peer diaries: a doc edited on two devices appears
+// in both, so keep the newest per (table, rowId) — by hlc when both carry one,
+// else by updatedAt with a device-id tie-break, so every device that reads the
+// same diaries picks the same packet.
+export function dedupePackets(packets: SyncPacket[]): SyncPacket[] {
+  const byKey = new Map<string, SyncPacket>()
+  const beats = (a: SyncPacket, b: SyncPacket): boolean => {
+    const ah = rowHlc(a.row)
+    const bh = rowHlc(b.row)
+    if (ah != null && bh != null) return compareHlc(ah, bh) > 0
+    return a.updatedAt > b.updatedAt || (a.updatedAt === b.updatedAt && a.device > b.device)
+  }
+  for (const p of packets) {
+    const key = `${p.table}\0${p.rowId}`
+    const existing = byKey.get(key)
+    if (!existing || beats(p, existing)) {
+      byKey.set(key, p)
+    }
+  }
+  return [...byKey.values()]
+}
+
+/**
+ * `nextHlc` mints a fresh HLC stamp from the device's ratchet — used when the
+ * plan itself EDITS a row (renumbering a collided incoming doc), so the edit
+ * outranks both originals on hlc-aware peers. Optional: without it the stamp
+ * is derived from `now` + the packet's device, which keeps old callers and
+ * tests working but skips the ratchet.
+ */
+export function planApply(packets: SyncPacket[], local: LocalIndex, now: number, nextHlc?: () => string): ApplyPlan {
+  const plan: ApplyPlan = { upserts: [], localRenumbers: [], skipped: [], log: [], incomingRemovals: 0 }
+
+  // Numbers claimed during THIS plan (incoming keeps, renumber targets, new
+  // docs) with their owning packet — so two colliding packets in one batch
+  // can't both grab the same slot, AND a number introduced by an earlier
+  // packet is visible as a collision owner to a later one (≥3-device case).
+  const claimed = new Map<string, Map<string, LocalNumberOwner>>()
+  const claim = (table: string, num: string | number, owner: LocalNumberOwner) => {
+    if (!claimed.has(table)) claimed.set(table, new Map())
+    claimed.get(table)!.set(String(num), owner)
+  }
+  const isTaken = (table: string, num: string | number): boolean =>
+    Boolean(local.numbers?.[table]?.[String(num)]) || Boolean(claimed.get(table)?.has(String(num)))
+
+  for (const packet of dedupePackets(packets)) {
+    const spec = DOC_SPEC_BY_TABLE.get(packet.table)
+    if (!spec && !SINGLE_TABLE_SET.has(packet.table)) {
+      plan.skipped.push({ table: packet.table, rowId: packet.rowId, reason: 'UNKNOWN_TABLE' })
+      continue
+    }
+
+    const localState: LocalHeaderState | undefined = local.headers[packet.table]?.[packet.rowId]
+    const row = { ...packet.row }
+    const incCancelled = row.cancelledAt != null
+    const locCancelled = localState?.cancelledAt != null
+    const incReversed = row.status === 'REVERSED'
+    const locReversed = localState?.status === 'REVERSED'
+
+    // ── decide ──────────────────────────────────────────────────────────────
+    if (localState) {
+      if (locCancelled && !incCancelled) {
+        plan.skipped.push({ table: packet.table, rowId: packet.rowId, reason: 'CANCEL_STICKY' })
+        plan.log.push({ kind: 'STICKY_SKIP', table: packet.table, rowId: packet.rowId, detail: 'Incoming edit ignored — document is cancelled here (cancel is terminal)' })
+        continue
+      }
+      if (locReversed && !incReversed && !incCancelled) {
+        plan.skipped.push({ table: packet.table, rowId: packet.rowId, reason: 'REVERSED_STICKY' })
+        plan.log.push({ kind: 'STICKY_SKIP', table: packet.table, rowId: packet.rowId, detail: 'Incoming edit ignored — document is reversed here (reversal is terminal)' })
+        continue
+      }
+      const stickyWin = (incCancelled && !locCancelled) || (incReversed && !locReversed)
+      const newer = incomingIsNewer(packet, row, localState)
+      if (!stickyWin && !newer) {
+        plan.skipped.push({ table: packet.table, rowId: packet.rowId, reason: 'NOT_NEWER' })
+        continue
+      }
+      if (stickyWin && !newer) {
+        plan.log.push({ kind: 'STICKY_WIN', table: packet.table, rowId: packet.rowId, detail: 'Incoming cancel/reversal applied over a newer local edit (terminal flags beat timestamps)' })
+      }
+    }
+
+    // ── tripwire accounting ─────────────────────────────────────────────────
+    if (
+      (row.deletedAt != null && localState?.deletedAt == null && localState) ||
+      (incCancelled && !locCancelled && localState)
+    ) {
+      plan.incomingRemovals++
+    }
+
+    // ── number-collision renumbering (D4) ───────────────────────────────────
+    if (spec?.numberColumn) {
+      const col = spec.numberColumn
+      const incomingNumber = row[col] as string | number | null | undefined
+      // A number's owner can be a LOCAL row or a row introduced EARLIER in
+      // this same plan (≥3 peers can collide inside one pull).
+      const owner =
+        incomingNumber != null
+          ? local.numbers?.[packet.table]?.[String(incomingNumber)] ??
+            claimed.get(packet.table)?.get(String(incomingNumber))
+          : undefined
+      if (incomingNumber != null && owner && owner.rowId !== packet.rowId) {
+        const incomingCreated = toEpochMs(row.createdAt) ?? Number.MAX_SAFE_INTEGER
+        const ownerCreated = owner.createdAt ?? Number.MAX_SAFE_INTEGER
+        const taken = (n: string | number) => isTaken(packet.table, n)
+        // Later-created loses the number; exact createdAt ties break on rowId
+        // so BOTH devices resolve the same collision identically (a tie that
+        // renumbered "the incoming one" on each side would diverge forever).
+        const incomingLoses =
+          incomingCreated > ownerCreated ||
+          (incomingCreated === ownerCreated && packet.rowId > owner.rowId)
+        if (incomingLoses) {
+          // Incoming is later-created → it gets the new number. Stamp the row
+          // NEWER (updatedAt AND hlc — hlc-aware peers compare hlc first) so
+          // the renumber propagates: without this, the doc's home device would
+          // skip the echo as NOT_NEWER and print the old number forever
+          // (permanent divergence).
+          const to = nextFreeNumber(incomingNumber, taken)
+          row[col] = to
+          row.updatedAt = now
+          row.hlc = nextHlc ? nextHlc() : encodeHlc(now, 0, packet.device)
+          claim(packet.table, to, { rowId: packet.rowId, createdAt: toEpochMs(row.createdAt) })
+          plan.log.push({ kind: 'RENUMBER_INCOMING', table: packet.table, rowId: packet.rowId, detail: `${incomingNumber} was already used here — renumbered to ${to}` })
+        } else {
+          // The LOCAL doc is later-created → renumber it; incoming keeps the number.
+          const to = nextFreeNumber(incomingNumber, taken)
+          claim(packet.table, to, owner)
+          claim(packet.table, incomingNumber, { rowId: packet.rowId, createdAt: toEpochMs(row.createdAt) })
+          plan.localRenumbers.push({ table: packet.table, rowId: owner.rowId, column: col, to })
+          plan.log.push({ kind: 'RENUMBER_LOCAL', table: packet.table, rowId: owner.rowId, detail: `${incomingNumber} belongs to an earlier document from another device — this one renumbered to ${to}` })
+        }
+      } else if (incomingNumber != null && !localState) {
+        // New doc bringing a new number — claim it against later packets.
+        claim(packet.table, incomingNumber, { rowId: packet.rowId, createdAt: toEpochMs(row.createdAt) })
+      }
+    }
+
+    // ── emit the upsert ─────────────────────────────────────────────────────
+    const upsert: PlannedUpsert = {
+      table: packet.table,
+      rowId: packet.rowId,
+      insert: !localState,
+      row,
+    }
+    if (spec) {
+      upsert.children = {
+        table: spec.childTable,
+        fk: spec.childFk,
+        rows: packet.children?.[spec.childTable] ?? [],
+      }
+      if (spec.movementRef) {
+        upsert.movements = {
+          referenceType: spec.movementRef,
+          referenceId: packet.rowId,
+          rows: packet.children?.stockMovement ?? [],
+        }
+      }
+    }
+    plan.upserts.push(upsert)
+  }
+
+  // FK-safe ordering: desktop enforces foreign keys at statement time, so a
+  // bill must never be inserted before the new supplier it references.
+  // Secondary sort on rowId keeps the plan deterministic across devices.
+  const orderOf = (t: string) => {
+    const i = SYNC_APPLY_ORDER.indexOf(t)
+    return i === -1 ? SYNC_APPLY_ORDER.length : i
+  }
+  plan.upserts.sort((a, b) =>
+    orderOf(a.table) - orderOf(b.table) || a.rowId.localeCompare(b.rowId),
+  )
+
+  return plan
+}

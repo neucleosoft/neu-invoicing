@@ -43,10 +43,10 @@ const destinations = [
 interface CommandPaletteProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSyncNow: () => void
+  onBackupNow: () => void
 }
 
-export default function CommandPalette({ open, onOpenChange, onSyncNow }: CommandPaletteProps) {
+export default function CommandPalette({ open, onOpenChange, onBackupNow }: CommandPaletteProps) {
   const navigate = useNavigate()
   const { themePreference, setThemePreference } = useStore()
 
@@ -129,12 +129,12 @@ export default function CommandPalette({ open, onOpenChange, onSyncNow }: Comman
                 <span>Theme: System{themePreference === 'system' ? ' (current)' : ''}</span>
               </Command.Item>
               <Command.Item
-                value="sync now drive"
-                onSelect={() => runAndClose(() => onSyncNow())}
+                value="backup back up cloud drive now"
+                onSelect={() => runAndClose(() => onBackupNow())}
                 className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm text-gray-700 dark:text-gray-200 cursor-pointer data-[selected=true]:bg-primary-50 data-[selected=true]:text-primary-700 dark:data-[selected=true]:bg-primary-900/30 dark:data-[selected=true]:text-primary-300"
               >
                 <RefreshCw className="w-4 h-4" />
-                <span>Sync now</span>
+                <span>Back up to cloud now</span>
               </Command.Item>
             </Command.Group>
           </Command.List>

@@ -14,10 +14,8 @@
     "preview": "vite preview",
     "electron:dev": "dotenv -- vite",
     "electron:build": "vite build && electron-builder",
-    "prisma:generate": "prisma generate",
-    "prisma:migrate": "prisma migrate dev",
-    "prisma:studio": "prisma studio",
-    "import:invoices": "node scripts/import-invoices.js"
+    "sandbox:rowsync": "esbuild scripts/rowsync-sandbox.ts --bundle --platform=node --format=cjs --external:@libsql/client --outfile=scripts/.rowsync-sandbox.cjs --log-level=warning && node scripts/.rowsync-sandbox.cjs",
+    "recompute": "esbuild scripts/recompute-runner.ts --bundle --platform=node --format=cjs --external:@libsql/client --outfile=scripts/.recompute-runner.cjs --log-level=warning && node scripts/.recompute-runner.cjs"
   },
   "keywords": [
     "invoicing",
@@ -28,13 +26,15 @@
   "author": "Neu Invoicing",
   "license": "MIT",
   "dependencies": {
-    "@prisma/client": "^5.20.0",
+    "@libsql/client": "^0.15.15",
+    "@neu/shared": "workspace:*",
     "@types/pdf-parse": "^1.1.5",
     "@types/react-datepicker": "^6.2.0",
     "axios": "^1.7.7",
     "cmdk": "^1.1.1",
     "date-fns": "^3.6.0",
     "dotenv": "^17.3.1",
+    "drizzle-orm": "^0.45.2",
     "electron-store": "^8.2.0",
     "exceljs": "^3.4.0",
     "googleapis": "^171.4.0",
@@ -45,7 +45,6 @@
     "pdf-parse": "^1.1.4",
     "pdfjs-dist": "^5.7.284",
     "pdfmake": "^0.2.10",
-    "prisma": "^5.20.0",
     "react": "^18.3.1",
     "react-datepicker": "^9.1.0",
     "react-dom": "^18.3.1",
@@ -81,32 +80,28 @@
       "output": "release"
     },
     "asarUnpack": [
-      "node_modules/prisma/**/*",
-      "node_modules/.prisma/**/*",
-      "node_modules/@prisma/**/*",
-      "prisma/**/*"
+      "node_modules/@libsql/**/*",
+      "node_modules/libsql/**/*"
     ],
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
       "node_modules/**/*",
-      "package.json",
-      "prisma/**/*",
-      {
-        "from": "node_modules/.prisma/client/",
-        "to": "node_modules/.prisma/client/"
-      }
+      "package.json"
     ],
     "extraResources": [
-      "prisma/**/*",
-      "node_modules/.prisma/**/*",
-      "node_modules/@prisma/client/**/*"
+      "prisma/migrations/**/*",
+      {
+        "from": "../../packages/shared/drizzle",
+        "to": "drizzle"
+      }
     ],
     "win": {
+      "icon": "resources/icon.ico",
       "target": [
         "nsis"
       ],
-      "signAndEditExecutable": false
+      "signAndEditExecutable": true
     },
     "nsis": {
       "oneClick": false,

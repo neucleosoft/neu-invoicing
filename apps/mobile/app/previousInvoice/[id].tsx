@@ -7,7 +7,9 @@ import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-nat
 import { Row, Section } from '@/components/DetailSection'
 import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
+import { useAuth } from '@/auth'
 import { schema, useDb } from '@/db'
+import { ensurePreviousInvoiceFile } from '@/sync/imageStore'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
 
@@ -16,6 +18,7 @@ type PreviousInvoice = typeof schema.previousInvoice.$inferSelect
 export default function PreviousInvoiceDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const db = useDb()
+  const { getFreshAccessToken } = useAuth()
 
   const [invoice, setInvoice] = useState<PreviousInvoice | null>(null)
   const [loading, setLoading] = useState(true)
@@ -41,17 +44,35 @@ export default function PreviousInvoiceDetailScreen() {
       setInvoice(inv)
 
       // The blob comes back as a Buffer (via the global polyfill); turn it into
-      // a data URI so expo-image can render it. fileData is NOT NULL so it's
-      // always present, but guard on the mime type to be safe.
-      if (inv.fileData && inv.fileMimeType) {
-        const buf = inv.fileData as unknown as { toString: (enc: string) => string }
-        const base64 = buf.toString('base64')
-        setFileUri(`data:${inv.fileMimeType};base64,${base64}`)
+      // a data URI so expo-image can render it. An EMPTY blob is the synced-in
+      // sentinel — the file lives on Drive (S4 image split), fetched lazily.
+      const blob = inv.fileData as unknown as { length: number; toString: (enc: string) => string }
+      if (blob && blob.length > 0 && inv.fileMimeType) {
+        setFileUri(`data:${inv.fileMimeType};base64,${blob.toString('base64')}`)
+      } else if (inv.fileMimeType) {
+        void (async () => {
+          const token = await getFreshAccessToken()
+          if (!token) return
+          if (await ensurePreviousInvoiceFile(db, token, id)) {
+            const [fresh] = await db
+              .select({
+                fileData: schema.previousInvoice.fileData,
+                fileMimeType: schema.previousInvoice.fileMimeType,
+              })
+              .from(schema.previousInvoice)
+              .where(eq(schema.previousInvoice.id, id))
+              .limit(1)
+            const freshBlob = fresh?.fileData as unknown as { length: number; toString: (enc: string) => string }
+            if (freshBlob && freshBlob.length > 0 && fresh?.fileMimeType) {
+              setFileUri(`data:${fresh.fileMimeType};base64,${freshBlob.toString('base64')}`)
+            }
+          }
+        })()
       }
       setLoading(false)
     }
     load()
-  }, [id, db])
+  }, [id, db, getFreshAccessToken])
 
   function handleDelete() {
     if (!id) return
@@ -112,7 +133,7 @@ export default function PreviousInvoiceDetailScreen() {
         {isDeleted ? (
           <ThemedView style={styles.deletedBanner}>
             <ThemedText style={styles.deletedBannerText}>
-              This previous invoice has been removed — it's left out of totals and reports and can't be restored.
+              This previous invoice has been removed — it&apos;s left out of totals and reports and can&apos;t be restored.
             </ThemedText>
           </ThemedView>
         ) : null}

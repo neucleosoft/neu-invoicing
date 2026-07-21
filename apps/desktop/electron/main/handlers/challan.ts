@@ -1,5 +1,36 @@
 import { ipcMain } from 'electron'
-import { getPrisma } from '../database'
+import { and, computeGstValues, desc, eq, like, sql, type DrizzleDbLike } from '@neu/shared'
+import { getDb, schema } from '../db'
+import { attachCustomerAndItems } from './docLoaders'
+
+// GST split for a challan's lines via the shared computeGstValues — same
+// engine as invoices and the mobile challan form. Totals are identical to the
+// old flat computation; this additionally yields the CGST/SGST/IGST split the
+// challan columns store since 2026-07-14.
+const buildChallanGst = async (tx: DrizzleDbLike, data: any) => {
+  const [customer] = await tx.select().from(schema.customer).where(eq(schema.customer.id, data.customerId)).limit(1)
+  const [company] = await tx.select().from(schema.company).limit(1)
+  const catalogItems: any[] = []
+  for (const item of data.items) {
+    const [row] = await tx.select().from(schema.item).where(eq(schema.item.id, item.itemId)).limit(1)
+    catalogItems.push(row ?? null)
+  }
+  return computeGstValues({
+    company: company ? { stateCode: company.stateCode, stateName: company.stateName } : null,
+    party: customer
+      ? { taxId: customer.taxId, stateCode: customer.stateCode, stateName: customer.stateName }
+      : {},
+    items: data.items.map((item: any, idx: number) => ({
+      quantity: item.quantity,
+      rate: item.rate,
+      discount: item.discount,
+      taxRate: item.taxRate,
+      hsnCode: item.hsnCode,
+      catalogHsnCode: catalogItems[idx]?.hsnCode,
+      catalogSkuHsn: catalogItems[idx]?.skuHsn,
+    })),
+  })
+}
 
 // Generate fiscal year string (e.g., "26-27" for April 2026 - March 2027)
 const getFiscalYear = (): string => {
@@ -25,23 +56,34 @@ const normalizeChallanNumber = (num: string): string => {
   return parts.join('/')
 }
 
+// Shape a challan line from the shared GST result (create + update use this).
+const challanLine = (item: any, g: any) => ({
+  itemId: item.itemId,
+  quantity: item.quantity,
+  rate: item.rate,
+  discount: item.discount || 0,
+  taxRate: item.taxRate || 0,
+  hsnCode: g.hsnCode || null,
+  total: g.total,
+  taxableAmount: g.taxableAmount,
+  cgstRate: g.cgstRate,
+  cgstAmount: g.cgstAmount,
+  sgstRate: g.sgstRate,
+  sgstAmount: g.sgstAmount,
+  igstRate: g.igstRate,
+  igstAmount: g.igstAmount,
+  cessRate: g.cessRate,
+  cessAmount: g.cessAmount,
+})
+
 export const setupChallanHandlers = () => {
-  const prisma = getPrisma()
+  const db = getDb()
 
   // Get all delivery challans
   ipcMain.handle('challan:getAll', async () => {
     try {
-      const challans = await prisma.deliveryChallan.findMany({
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true
-            }
-          }
-        },
-        orderBy: { challanDate: 'desc' }
-      })
+      const headers = await db.select().from(schema.deliveryChallan).orderBy(desc(schema.deliveryChallan.challanDate))
+      const challans = await attachCustomerAndItems(db, headers, schema.deliveryChallanItem, 'deliveryChallanId')
       return { success: true, data: challans }
     } catch (error) {
       return {
@@ -54,17 +96,9 @@ export const setupChallanHandlers = () => {
   // Get challan by ID
   ipcMain.handle('challan:getById', async (_, id: string) => {
     try {
-      const challan = await prisma.deliveryChallan.findUnique({
-        where: { id },
-        include: {
-          customer: true,
-          items: {
-            include: {
-              item: true
-            }
-          }
-        }
-      })
+      const [header] = await db.select().from(schema.deliveryChallan).where(eq(schema.deliveryChallan.id, id)).limit(1)
+      if (!header) return { success: true, data: null }
+      const [challan] = await attachCustomerAndItems(db, [header], schema.deliveryChallanItem, 'deliveryChallanId')
       return { success: true, data: challan }
     } catch (error) {
       return {
@@ -80,31 +114,26 @@ export const setupChallanHandlers = () => {
       // Normalize challan number — pad last numeric segment to 2 digits
       data.challanNumber = normalizeChallanNumber(data.challanNumber)
 
-      const challan = await prisma.$transaction(async (tx: any) => {
+      const created = await db.transaction(async (tx) => {
         // Check for duplicate challan number
-        const existing = await tx.deliveryChallan.findUnique({ where: { challanNumber: data.challanNumber } })
+        const [existing] = await tx
+          .select({ id: schema.deliveryChallan.id })
+          .from(schema.deliveryChallan)
+          .where(eq(schema.deliveryChallan.challanNumber, data.challanNumber))
+          .limit(1)
         if (existing) throw new Error(`Challan number ${data.challanNumber} already exists`)
 
-        // Calculate totals
-        let subtotal = 0
-        let taxAmount = 0
+        const gst = await buildChallanGst(tx, data)
 
-        data.items.forEach((item: any) => {
-          const itemTotal = item.quantity * item.rate - (item.discount || 0)
-          subtotal += itemTotal
-          taxAmount += (itemTotal * (item.taxRate || 0)) / 100
-        })
-
-        const totalAmount = subtotal + taxAmount
-
-        const created = await tx.deliveryChallan.create({
-          data: {
+        const [challan] = await tx
+          .insert(schema.deliveryChallan)
+          .values({
             challanNumber: data.challanNumber,
             challanDate: new Date(data.challanDate),
             customerId: data.customerId,
-            subtotal,
-            taxAmount,
-            totalAmount,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
             transportMode: data.transportMode || null,
             vehicleNumber: data.vehicleNumber || null,
             notes: data.notes || null,
@@ -114,53 +143,48 @@ export const setupChallanHandlers = () => {
             ewayBillNo: data.ewayBillNo || null,
             warrantyPeriod: data.warrantyPeriod || null,
             dispatchedThrough: data.dispatchedThrough || null,
-            items: {
-              create: data.items.map((item: any) => {
-                const taxableAmount = item.quantity * item.rate - (item.discount || 0)
-                return {
-                  itemId: item.itemId,
-                  quantity: item.quantity,
-                  rate: item.rate,
-                  discount: item.discount || 0,
-                  taxRate: item.taxRate || 0,
-                  hsnCode: item.hsnCode || null,
-                  total: taxableAmount + (taxableAmount * (item.taxRate || 0)) / 100
-                }
-              })
-            }
-          },
-          include: {
-            items: { include: { item: true } },
-            customer: true
-          }
-        })
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
+          })
+          .returning()
+
+        if (data.items.length) {
+          await tx.insert(schema.deliveryChallanItem).values(
+            data.items.map((item: any, idx: number) => ({
+              ...challanLine(item, gst.items[idx]),
+              deliveryChallanId: challan.id,
+            })),
+          )
+        }
 
         // Update stock (decrement for tracked items) — challans dispatch goods
         for (const item of data.items) {
-          const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
+          const [dbItem] = await tx.select().from(schema.item).where(eq(schema.item.id, item.itemId)).limit(1)
           if (dbItem && dbItem.trackStock) {
-            await tx.item.update({
-              where: { id: item.itemId },
-              data: {
-                currentStock: { decrement: item.quantity }
-              }
-            })
+            await tx
+              .update(schema.item)
+              .set({ currentStock: sql`${schema.item.currentStock} - ${item.quantity}` })
+              .where(eq(schema.item.id, item.itemId))
 
-            await tx.stockMovement.create({
-              data: {
-                itemId: item.itemId,
-                movementType: 'SALE',
-                quantity: -item.quantity,
-                referenceType: 'CHALLAN',
-                referenceId: created.id
-              }
+            await tx.insert(schema.stockMovement).values({
+              itemId: item.itemId,
+              movementType: 'SALE',
+              quantity: -item.quantity,
+              referenceType: 'CHALLAN',
+              referenceId: challan.id
             })
           }
         }
 
-        return created
+        return challan
       })
 
+      const [challan] = await attachCustomerAndItems(db, [created], schema.deliveryChallanItem, 'deliveryChallanId')
       return { success: true, data: challan }
     } catch (error) {
       return {
@@ -178,78 +202,69 @@ export const setupChallanHandlers = () => {
         data.challanNumber = normalizeChallanNumber(data.challanNumber)
       }
 
-      const existingChallan = await prisma.deliveryChallan.findUnique({
-        where: { id },
-        include: { items: true }
-      })
-
+      const [existingChallan] = await db.select().from(schema.deliveryChallan).where(eq(schema.deliveryChallan.id, id)).limit(1)
       if (!existingChallan) {
         throw new Error('Delivery challan not found')
       }
 
       // Check for duplicate if challan number changed
       if (data.challanNumber && data.challanNumber !== existingChallan.challanNumber) {
-        const duplicate = await prisma.deliveryChallan.findUnique({ where: { challanNumber: data.challanNumber } })
+        const [duplicate] = await db
+          .select({ id: schema.deliveryChallan.id })
+          .from(schema.deliveryChallan)
+          .where(eq(schema.deliveryChallan.challanNumber, data.challanNumber))
+          .limit(1)
         if (duplicate) throw new Error(`Challan number ${data.challanNumber} already exists`)
       }
 
-      // Calculate new totals
-      let subtotal = 0
-      let taxAmount = 0
+      const gst = await buildChallanGst(db, data)
 
-      data.items.forEach((item: any) => {
-        const itemTotal = item.quantity * item.rate - (item.discount || 0)
-        subtotal += itemTotal
-        taxAmount += (itemTotal * (item.taxRate || 0)) / 100
-      })
+      const updated = await db.transaction(async (tx) => {
+        // Delete existing items
+        await tx.delete(schema.deliveryChallanItem).where(eq(schema.deliveryChallanItem.deliveryChallanId, id))
 
-      const totalAmount = subtotal + taxAmount
+        // Update challan with new data
+        const [challan] = await tx
+          .update(schema.deliveryChallan)
+          .set({
+            challanNumber: data.challanNumber || existingChallan.challanNumber,
+            challanDate: new Date(data.challanDate),
+            customerId: data.customerId,
+            subtotal: gst.subtotal,
+            taxAmount: gst.taxAmount,
+            totalAmount: gst.totalAmount,
+            transportMode: data.transportMode || null,
+            vehicleNumber: data.vehicleNumber || null,
+            notes: data.notes || null,
+            termsConditions: data.termsConditions ?? null,
+            status: data.status || existingChallan.status,
+            poNumber: data.poNumber || null,
+            ewayBillNo: data.ewayBillNo || null,
+            warrantyPeriod: data.warrantyPeriod || null,
+            dispatchedThrough: data.dispatchedThrough || null,
+            placeOfSupply: gst.placeOfSupply || null,
+            placeOfSupplyName: gst.placeOfSupplyName || null,
+            isInterState: gst.isInterState,
+            cgstAmount: gst.totalCgst,
+            sgstAmount: gst.totalSgst,
+            igstAmount: gst.totalIgst,
+            cessAmount: gst.totalCess,
+          })
+          .where(eq(schema.deliveryChallan.id, id))
+          .returning()
 
-      // Delete existing items
-      await prisma.deliveryChallanItem.deleteMany({
-        where: { deliveryChallanId: id }
-      })
-
-      // Update challan with new data
-      const challan = await prisma.deliveryChallan.update({
-        where: { id },
-        data: {
-          challanNumber: data.challanNumber || existingChallan.challanNumber,
-          challanDate: new Date(data.challanDate),
-          customerId: data.customerId,
-          subtotal,
-          taxAmount,
-          totalAmount,
-          transportMode: data.transportMode || null,
-          vehicleNumber: data.vehicleNumber || null,
-          notes: data.notes || null,
-          termsConditions: data.termsConditions ?? null,
-          status: data.status || existingChallan.status,
-          poNumber: data.poNumber || null,
-          ewayBillNo: data.ewayBillNo || null,
-          warrantyPeriod: data.warrantyPeriod || null,
-          dispatchedThrough: data.dispatchedThrough || null,
-          items: {
-            create: data.items.map((item: any) => {
-              const taxableAmount = item.quantity * item.rate - (item.discount || 0)
-              return {
-                itemId: item.itemId,
-                quantity: item.quantity,
-                rate: item.rate,
-                discount: item.discount || 0,
-                taxRate: item.taxRate || 0,
-                hsnCode: item.hsnCode || null,
-                total: taxableAmount + (taxableAmount * (item.taxRate || 0)) / 100
-              }
-            })
-          }
-        },
-        include: {
-          items: { include: { item: true } },
-          customer: true
+        if (data.items.length) {
+          await tx.insert(schema.deliveryChallanItem).values(
+            data.items.map((item: any, idx: number) => ({
+              ...challanLine(item, gst.items[idx]),
+              deliveryChallanId: id,
+            })),
+          )
         }
+        return challan
       })
 
+      const [challan] = await attachCustomerAndItems(db, [updated], schema.deliveryChallanItem, 'deliveryChallanId')
       return { success: true, data: challan }
     } catch (error) {
       return {
@@ -264,11 +279,8 @@ export const setupChallanHandlers = () => {
   // Terminal — there is no restore.
   ipcMain.handle('challan:cancel', async (_, id: string) => {
     try {
-      await prisma.$transaction(async (tx: any) => {
-        const challan = await tx.deliveryChallan.findUnique({
-          where: { id },
-          include: { items: true }
-        })
+      await db.transaction(async (tx) => {
+        const [challan] = await tx.select().from(schema.deliveryChallan).where(eq(schema.deliveryChallan.id, id)).limit(1)
 
         if (!challan) {
           throw new Error('Delivery challan not found')
@@ -288,34 +300,28 @@ export const setupChallanHandlers = () => {
         // Put tracked stock back AND append a "returned" movement per line. We do
         // NOT delete the original movements: cancel preserves the record, and a
         // deleted stockMovement can't sync (the table has no soft-delete column).
-        for (const item of challan.items) {
-          const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
+        const items = await tx.select().from(schema.deliveryChallanItem).where(eq(schema.deliveryChallanItem.deliveryChallanId, id))
+        for (const item of items) {
+          const [dbItem] = await tx.select().from(schema.item).where(eq(schema.item.id, item.itemId)).limit(1)
           if (dbItem && dbItem.trackStock) {
-            await tx.item.update({
-              where: { id: item.itemId },
-              data: {
-                currentStock: { increment: item.quantity }
-              }
-            })
-            await tx.stockMovement.create({
-              data: {
-                itemId: item.itemId,
-                movementType: 'SALE',
-                quantity: item.quantity, // positive = goods returned by the cancel
-                referenceType: 'CHALLAN',
-                referenceId: id,
-                notes: 'Challan cancelled — stock returned'
-              }
+            await tx
+              .update(schema.item)
+              .set({ currentStock: sql`${schema.item.currentStock} + ${item.quantity}` })
+              .where(eq(schema.item.id, item.itemId))
+            await tx.insert(schema.stockMovement).values({
+              itemId: item.itemId,
+              movementType: 'SALE',
+              quantity: item.quantity, // positive = goods returned by the cancel
+              referenceType: 'CHALLAN',
+              referenceId: id,
+              notes: 'Challan cancelled — stock returned'
             })
           }
         }
 
         // CANCEL, not delete: stamp cancelledAt; the challan, its items, and its
         // stock movements all stay on record.
-        await tx.deliveryChallan.update({
-          where: { id },
-          data: { cancelledAt: new Date() }
-        })
+        await tx.update(schema.deliveryChallan).set({ cancelledAt: new Date() }).where(eq(schema.deliveryChallan.id, id))
       })
 
       return { success: true }
@@ -330,11 +336,8 @@ export const setupChallanHandlers = () => {
   // Convert challan to sales invoice
   ipcMain.handle('challan:convertToInvoice', async (_, id: string) => {
     try {
-      const result = await prisma.$transaction(async (tx: any) => {
-        const challan = await tx.deliveryChallan.findUnique({
-          where: { id },
-          include: { items: true }
-        })
+      const createdId = await db.transaction(async (tx) => {
+        const [challan] = await tx.select().from(schema.deliveryChallan).where(eq(schema.deliveryChallan.id, id)).limit(1)
 
         if (!challan) {
           throw new Error('Delivery challan not found')
@@ -351,21 +354,33 @@ export const setupChallanHandlers = () => {
           throw new Error('Returnable challans cannot be converted to an invoice')
         }
 
-        // Generate new invoice number (same pattern as sales handler)
-        const lastInvoice = await tx.salesInvoice.findFirst({
-          where: { type: 'INVOICE' },
-          orderBy: { invoiceNumber: 'desc' }
-        })
+        const challanItems = await tx
+          .select()
+          .from(schema.deliveryChallanItem)
+          .where(eq(schema.deliveryChallanItem.deliveryChallanId, id))
 
-        const company = await tx.company.findFirst()
+        // Generate new invoice number (same pattern as sales handler)
+        const [lastInvoice] = await tx
+          .select({ invoiceNumber: schema.salesInvoice.invoiceNumber })
+          .from(schema.salesInvoice)
+          .where(eq(schema.salesInvoice.type, 'INVOICE'))
+          .orderBy(desc(schema.salesInvoice.invoiceNumber))
+          .limit(1)
+
+        const [company] = await tx.select().from(schema.company).limit(1)
         const prefix = company?.invoicePrefix || 'INV'
         const year = new Date().getFullYear()
         const lastNumber = lastInvoice ? parseInt(lastInvoice.invoiceNumber.split('-').pop() || '0') : 0
         const newInvoiceNumber = `${prefix}-${year}-${String(lastNumber + 1).padStart(3, '0')}`
 
         // Create the sales invoice from challan data
-        const invoice = await tx.salesInvoice.create({
-          data: {
+        const [invoice] = await tx
+          .insert(schema.salesInvoice)
+          .values({
+            // Deterministic id: both devices converting this challan offline
+            // mint the SAME invoice row, so sync converges to one invoice
+            // instead of billing the customer twice.
+            id: `conv-${challan.id}`,
             invoiceNumber: newInvoiceNumber,
             invoiceDate: new Date(),
             type: 'INVOICE',
@@ -378,65 +393,62 @@ export const setupChallanHandlers = () => {
             balanceDue: challan.totalAmount,
             status: 'DRAFT',
             notes: challan.notes,
-            items: {
-              create: challan.items.map((item: any) => ({
-                itemId: item.itemId,
-                quantity: item.quantity,
-                rate: item.rate,
-                discount: item.discount || 0,
-                taxRate: item.taxRate || 0,
-                total: item.total
-              }))
-            }
-          },
-          include: {
-            items: { include: { item: true } },
-            customer: true
-          }
-        })
+            // Mirror mobile's convert: carry the challan's terms onto the
+            // invoice and stamp each line's taxable base.
+            termsConditions: challan.termsConditions ?? null,
+          })
+          .returning({ id: schema.salesInvoice.id })
+
+        if (challanItems.length) {
+          await tx.insert(schema.salesInvoiceItem).values(
+            challanItems.map((item: any) => ({
+              salesInvoiceId: invoice.id,
+              itemId: item.itemId,
+              quantity: item.quantity,
+              rate: item.rate,
+              discount: item.discount || 0,
+              taxRate: item.taxRate || 0,
+              total: item.total,
+              taxableAmount: item.quantity * item.rate - (item.discount || 0)
+            })),
+          )
+        }
 
         // Update challan status to CONVERTED
-        await tx.deliveryChallan.update({
-          where: { id },
-          data: {
-            status: 'CONVERTED',
-            convertedToInvoiceId: invoice.id
-          }
-        })
+        await tx
+          .update(schema.deliveryChallan)
+          .set({ status: 'CONVERTED', convertedToInvoiceId: invoice.id })
+          .where(eq(schema.deliveryChallan.id, id))
 
         // Update customer balance (since it's now an invoice)
-        await tx.customer.update({
-          where: { id: challan.customerId },
-          data: {
-            currentBalance: { increment: challan.totalAmount }
-          }
-        })
+        await tx
+          .update(schema.customer)
+          .set({ currentBalance: sql`${schema.customer.currentBalance} + ${challan.totalAmount}` })
+          .where(eq(schema.customer.id, challan.customerId))
 
         // Note: Stock was already decremented when the challan was created,
-        // so we do NOT decrement stock again. But we create stock movements
-        // with INVOICE reference for the new invoice and remove the CHALLAN ones.
-        for (const item of challan.items) {
-          const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
+        // so we do NOT decrement stock again. But we retarget the CHALLAN
+        // stock movements to reference the new invoice.
+        for (const item of challanItems) {
+          const [dbItem] = await tx.select().from(schema.item).where(eq(schema.item.id, item.itemId)).limit(1)
           if (dbItem && dbItem.trackStock) {
-            // Update the existing challan stock movement to reference the invoice
-            await tx.stockMovement.updateMany({
-              where: {
-                itemId: item.itemId,
-                referenceType: 'CHALLAN',
-                referenceId: challan.id
-              },
-              data: {
-                referenceType: 'INVOICE',
-                referenceId: invoice.id
-              }
-            })
+            await tx
+              .update(schema.stockMovement)
+              .set({ referenceType: 'INVOICE', referenceId: invoice.id })
+              .where(and(
+                eq(schema.stockMovement.itemId, item.itemId),
+                eq(schema.stockMovement.referenceType, 'CHALLAN'),
+                eq(schema.stockMovement.referenceId, challan.id),
+              ))
           }
         }
 
-        return invoice
+        return invoice.id
       })
 
-      return { success: true, data: result }
+      const [header] = await db.select().from(schema.salesInvoice).where(eq(schema.salesInvoice.id, createdId)).limit(1)
+      const [invoice] = await attachCustomerAndItems(db, [header], schema.salesInvoiceItem, 'salesInvoiceId')
+      return { success: true, data: invoice }
     } catch (error) {
       return {
         success: false,
@@ -451,10 +463,12 @@ export const setupChallanHandlers = () => {
       const fy = getFiscalYear()
       const prefix = `NS/DC/${fy}/`
 
-      const lastChallan = await prisma.deliveryChallan.findFirst({
-        where: { challanNumber: { startsWith: prefix } },
-        orderBy: { challanNumber: 'desc' }
-      })
+      const [lastChallan] = await db
+        .select({ challanNumber: schema.deliveryChallan.challanNumber })
+        .from(schema.deliveryChallan)
+        .where(like(schema.deliveryChallan.challanNumber, `${prefix}%`))
+        .orderBy(desc(schema.deliveryChallan.challanNumber))
+        .limit(1)
 
       let nextNum = 1
       if (lastChallan) {

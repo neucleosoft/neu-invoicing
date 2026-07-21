@@ -91,6 +91,7 @@ export async function buildChallanPdfPayload(db: Db, id: string): Promise<Challa
           stateCode: company.stateCode ?? undefined,
           stateName: company.stateName ?? undefined,
           logoBase64: company.logoPath ?? undefined,
+          signatureBase64: company.signaturePath ?? undefined,
         }
       : undefined,
   }
