@@ -1,15 +1,20 @@
 import { useRef, useState } from 'react'
 import { Alert, StyleSheet, View } from 'react-native'
+import { router, type Href } from 'expo-router'
 
 import { HiddenPdfWebView, type HiddenPdfWebViewHandle } from '@/components/HiddenPdfWebView'
 import { Button } from '@/components/ui/Button'
 import { Spacing } from '@/constants/tokens'
-import { saveAndSharePdf, viewAndDownloadPdf } from '@/utils/pdfShare'
+import { setPdfPreviewPayload } from '@/utils/pdfPreviewStore'
+import { saveAndSharePdf } from '@/utils/pdfShare'
 
-// Shared PDF action bar: a "Share PDF" button + a "View / Save" button, plus the
-// off-screen pdfmake WebView host. One place owns all the generate/share/view
-// glue so the 10 document screens don't each duplicate it — a screen just passes
-// a `buildPayload` thunk that loads its data on demand.
+// Shared PDF action bar: a "Share PDF" button + a "Preview" button, plus the
+// off-screen pdfmake WebView host for the share path. One place owns the glue
+// so the 10 document screens don't each duplicate it — a screen just passes a
+// `buildPayload` thunk that loads its data on demand.
+//
+// Preview opens the in-app pdf.js viewer (app/pdfPreview.tsx) — no folder
+// prompt, no external viewer app; share & download live on that screen too.
 
 export type PdfPayloadLike = { builder: string; data: object; filename: string }
 
@@ -25,11 +30,11 @@ const REBUILD_HINT =
 
 export function PdfActions({ buildPayload, disabled }: PdfActionsProps) {
   const pdfRef = useRef<HiddenPdfWebViewHandle>(null)
-  const [busy, setBusy] = useState<'share' | 'view' | null>(null)
+  const [busy, setBusy] = useState<'share' | 'preview' | null>(null)
 
-  async function run(action: 'share' | 'view') {
+  async function share() {
     if (busy) return
-    setBusy(action)
+    setBusy('share')
     try {
       const payload = await buildPayload()
       if (!payload) {
@@ -37,11 +42,30 @@ export function PdfActions({ buildPayload, disabled }: PdfActionsProps) {
         return
       }
       const base64 = await pdfRef.current!.generate(payload.builder, payload.data)
-      if (action === 'share') await saveAndSharePdf(base64, payload.filename)
-      else await viewAndDownloadPdf(base64, payload.filename)
+      await saveAndSharePdf(base64, payload.filename)
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Failed to generate PDF'
       Alert.alert('PDF failed', `${msg}\n\n${REBUILD_HINT}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function preview() {
+    if (busy) return
+    setBusy('preview')
+    try {
+      const payload = await buildPayload()
+      if (!payload) {
+        Alert.alert('Error', 'Could not load this document.')
+        return
+      }
+      setPdfPreviewPayload(payload)
+      // Cast: expo-router's generated route union is stale until the next
+      // `expo start` regenerates .expo/types — the route file exists.
+      router.push('/pdfPreview' as Href)
+    } catch (e) {
+      Alert.alert('Error', e instanceof Error ? e.message : 'Could not open the preview')
     } finally {
       setBusy(null)
     }
@@ -55,16 +79,16 @@ export function PdfActions({ buildPayload, disabled }: PdfActionsProps) {
         <Button
           title="Share PDF"
           variant="secondary"
-          onPress={() => run('share')}
+          onPress={share}
           loading={busy === 'share'}
           disabled={blocked}
           style={styles.btn}
         />
         <Button
-          title="View / Save"
+          title="Preview"
           variant="primary"
-          onPress={() => run('view')}
-          loading={busy === 'view'}
+          onPress={preview}
+          loading={busy === 'preview'}
           disabled={blocked}
           style={styles.btn}
         />
