@@ -1,0 +1,236 @@
+import { desc, eq } from 'drizzle-orm'
+import { router, useFocusEffect } from 'expo-router'
+import { memo, useCallback, useMemo, useState } from 'react'
+import {
+  FlatList,
+  type ListRenderItem,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+} from 'react-native'
+
+import EmptyState from '@/components/EmptyState'
+import Fab from '@/components/Fab'
+import {
+  applyListControls,
+  ListControls,
+  type DateRangeKey,
+  type SortKey,
+} from '@/components/ListControls'
+import { ThemedText } from '@/components/themed-text'
+import { ThemedView } from '@/components/themed-view'
+import { schema, useDb } from '@/db'
+import { formatCurrency } from '@/utils/currency'
+import { formatDate } from '@/utils/date'
+import {
+  deriveDisplayStatus,
+  formatInvoiceStatus,
+  STATUS_BADGE_COLORS,
+} from '@/utils/invoiceStatus'
+
+type Invoice = typeof schema.salesInvoice.$inferSelect
+type Row = Invoice & { customerName: string | null }
+
+export default function InvoicesScreen() {
+  const db = useDb()
+  const [rows, setRows] = useState<Row[]>([])
+  const [search, setSearch] = useState('')
+  const [range, setRange] = useState<DateRangeKey>('all')
+  const [sort, setSort] = useState<SortKey>('date_desc')
+
+  useFocusEffect(
+    useCallback(() => {
+      db.select({
+        invoice: schema.salesInvoice,
+        customerName: schema.customer.name,
+      })
+        .from(schema.salesInvoice)
+        .leftJoin(
+          schema.customer,
+          eq(schema.salesInvoice.customerId, schema.customer.id),
+        )
+        .orderBy(desc(schema.salesInvoice.invoiceDate))
+        .then((result) => {
+          setRows(
+            result.map((r) => ({ ...r.invoice, customerName: r.customerName })),
+          )
+        })
+    }, [db]),
+  )
+
+  // Search matches invoice number OR customer name (both fields useful when
+  // scanning — a bookkeeper might know "Sharma Trading" but not the invoice #,
+  // or vice versa).
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    const matches = q
+      ? rows.filter((r) => {
+          const hay = `${r.invoiceNumber} ${r.customerName ?? ''}`.toLowerCase()
+          return hay.includes(q)
+        })
+      : rows
+    return applyListControls(matches, range, sort, (r) => r.invoiceDate, (r) => r.totalAmount)
+  }, [rows, search, range, sort])
+
+  const renderItem = useCallback<ListRenderItem<Row>>(
+    ({ item }) => <InvoiceRow row={item} />,
+    [],
+  )
+  const keyExtractor = useCallback((row: Row) => row.id, [])
+
+  return (
+    <ThemedView style={styles.container}>
+      <View style={styles.header}>
+        <ThemedText type="title">Invoices</ThemedText>
+        <ThemedView lightColor="#e5e7eb" darkColor="#374151" style={styles.countChip}>
+          <ThemedText style={styles.countText}>{rows.length}</ThemedText>
+        </ThemedView>
+      </View>
+
+      <ThemedView lightColor="#f3f4f6" darkColor="#1f2937" style={styles.searchWrap}>
+        <TextInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search by invoice # or customer…"
+          placeholderTextColor="#9ca3af"
+          style={styles.searchInput}
+        />
+      </ThemedView>
+
+      <ListControls range={range} onRange={setRange} sort={sort} onSort={setSort} />
+
+      <FlatList
+        data={filtered}
+        keyExtractor={keyExtractor}
+        contentContainerStyle={styles.listContent}
+        ListEmptyComponent={
+          search ? (
+            <EmptyState
+              title="No matches"
+              description={`No invoices match "${search}"`}
+            />
+          ) : (
+            <EmptyState
+              title="No invoices yet"
+              description="Create your first invoice to start billing customers."
+              action={{
+                label: 'New Invoice',
+                onPress: () => router.push('/invoice/newInvoice'),
+              }}
+            />
+          )
+        }
+        renderItem={renderItem}
+      />
+
+      <Fab onPress={() => router.push('/invoice/newInvoice')} label="New invoice" />
+    </ThemedView>
+  )
+}
+
+const InvoiceRow = memo(function InvoiceRow({ row }: { row: Row }) {
+  // OVERDUE is computed at render time, not stored — so the pill stays correct
+  // without a nightly status-bump job.
+  const isCancelled = !!row.cancelledAt
+  const isReversed = row.status === 'REVERSED'
+  const isInactive = isCancelled || isReversed
+  const displayStatus = deriveDisplayStatus(
+    row.status,
+    row.dueDate,
+    row.amountPaid,
+    row.totalAmount,
+  )
+  const badge = STATUS_BADGE_COLORS[displayStatus] ?? STATUS_BADGE_COLORS.DRAFT
+  // Cancelled is the cancelledAt flag (not a stored status); Reversed flows through
+  // displayStatus → STATUS_BADGE_COLORS.REVERSED.
+  const chip = isCancelled
+    ? { label: 'Cancelled', bg: '#f3f4f6', text: '#4b5563' }
+    : { label: formatInvoiceStatus(displayStatus), bg: badge.bg, text: badge.text }
+
+  return (
+    <Pressable
+      onPress={() =>
+        router.push({ pathname: '/invoice/[id]', params: { id: row.id } })
+      }
+      style={({ pressed }) => [pressed && styles.cardPressed]}
+    >
+      <ThemedView
+        lightColor="#f9fafb"
+        darkColor="#1f2937"
+        style={[styles.card, isInactive && styles.cardDimmed]}
+      >
+        <View style={styles.cardLeft}>
+          <ThemedText type="defaultSemiBold" numberOfLines={1}>
+            {row.invoiceNumber}
+          </ThemedText>
+          <ThemedText numberOfLines={1} style={styles.customerName}>
+            {row.customerName ?? 'Unknown customer'}
+          </ThemedText>
+          <ThemedText style={styles.dateText}>
+            {formatDate(row.invoiceDate)}
+          </ThemedText>
+        </View>
+        <View style={styles.cardRight}>
+          <ThemedText type="defaultSemiBold">
+            {formatCurrency(row.totalAmount)}
+          </ThemedText>
+          <View style={[styles.statusBadge, { backgroundColor: chip.bg }]}>
+            <ThemedText style={[styles.statusBadgeText, { color: chip.text }]}>
+              {chip.label}
+            </ThemedText>
+          </View>
+          {/* Nested Pressable: in RN the inner press wins, so tapping Edit
+              navigates to the edit screen without also triggering the card's
+              View navigation. Hitslop widens the touch target without
+              enlarging the visible chip. Hidden once cancelled/reversed. */}
+          {!isInactive ? (
+            <Pressable
+              onPress={() =>
+                router.push({ pathname: '/invoice/edit/[id]', params: { id: row.id } })
+              }
+              hitSlop={8}
+              style={({ pressed }) => [styles.editChip, pressed && styles.editChipPressed]}
+            >
+              <ThemedText style={styles.editChipText}>Edit</ThemedText>
+            </Pressable>
+          ) : null}
+        </View>
+      </ThemedView>
+    </Pressable>
+  )
+})
+
+const styles = StyleSheet.create({
+  container: { flex: 1, paddingTop: 60, paddingHorizontal: 16 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 },
+  countChip: { paddingHorizontal: 10, paddingVertical: 2, borderRadius: 12 },
+  docsLink: { color: '#007AFF', fontWeight: '600', fontSize: 14 },
+  countText: { fontSize: 12, fontWeight: '500', opacity: 0.7 },
+  searchWrap: { borderRadius: 10, marginBottom: 12 },
+  searchInput: { paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: '#111827' },
+  listContent: { paddingBottom: 96 },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 12,
+    marginBottom: 10,
+    gap: 12,
+  },
+  cardPressed: { opacity: 0.7 },
+  cardDimmed: { opacity: 0.6 },
+  cardLeft: { flex: 1, gap: 2 },
+  cardRight: { alignItems: 'flex-end', gap: 4 },
+  customerName: { fontSize: 13 },
+  dateText: { fontSize: 12, opacity: 0.6 },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  statusBadgeText: { fontSize: 10, fontWeight: '600' },
+  editChip: { paddingHorizontal: 6, paddingVertical: 2 },
+  editChipPressed: { opacity: 0.5 },
+  editChipText: { fontSize: 12, fontWeight: '600', color: '#16a34a' },
+})

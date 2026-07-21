@@ -1,0 +1,1 @@
+ALTER TABLE `Item` ADD `openingStock` real DEFAULT 0 NOT NULL;

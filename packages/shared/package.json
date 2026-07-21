@@ -1,0 +1,22 @@
+{
+  "name": "@neu/shared",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/index.ts",
+  "scripts": {
+    "test": "node scripts/run-tests.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "private": "true",
+  "dependencies": {
+    "cuid": "^3.0.0",
+    "drizzle-orm": "^0.45.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.41",
+    "esbuild": "^0.28.0"
+  }
+}

@@ -1,0 +1,15 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+allowBuilds:
+  '@prisma/client': true
+  '@prisma/engines': true
+  # optional native dep of pdfjs-dist; we only read pdf.min.js as text
+  canvas: false
+  core-js: false
+  electron: true
+  electron-winstaller: true
+  esbuild: true
+  prisma: true
+  puppeteer: false
+  unrs-resolver: true

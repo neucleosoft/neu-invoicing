@@ -33,10 +33,9 @@ release
 *.sqlite
 *.sqlite-journal
 *.db
-
-# Prisma
-prisma/migrations/*
-!prisma/migrations/.gitkeep
+*.db-journal
+*.db-wal
+*.db-shm
 
 # Environment
 .env
@@ -52,6 +51,10 @@ vite.config.js
 vite.config.d.ts
 tsconfig.node.tsbuildinfo
 
+# Turborepo cache + logs (per-machine, never commit)
+.turbo
+**/.turbo
+
 # Sensitive files
 sbox_live_key.csv
 *.csv
@@ -61,9 +64,40 @@ invoices database/
 learning_pdf/
 party-captures/
 
+# One-off migration scripts (contain hardcoded company-specific data)
+scripts/.convert-cache/
+scripts/convert-old-to-new-style.mjs
+scripts/import-previous-invoices.mjs
+scripts/reset-from-old-import.mjs
+scripts/_inspect-purchase-bills.mjs
+scripts/_list-pending.mjs
+scripts/import-from-jsonl.mjs
+scripts/import-purchase-bills.mjs
+scripts/rescan-previous-invoices.js
+apps/desktop/scripts/_data/
+apps/desktop/scripts/_inspect-boss-db.cjs
+apps/desktop/scripts/_inspect-db.cjs
+apps/desktop/scripts/_diff-dbs.cjs
+apps/desktop/scripts/_premerge-check.cjs
+apps/desktop/scripts/_merge-into-boss.cjs
+apps/desktop/scripts/insert-extracted-bills.mjs
+apps/desktop/scripts
+/scripts
+
 # Scraping tools (not part of the app)
 platform-tools/
 *.zip
 nul
 claude.md
+AGENTS.md
+CLAUDE.md
 issues.md
+/decisions
+2026-05-06-160621-local-command-caveatcaveat-the-messages-below.txt
+learning_pdf.md
+# Local-only originals of pre-blur README screenshots
+docs/screenshots/.originals/
+engineering_notes.pdf
+sync-design.md
+gst-design.md
+/docs

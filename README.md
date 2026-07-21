@@ -1,331 +1,345 @@
-# neuInvoicing
+<div align="center">
 
-A powerful, offline-first desktop invoicing application with seamless Google Drive synchronization. Built for small businesses who value data ownership and privacy.
+<img src="docs/screenshots/logo.png" alt="Neu Invoicing" width="120" />
 
-## 🌟 Key Features
+# Neu Invoicing
 
-### Core Philosophy
-- **Offline-First**: 100% functional without internet connectivity
-- **User-Owned Data**: Your database stored in YOUR Google Drive
-- **Privacy-Focused**: No third-party servers, complete data portability
-- **Cross-Platform**: Windows, macOS, and Linux support
+**Offline-first GST invoicing that lives on your laptop and your phone — not someone else's server.**
 
-### Modules
+Run your shop, your studio, your side hustle without paying a SaaS tax every month. Your data stays in a SQLite file you can copy, your backups go to *your* Google Drive, and the app works on the train.
 
-#### 📊 Dashboard
-- Real-time business metrics (receivables, payables, sales)
-- Sales trend visualization
-- Low stock alerts
-- Recent invoice overview
-- Quick action buttons
+[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/neucleosoft/neu-invoicing/releases/latest)
+[![Download for macOS](https://img.shields.io/badge/Download-macOS-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/neucleosoft/neu-invoicing/releases/latest)
+[![Download for Linux](https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/neucleosoft/neu-invoicing/releases/latest)
 
-#### 👥 Party Management
-- Customer and Supplier management
-- Complete contact details and addresses
-- Party ledger with transaction history
-- Running balance tracking
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=flat-square)](LICENSE)
+[![GitHub release](https://img.shields.io/github/v/release/neucleosoft/neu-invoicing?style=flat-square)](https://github.com/neucleosoft/neu-invoicing/releases/latest)
+[![GitHub stars](https://img.shields.io/github/stars/neucleosoft/neu-invoicing?style=flat-square)](https://github.com/neucleosoft/neu-invoicing/stargazers)
 
-#### 📦 Item & Inventory Management
-- Product and Service catalog
-- Automatic stock tracking
-- Low stock warnings
-- Purchase and sale price management
-- Tax rate configuration per item
+<img src="docs/screenshots/hero.png" alt="Neu Invoicing dashboard" width="900" />
 
-#### 💰 Sales Module
-- Professional invoice creation
-- Quotation generation with one-click conversion
-- Automatic invoice numbering
-- Partial payment tracking
-- Multiple tax rates support
-
-#### 🛒 Purchase Module
-- Purchase bill management
-- Automatic stock updates
-- Supplier payment tracking
-
-#### 💳 Payment Tracking
-- Payment In (from customers)
-- Payment Out (to suppliers)
-- Multiple payment modes (Cash, Bank, Card, UPI, Cheque)
-- Automatic balance reconciliation
-
-#### 📈 Reports
-- Sales Report (filterable by date, party, status)
-- Stock Summary with valuation
-- Outstanding Receivables
-- Outstanding Payables
-- Tax Report (collected vs paid)
-
-#### ⚙️ Settings
-- Company profile management
-- Invoice customization
-- Fiscal year configuration
-- Terms & conditions
-- Bank details for invoices
-
-## 🚀 Getting Started
-
-### Prerequisites
-- Node.js 18+ and npm
-- Google Cloud Console account (for OAuth setup)
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   cd neu_invoicing
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Set up Google OAuth Credentials**
-
-   a. Go to [Google Cloud Console](https://console.cloud.google.com/)
-
-   b. Create a new project or select existing one
-
-   c. Enable Google Drive API and Google OAuth2 API
-
-   d. Go to "Credentials" → "Create Credentials" → "OAuth 2.0 Client ID"
-
-   e. Application type: "Desktop app"
-
-   f. Download credentials and note your:
-      - Client ID
-      - Client Secret
-
-   g. Add authorized redirect URI: `http://localhost:3000/oauth/callback`
-
-   h. Update credentials in `electron/main/auth.ts`:
-      ```typescript
-      const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID'
-      const GOOGLE_CLIENT_SECRET = 'YOUR_GOOGLE_CLIENT_SECRET'
-      ```
-
-4. **Initialize Prisma**
-   ```bash
-   npm run prisma:generate
-   ```
-
-5. **Run in development mode**
-   ```bash
-   npm run electron:dev
-   ```
-
-### Building for Production
-
-Build for all platforms:
-```bash
-npm run build
-```
-
-Build for specific platform:
-```bash
-npm run build:win    # Windows
-npm run build:mac    # macOS
-npm run build:linux  # Linux
-```
-
-Executables will be in the `release` folder.
-
-## 📁 Project Structure
-
-```
-neu-invoicing/
-├── electron/
-│   ├── main/
-│   │   ├── index.ts           # Main Electron process
-│   │   ├── database.ts        # Prisma SQLite setup
-│   │   ├── auth.ts            # Google OAuth handler
-│   │   ├── sync.ts            # Google Drive sync
-│   │   └── handlers/          # IPC handlers for all modules
-│   │       ├── company.ts
-│   │       ├── party.ts
-│   │       ├── item.ts
-│   │       ├── sales.ts
-│   │       ├── purchase.ts
-│   │       ├── payment.ts
-│   │       ├── dashboard.ts
-│   │       └── report.ts
-│   └── preload/
-│       └── index.ts           # Preload script (context bridge)
-├── src/
-│   ├── pages/                 # React pages
-│   │   ├── Login.tsx
-│   │   ├── Onboarding.tsx
-│   │   ├── Dashboard.tsx
-│   │   ├── Parties.tsx
-│   │   ├── Items.tsx
-│   │   ├── Sales.tsx
-│   │   ├── Purchase.tsx
-│   │   ├── Payments.tsx
-│   │   ├── Reports.tsx
-│   │   └── Settings.tsx
-│   ├── components/
-│   │   └── Layout.tsx         # Main app layout with sidebar
-│   ├── store/
-│   │   └── useStore.ts        # Zustand state management
-│   ├── types/
-│   │   └── index.ts           # TypeScript definitions
-│   ├── App.tsx                # Main React component
-│   ├── main.tsx               # React entry point
-│   └── index.css              # Global styles (Tailwind)
-├── prisma/
-│   └── schema.prisma          # Database schema
-├── package.json
-├── vite.config.ts
-└── README.md
-```
-
-## 🔒 Security & Privacy
-
-### Data Storage
-- Database: Local SQLite file stored in app data directory
-- Sync: Encrypted upload to your personal Google Drive `appDataFolder`
-- No Third-Party Servers: Your data never touches our servers
-
-### Authentication
-- OAuth 2.0: Secure Google Sign-In
-- Token Storage: Encrypted using electron-store
-- Scope: Minimal permissions (only appDataFolder access)
-
-### Sync Mechanism
-- **On App Start**: Check cloud for newer version, download if needed
-- **On Changes**: Upload database after significant operations
-- **On Exit**: Final sync before app closes
-- **Conflict Resolution**: Last-write-wins model (single user assumed)
-
-## 🛠️ Tech Stack
-
-- **Framework**: Electron.js
-- **Frontend**: React 18 + TypeScript
-- **Styling**: Tailwind CSS
-- **State Management**: Zustand
-- **Database**: SQLite + Prisma ORM
-- **Charts**: Recharts
-- **Build Tool**: Vite
-- **Bundler**: electron-builder
-
-## 📱 Usage Guide
-
-### First Time Setup
-1. Launch neuInvoicing
-2. Click "Sign in with Google"
-3. Authorize app to access your Google Drive
-4. Complete business onboarding wizard
-5. Start creating invoices!
-
-### Creating Your First Invoice
-1. Add Customers: Go to **Parties** → Add Customer
-2. Add Items: Go to **Items** → Add Product/Service
-3. Create Invoice: Go to **Sales** → New Invoice
-4. Select customer, add items, set quantities
-5. Record payment if received
-6. Save! (Auto-syncs to Google Drive)
-
-### Recording Payments
-1. Go to **Payments**
-2. Click "Payment In" (from customer) or "Payment Out" (to supplier)
-3. Select party and enter amount
-4. Link to specific invoice/bill or mark as advance
-5. Choose payment mode
-6. Save!
-
-### Generating Reports
-1. Go to **Reports**
-2. Select report type (Sales, Stock, Receivables, etc.)
-3. Apply filters (date range, party, status)
-4. Click "Generate Report"
-5. Export or print
-
-### Managing Stock
-- Enable "Track Stock" when creating items
-- Stock automatically updates on:
-  - Sale invoices (decreases)
-  - Purchase bills (increases)
-- Low stock alerts appear on Dashboard
-
-## 🔄 Sync Status
-
-Watch the sync indicator in the sidebar:
-- ✅ **Synced**: Data is backed up
-- 🔄 **Syncing**: Upload/download in progress
-- ❌ **Error**: Sync failed (check internet connection)
-
-Manual sync: Click the sync button anytime.
-
-## ⚠️ Important Notes
-
-### Database Location
-- **Windows**: `C:\Users\[Username]\AppData\Roaming\neu-invoicing\neuinvoicing.db`
-- **macOS**: `~/Library/Application Support/neu-invoicing/neuinvoicing.db`
-- **Linux**: `~/.config/neu-invoicing/neuinvoicing.db`
-
-### Backup Strategy
-- **Primary**: Auto-sync to Google Drive
-- **Secondary**: Manual database file backup recommended
-- **Export**: Use Reports to export data to CSV
-
-### Multi-Device Usage
-⚠️ **Current Limitation**: Last-write-wins sync model
-- Close app on one device before opening on another
-- Future: Conflict detection and resolution UI
-
-## 🐛 Troubleshooting
-
-### Sync Errors
-1. Check internet connection
-2. Re-authenticate (Settings → Sign Out → Sign In)
-3. Check Google Drive permissions
-4. Try "Force Sync" button
-
-### Database Errors
-1. Close all instances of the app
-2. Restart the application
-3. If persists, check database file permissions
-
-### Login Issues
-1. Clear browser cache for Google OAuth
-2. Check OAuth credentials are correct
-3. Verify redirect URI matches configuration
-
-## 🤝 Contributing
-
-This is a personal/business project, but suggestions are welcome!
-
-## 📄 License
-
-MIT License - Use freely for personal or commercial purposes
-
-## 🎯 Roadmap
-
-### v1.1 (Planned)
-- [ ] PDF Invoice generation with templates
-- [ ] Email invoices directly
-- [ ] Recurring invoices
-- [ ] Multi-currency support
-- [ ] Advanced tax configurations (GST, VAT)
-
-### v2.0 (Future)
-- [ ] Mobile app (React Native)
-- [ ] Multi-company support
-- [ ] User roles and permissions
-- [ ] Advanced reporting with charts
-- [ ] Integration with accounting software
-
-## 📧 Support
-
-For issues or questions:
-- Check this README
-- Review Google OAuth setup
-- Check Prisma database configuration
+</div>
 
 ---
 
-**Built with ❤️ for small businesses who value data ownership**
+## Why Neu Invoicing?
 
-Remember: Your data, your control, your business.
+| 🛜 Works offline | 🔒 Your data, your drive | 🇮🇳 GST done right |
+| --- | --- | --- |
+| Cut power, kill Wi-Fi, board a flight — every screen still loads. | Your SQLite file syncs only to your own Google Drive `appDataFolder`. We don't have a server. | GSTR-1, GSTR-3B, HSN-wise summaries, GSTIN auto-validation, intra/inter-state CGST/SGST/IGST split — all out of the box. |
+
+<br>
+
+## ⚡ Quick Start (Non-Technical)
+
+Three steps. No terminal, no Node, no database setup.
+
+<table>
+<tr>
+<td width="33%" align="center">
+
+### 1. Download
+[Grab the latest installer →](https://github.com/neucleosoft/neu-invoicing/releases/latest)
+
+Pick **Windows**, **macOS**, or **Linux**.
+
+</td>
+<td width="33%" align="center">
+
+### 2. Install
+Double-click the installer.<br>
+Approve the "untrusted publisher" prompt — we don't have a code-signing cert yet, the file is still safe.
+
+</td>
+<td width="33%" align="center">
+
+### 3. Sign in
+Click **Sign in with Google** the first time so your data can back up to your Drive.<br>
+Done. Start invoicing.
+
+</td>
+</tr>
+</table>
+
+<br>
+
+## ✨ What's inside
+
+<details open>
+<summary><b>📊 Dashboard</b> — receivables, payables, sales trend, low stock at a glance</summary>
+
+<img src="docs/screenshots/dashboard.png" alt="Dashboard" width="800" />
+
+Real-time tiles for receivables, payables, YTD sales, overdue invoices, and cash position. A sales trend chart that defaults to *all-time* with monthly bucketing once you cross a few months. Quick-action tiles drop you straight into "+ New Invoice", "+ Add Customer", etc. — no wasted clicks.
+
+</details>
+
+<details>
+<summary><b>💰 Sales, Quotations &amp; Proforma</b> — pretty PDFs, multiple templates, GST-ready</summary>
+
+<img src="docs/screenshots/sales.png" alt="Sales" width="800" />
+
+Five invoice templates (Classic GST, Modern, Minimal, Elegant, Bold) rendered from the same shared blueprints on desktop and mobile — pick once in Settings and both devices print it. Quotations and proforma invoices convert to a real invoice in one click. Invoice numbers lock after issue (GST-safe), partial payments, and multi-rate tax handling.
+
+</details>
+
+<details>
+<summary><b>🛒 Purchase + Purchase Orders</b> — extract bills from a photo, convert PO → bill</summary>
+
+<img src="docs/screenshots/purchase.png" alt="Purchase" width="800" />
+
+Upload a supplier's bill (image or PDF) and let the AI extract supplier, line items, HSN codes, and CGST/SGST/IGST split. Send a Purchase Order to a supplier as a styled PDF; convert it to a Purchase Bill the moment goods arrive.
+
+</details>
+
+<details>
+<summary><b>🚚 Delivery Challans &amp; 📝 Credit/Debit Notes</b></summary>
+
+<img src="docs/screenshots/challan.png" alt="Challans" width="800" />
+
+Auto-numbered challans against parties with transport mode and vehicle number. Credit/debit notes link to invoices/bills and adjust the ledger automatically.
+
+</details>
+
+<details>
+<summary><b>📈 Reports &amp; 🧾 GST</b> — GSTR-1, GSTR-3B, HSN summary, Excel export</summary>
+
+<img src="docs/screenshots/gst.png" alt="GST reports" width="800" />
+
+Sales report, stock summary with valuation, outstanding receivables/payables, tax report, GSTR-1/2/3B/9 with per-section drill-downs, and HSN summaries for both sales and purchases. Exports to Excel/CSV — and GSTR-1 exports the **GST-portal JSON** your CA uploads to gst.gov.in directly, identical from desktop or phone.
+
+</details>
+
+<details>
+<summary><b>📥 Multi-format Download</b> — PDF, PNG, JPEG, Excel, CSV, Print — with live preview</summary>
+
+<img src="docs/screenshots/download-menu.png" alt="Download menu" width="800" />
+
+Every document has a **Download** icon that drops a fold-down menu of formats. Pick one and a preview opens — confirm to save. The Excel export is a single flat sheet you can pivot, sort, or paste into Tally.
+
+</details>
+
+<details>
+<summary><b>👥 Parties, 📦 Items, 💳 Payments, 🏦 Cash &amp; Bank</b></summary>
+
+Customer + supplier ledgers, statement view, item catalog with stock tracking and low-stock alerts, payment in/out across cash/bank/card/UPI/cheque, multi-account cash & bank. Bank balances are journal-backed (append-only entries, like a passbook) so they merge cleanly across devices and are always rebuildable.
+
+</details>
+
+<details>
+<summary><b>📱 Mobile companion</b> — the full app on your phone, same brain</summary>
+
+An Expo/React Native app with near-complete feature parity: every document type, payments, cash &amp; bank, reports, GST returns, PDF sharing with the same five templates, AI bill scan, and the same sync/backup/time-machine stack. Tax math, payment math, merge rules, and PDF blueprints are literally the same shared code the desktop runs — the two apps cannot drift on a number.
+
+</details>
+
+<details>
+<summary><b>🩺 Data Health</b> — the books audit themselves</summary>
+
+One tap rebuilds every balance, invoice status, stock count, and bank balance from the underlying documents and shows you any drift before fixing it. Checking changes nothing; fixing is explicit.
+
+</details>
+
+<br>
+
+## 📸 Screenshots
+
+<table>
+<tr>
+<td><img src="docs/screenshots/dashboard-light.png" alt="Dashboard light" /></td>
+<td><img src="docs/screenshots/dashboard-dark.png" alt="Dashboard dark" /></td>
+</tr>
+<tr>
+<td align="center"><sub>Dashboard — light</sub></td>
+<td align="center"><sub>Dashboard — dark</sub></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/invoice-create.png" alt="Create invoice" /></td>
+<td><img src="docs/screenshots/invoice-pdf.png" alt="Invoice PDF" /></td>
+</tr>
+<tr>
+<td align="center"><sub>Create an invoice</sub></td>
+<td align="center"><sub>Generated PDF</sub></td>
+</tr>
+</table>
+
+<br>
+
+## 🔒 Where does my data go?
+
+Short answer: **into a SQLite file on your device**, and into **your own Google Drive** (in a hidden app folder only this app can see). That's it.
+
+- **Local:** `userData/neuinvoicing.db` — copy it, back it up, version it.
+- **Cloud:** Google Drive `appDataFolder` scope. We literally cannot read it.
+- **Sync model:** real two-device sync. Each device posts a small "diary" of its recent changes to your Drive and merges the other's — newest edit wins per document, invoice-number collisions auto-renumber with a receipt, a cancelled invoice stays cancelled everywhere, and a mass-deletion tripwire pauses and asks before applying 10+ removals. Use the desktop and the phone at the same time; totals are recomputed from the merged documents after every sync.
+- **Backups:** a full-copy backup on your schedule, plus a three-rung **time machine** (daily / weekly / monthly copies kept deliberately stale, ~10 MB each) for mistakes you notice late. Every restore verifies its download before touching anything and parks your current database next to the new one — a wrong restore is one file-rename to undo.
+- **Auth:** Google OAuth 2.0, refresh tokens on both apps — sign in once, works offline after.
+- **No third-party servers.** No analytics. No phone-home.
+
+<details>
+<summary><b>Where is the local database file?</b></summary>
+
+| OS | Path |
+| --- | --- |
+| Windows | `C:\Users\<you>\AppData\Roaming\neu-invoicing\neuinvoicing.db` |
+| macOS | `~/Library/Application Support/neu-invoicing/neuinvoicing.db` |
+| Linux | `~/.config/neu-invoicing/neuinvoicing.db` |
+
+</details>
+
+<br>
+
+## 🛠️ For developers
+
+<details>
+<summary><b>Run from source</b></summary>
+
+```bash
+git clone https://github.com/neucleosoft/neu-invoicing.git
+cd neu-invoicing
+pnpm install
+
+# Desktop
+cd apps/desktop
+cp .env.example .env        # fill in GOOGLE_CLIENT_ID / SECRET (see below)
+pnpm dev
+
+# Mobile (Expo dev client)
+cd apps/mobile
+pnpm dev                    # then open the dev client on your phone
+```
+
+Architecture tour for contributors: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Schema-change recipe: [`MIGRATIONS.md`](MIGRATIONS.md).
+
+</details>
+
+<details>
+<summary><b>Set up Google OAuth (one-time)</b></summary>
+
+1. [Google Cloud Console](https://console.cloud.google.com/) → create a project.
+2. Enable **Google Drive API**.
+3. **Credentials → Create Credentials → OAuth 2.0 Client ID** → application type **Desktop app**.
+4. Copy the Client ID + Client Secret into `.env`:
+   ```env
+   GOOGLE_CLIENT_ID=your-client-id
+   GOOGLE_CLIENT_SECRET=your-client-secret
+   REDIRECT_URI=http://localhost
+   ```
+5. Vite reads `.env` at build time and bakes the values into the main-process bundle — re-run `electron:dev` after editing `.env`.
+
+</details>
+
+<details>
+<summary><b>Build platform installers</b></summary>
+
+```bash
+cd apps/desktop
+pnpm build:win         # Windows NSIS .exe
+pnpm build:mac         # macOS .dmg
+pnpm build:linux       # Linux AppImage
+
+cd apps/mobile
+eas build --profile preview --platform android   # installable APK
+```
+
+Desktop output lands in `apps/desktop/release/`; EAS gives you a download link.
+
+</details>
+
+<details>
+<summary><b>Tech stack</b></summary>
+
+- **Monorepo:** pnpm workspaces — `apps/desktop`, `apps/mobile`, `packages/shared`
+- **Desktop shell:** Electron (main + preload + renderer split), React + TypeScript + Tailwind + Zustand, SQLite via Drizzle (libsql)
+- **Mobile:** Expo SDK 54 / React Native, expo-router, SQLite via Drizzle (expo-sqlite) — the SAME shared schema and migration lineage as desktop
+- **The shared brain (`packages/shared`):** GST engine, payment logic, recompute engine, sync merge rules, GSTN JSON builder, and every pdfmake document blueprint — imported by both apps so money math exists exactly once
+- **PDF:** pdfmake everywhere (desktop renders directly; mobile runs pdfmake inside a hidden WebView) — all 5 invoice templates + every other document
+- **Excel:** ExcelJS (desktop), CSV via share sheet (mobile)
+- **AI extraction:** Gemini / OpenRouter for bill OCR (`OCR_PROVIDER` env var)
+- **Build:** Vite + `vite-plugin-electron` + `electron-builder` (desktop); EAS (mobile)
+- **Sync:** `googleapis` / Drive REST, `appDataFolder` scope only
+
+</details>
+
+<details>
+<summary><b>Repo layout</b></summary>
+
+```
+neu_invoicing/
+├── apps/
+│   ├── desktop/
+│   │   ├── electron/main/        # Node side: Drizzle DB (libsql), OAuth, backups, row sync
+│   │   │   ├── sync.ts           # Full backup + ladder + restore
+│   │   │   ├── rowSync.ts        # Two-device diary sync
+│   │   │   └── handlers/         # One file per domain (sales, purchase, …)
+│   │   ├── src/pages/            # React renderer
+│   │   └── prisma/migrations/    # Frozen pre-Drizzle upgrade SQL (boot data)
+│   └── mobile/
+│       ├── app/                  # expo-router screens
+│       ├── sync/                 # Row sync, backups, ladder, purge (mobile twins)
+├── packages/shared/src/          # The shared brain (see docs/ARCHITECTURE.md)
+│   ├── schema.ts                 # THE schema — one Drizzle definition for both apps
+│   ├── drizzle/ (packages/shared/drizzle)  # THE migration lineage, applied by both apps
+│   ├── gstCompute.ts             # The one GST implementation
+│   ├── paymentLogic.ts           # applyPayment / reversePayment
+│   ├── recompute.ts              # Rebuild every derived number
+│   ├── syncPackets.ts + syncApply.ts   # Sync diary format + merge planner
+│   └── pdf/                      # pdfmake blueprints, all docs + 5 templates
+└── docs/                         # ARCHITECTURE.md + screenshots
+```
+
+</details>
+
+<br>
+
+## 🐛 Troubleshooting
+
+<details>
+<summary><b>Sync says "error" / I just signed in fresh</b></summary>
+
+Settings → sign out → sign back in. The OAuth refresh token is regenerated and the app reconnects on the next sync tick. If it still fails, check that the OAuth consent screen for your project includes your email under "Test users" while in unverified mode.
+
+</details>
+
+<details>
+<summary><b>"My data isn't there on the new device"</b></summary>
+
+A **fresh device** gets its full history from the cloud backup, not from sync (sync diaries only carry the last 30 days of changes): sign in, and accept the restore offer that appears — on desktop it's the boot screen after a relaunch, on mobile it's the card on the company-setup screen. After that first restore, day-to-day changes flow through "Sync changes now" / auto-sync. If a *specific recent change* is missing, remember convergence takes one round trip: sync the device that made the change first, then the one that's missing it.
+
+</details>
+
+<details>
+<summary><b>"AI extract from photo" fails</b></summary>
+
+That feature needs `GEMINI_API_KEY` (or an OpenRouter key) in `.env`, and a *built* main bundle that includes it. After editing `.env`, re-run `npm run electron:dev` or rebuild — `.env` is baked at compile time, not read at runtime.
+
+</details>
+
+<br>
+
+## 🗺️ Roadmap
+
+**Shipped** — Mobile companion app (near-full parity) · Two-device sync with conflict resolution · Backup time machine (daily/weekly/monthly) · Undoable restores · Journal-backed bank balances · Data Health self-audit · 5 shared invoice templates · GSTR-1/2/3B/9 + GST-portal JSON export · PO ↔ Bill linking · AI bill extraction · Multi-format downloads · Dark mode (both apps)
+
+**Next** — Logical-clock sync (clock-skew-proof) · Encrypted cloud backups · Email invoices in-app · Recurring invoices
+
+**Later** — Multi-company · Roles + permissions · e-Invoicing (IRN) · Integrations (Tally, Zoho)
+
+<br>
+
+## 🤝 Contributing
+
+Bug reports, feature ideas, and PRs are welcome — open an [issue](https://github.com/neucleosoft/neu-invoicing/issues) and let's chat first if it's a big change.
+
+## 📄 License
+
+[MIT](LICENSE) — use it for your business, fork it, ship it.
+
+---
+
+<div align="center">
+
+**Built for small businesses who want to own their numbers.**<br>
+<sub>Your data, your control, your business.</sub>
+
+</div>
