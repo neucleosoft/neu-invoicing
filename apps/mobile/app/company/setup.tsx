@@ -1,6 +1,6 @@
 import { router } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { Alert, DevSettings, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { useSQLiteContext } from 'expo-sqlite'
 
 import { ThemedText } from '@/components/themed-text'
@@ -8,6 +8,8 @@ import { useAuth } from '@/auth'
 import { schema, useDb } from '@/db'
 import { INDIAN_STATE_CODES } from '@neu/shared'
 import { checkCloudBackup, restoreFromCloud, type CloudBackupInfo } from '@/sync/drive'
+import { reloadDb } from '@/db/reload'
+import { setRestoreNotice } from '@/sync/restoreNotice'
 import {
   CompanyForm,
   emptyCompanyForm,
@@ -30,6 +32,7 @@ export default function CompanySetupScreen() {
   // nothing — vacuously safe, like desktop's App.tsx offer.
   const [cloudBackup, setCloudBackup] = useState<CloudBackupInfo | null>(null)
   const [restoring, setRestoring] = useState(false)
+  const [restorePct, setRestorePct] = useState<number | null>(null)
 
   useEffect(() => {
     if (!user || offlineMode) return
@@ -62,13 +65,24 @@ export default function CompanySetupScreen() {
           text: 'Restore from Drive',
           onPress: async () => {
             setRestoring(true)
+            setRestorePct(null)
             try {
               const fresh = await getFreshAccessToken()
               if (!fresh) throw new Error('Session expired — sign in again.')
-              await restoreFromCloud(fresh, liveDb)
-              DevSettings.reload()
+              const info = await restoreFromCloud(fresh, liveDb, (f) => {
+                const pct = Math.round(f * 100)
+                setRestorePct((prev) => (prev === pct ? prev : pct))
+              })
+              setRestoreNotice(
+                info.modifiedTime ? new Date(info.modifiedTime).toLocaleString() : 'the cloud backup',
+              )
+              // Soft reboot onto the restored DB; the company gate then routes
+              // straight into the app (production-safe — DevSettings.reload
+              // was a no-op in release builds).
+              reloadDb()
             } catch (e) {
               setRestoring(false)
+              setRestorePct(null)
               Alert.alert('Restore failed', e instanceof Error ? e.message : String(e))
             }
           },
@@ -142,7 +156,11 @@ export default function CompanySetupScreen() {
             disabled={restoring || saving}
           >
             <ThemedText style={styles.restoreButtonText}>
-              {restoring ? 'Restoring & reloading…' : 'Restore from Drive'}
+              {restoring
+                ? restorePct != null && restorePct < 100
+                  ? `Downloading backup… ${restorePct}%`
+                  : 'Restoring…'
+                : 'Restore from Drive'}
             </ThemedText>
           </Pressable>
         </View>

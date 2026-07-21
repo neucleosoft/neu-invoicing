@@ -12,7 +12,7 @@
 //    only ever adds, never gates (C0).
 
 import { useEffect, useRef } from 'react'
-import { AppState } from 'react-native'
+import { Alert, AppState } from 'react-native'
 import * as SecureStore from 'expo-secure-store'
 import { useSQLiteContext } from 'expo-sqlite'
 
@@ -21,6 +21,7 @@ import { useDb } from '@/db'
 
 import { runLadderIfDue } from './ladder'
 import { purgeArchivedDocs } from './purge'
+import { consumeRestoreNotice } from './restoreNotice'
 import { rowSyncNow } from './rowSync'
 import { runScheduledBackupIfDue } from './scheduledBackup'
 
@@ -66,7 +67,19 @@ export function AutoSync() {
       }
     }
 
-    const first = setTimeout(() => void tick(), FIRST_RUN_DELAY_MS)
+    // Post-restore mount: confirm out loud and sync NOW — the restored file
+    // needs no backfill head start (it came from a healthy device), and the
+    // user is watching. Normal boots keep the delay.
+    const notice = consumeRestoreNotice()
+    if (notice) {
+      Alert.alert(
+        'Restore complete',
+        `Your data from ${notice} is now on this phone. Syncing the latest changes…`,
+      )
+      void tick()
+    }
+
+    const first = setTimeout(() => void tick(), notice ? TICK_MS : FIRST_RUN_DELAY_MS)
     const interval = setInterval(() => {
       if (AppState.currentState === 'active') void tick()
     }, TICK_MS)

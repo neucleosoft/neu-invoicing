@@ -1,8 +1,8 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { SQLiteProvider } from 'expo-sqlite';
+import { SQLiteProvider, type SQLiteDatabase } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import 'react-native-reanimated';
 
@@ -31,6 +31,7 @@ import { useColorScheme } from '@/hooks/use-color-scheme';
 import { loadThemePreference } from '@/hooks/theme-preference';
 import { initAppLog } from '@/utils/appLog';
 import { runMigrations, schema, useDb } from '@/db';
+import { registerDbReload } from '@/db/reload';
 import { AuthProvider, useAuth } from '@/auth';
 import { AppLockGate } from '@/components/AppLockGate';
 import { AutoSync } from '@/sync/AutoSync';
@@ -54,6 +55,19 @@ export default function RootLayout() {
     Inter_800ExtraBold,
   });
 
+  // Restore soft-reboot: bumping the epoch remounts the provider subtree AND
+  // hands SQLiteProvider a fresh onInit identity. Both matter — expo-sqlite's
+  // Suspense provider caches the open database globally, keyed on prop
+  // identity (including onInit), so a bare key remount would return the same
+  // stale handle the restore just closed. New identity → true re-open, and
+  // runMigrations re-runs (re-seeds the HLC ratchet from the restored file).
+  const [dbEpoch, setDbEpoch] = useState(0);
+  useEffect(() => {
+    registerDbReload(() => setDbEpoch((e) => e + 1));
+  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const onDbInit = useCallback((db: SQLiteDatabase) => runMigrations(db), [dbEpoch]);
+
   if (!fontsLoaded) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
@@ -70,7 +84,7 @@ export default function RootLayout() {
         </View>
       }
     >
-      <SQLiteProvider databaseName="neu-invoicing.db" onInit={runMigrations} useSuspense>
+      <SQLiteProvider key={dbEpoch} databaseName="neu-invoicing.db" onInit={onDbInit} useSuspense>
         <AuthProvider>
           <RootLayoutInner />
         </AuthProvider>

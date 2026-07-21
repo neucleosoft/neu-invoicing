@@ -73,7 +73,8 @@ export async function checkCloudBackup(accessToken: string): Promise<CloudBackup
 // without doing its own list call first.
 export async function restoreFromCloud(
   accessToken: string,
-  liveDb: SQLite.SQLiteDatabase
+  liveDb: SQLite.SQLiteDatabase,
+  onProgress?: (fraction: number) => void,
 ): Promise<CloudBackupInfo> {
   const info = await checkCloudBackup(accessToken)
   if (!info.exists || !info.fileId) {
@@ -99,16 +100,29 @@ export async function restoreFromCloud(
   // no way back; with the temp file, a failed download leaves the live DB
   // untouched (it isn't even closed yet). Streams to disk via the native
   // downloader — an arrayBuffer round-trip would OOM on large DBs.
+  // Legacy downloader ON PURPOSE: the full backup can be hundreds of MB and
+  // the new File.downloadFileAsync has no progress callback at all — minutes
+  // of apparent freeze. createDownloadResumable streams the same way but
+  // reports bytes, which the Settings button turns into "Downloading… N%".
   const tmpFile = new File(sqliteDir, `${MOBILE_DB_NAME}.download`)
   if (tmpFile.exists) tmpFile.delete()
-  await File.downloadFileAsync(
+  const download = LegacyFS.createDownloadResumable(
     `${DRIVE_FILES_URL}/${info.fileId}?alt=media`,
-    tmpFile,
-    {
-      headers: { Authorization: `Bearer ${accessToken}` },
-      idempotent: true,
-    }
+    tmpFile.uri,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    onProgress
+      ? (p) => {
+          if (p.totalBytesExpectedToWrite > 0) {
+            onProgress(Math.min(1, p.totalBytesWritten / p.totalBytesExpectedToWrite))
+          }
+        }
+      : undefined,
   )
+  const result = await download.downloadAsync()
+  if (!result || result.status < 200 || result.status >= 300) {
+    if (tmpFile.exists) tmpFile.delete()
+    throw new Error(`Download failed (HTTP ${result?.status ?? 'aborted'}) — your local data is untouched. Try again.`)
+  }
 
   // Verify the download is complete before touching the live DB.
   const gotSize = tmpFile.size ?? 0

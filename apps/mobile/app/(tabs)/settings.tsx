@@ -1,6 +1,6 @@
 import { router, useFocusEffect } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, DevSettings, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as Sharing from 'expo-sharing';
 import { useSQLiteContext } from 'expo-sqlite';
@@ -17,7 +17,9 @@ import {
   restoreFromCloud,
   type CloudBackupInfo,
 } from '@/sync/drive';
-import { getSyncActivity, type SyncActivityEntry } from '@/sync/activityLog';
+import { appendSyncActivity, getSyncActivity, type SyncActivityEntry } from '@/sync/activityLog';
+import { reloadDb } from '@/db/reload';
+import { setRestoreNotice } from '@/sync/restoreNotice';
 import { LAST_ROW_SYNC_KEY } from '@/sync/AutoSync';
 import { getLadderInfo, restoreFromLadder, type LadderRungInfo } from '@/sync/ladder';
 import { rowSyncNow } from '@/sync/rowSync';
@@ -47,6 +49,8 @@ export default function SettingsScreen() {
   const [backupLoading, setBackupLoading] = useState(true);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState(false);
+  // Download progress (0-100) while restoring; null before the stream starts.
+  const [restorePct, setRestorePct] = useState<number | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [ladderInfo, setLadderInfo] = useState<LadderRungInfo[]>([]);
   const [ladderRestoring, setLadderRestoring] = useState<string | null>(null);
@@ -237,13 +241,26 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: async () => {
             setRestoring(true);
+            setRestorePct(null);
             try {
               const fresh = await getFreshAccessToken();
               if (!fresh) throw new Error('Session expired — sign in again.');
-              await restoreFromCloud(fresh, liveDb);
-              DevSettings.reload();
+              const info = await restoreFromCloud(fresh, liveDb, (f) => {
+                const pct = Math.round(f * 100);
+                // Functional set: same-percent updates skip the re-render, so
+                // the byte-level callback stream stays cheap.
+                setRestorePct((prev) => (prev === pct ? prev : pct));
+              });
+              const label = info.modifiedTime ? formatBackupDate(info.modifiedTime) : 'the cloud backup';
+              await appendSyncActivity([{ kind: 'RESTORE', detail: `Restored cloud backup from ${label}` }]);
+              // Soft reboot: remounts the tree onto the restored DB. AutoSync
+              // picks up the notice — success alert + immediate sync. This
+              // screen unmounts here, so no state updates after this line.
+              setRestoreNotice(label);
+              reloadDb();
             } catch (e) {
               setRestoring(false);
+              setRestorePct(null);
               Alert.alert('Restore failed', e instanceof Error ? e.message : String(e));
             }
           },
@@ -277,7 +294,10 @@ export default function SettingsScreen() {
               const fresh = await getFreshAccessToken();
               if (!fresh) throw new Error('Session expired — sign in again.');
               await restoreFromLadder(fresh, liveDb, rung.name);
-              DevSettings.reload();
+              const label = formatBackupDate(rung.modifiedTime!);
+              await appendSyncActivity([{ kind: 'RESTORE', detail: `Restored ${LADDER_LABELS[rung.name] ?? rung.name} copy from ${label}` }]);
+              setRestoreNotice(label);
+              reloadDb();
             } catch (e) {
               setLadderRestoring(null);
               Alert.alert('Restore failed', e instanceof Error ? e.message : String(e));
@@ -644,7 +664,11 @@ export default function SettingsScreen() {
           ]}
         >
           <ThemedText style={styles.dangerButtonText}>
-            {restoring ? 'Restoring & reloading…' : 'Restore from cloud'}
+            {restoring
+              ? restorePct != null && restorePct < 100
+                ? `Downloading backup… ${restorePct}%`
+                : 'Restoring…'
+              : 'Restore from cloud'}
           </ThemedText>
         </Pressable>
 
