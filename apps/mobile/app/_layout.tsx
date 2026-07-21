@@ -135,11 +135,15 @@ function RootLayoutInner() {
   // so a not-yet-resolved value never triggers a wrong redirect.
   useEffect(() => {
     if (loading) return;
-    const inLoginRoute = segments[0] === 'login';
+    // Widened on purpose: without generated route types (.expo/types — absent
+    // on CI), expo-router's fallback types segments as a 1-tuple and indexing
+    // [1] fails to compile.
+    const segs: string[] = segments;
+    const inLoginRoute = segs[0] === 'login';
     // Specifically the SETUP screen, NOT the whole company/ folder. The edit
     // screen (company/edit) also lives under `company`, and conflating them was
     // bouncing a user who tapped "Edit company profile" straight back to home.
-    const inCompanySetup = segments[0] === 'company' && segments[1] === 'setup';
+    const inCompanySetup = segs[0] === 'company' && segs[1] === 'setup';
 
     // Offline mode counts as "allowed in", same as desktop where offlineMode is
     // accepted alongside a real Google session.
