@@ -132,6 +132,23 @@ npm run build:linux  # Linux
 
 Executables will be in the `release` folder.
 
+### Testing
+
+Unit tests run on [Vitest](https://vitest.dev/) in a plain Node environment — the
+Electron main/renderer and Prisma boundaries are mocked, so no database or Electron
+runtime is needed.
+
+```bash
+npm test            # run the suite once (CI mode)
+npm run test:watch  # watch mode
+npm run test:coverage
+```
+
+Tests live in `test/` and cover the highest-value pure logic: invoice-number
+normalization/zero-padding, duplicate validation, GSTIN validation, and
+invoice total/GST calculations. CI runs `npm test` on every push and pull
+request (`.github/workflows/test.yml`).
+
 ## 📁 Project Structure
 
 ```

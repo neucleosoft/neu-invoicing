@@ -1,32 +1,14 @@
 import { ipcMain } from 'electron'
 import { getPrisma } from '../database'
 import { triggerSyncAfterChange } from '../sync'
-
-// Normalize invoice number — pad last numeric segment to 2 digits
-// NS/SL/26-27/6 → NS/SL/26-27/06, NS/SL/26-27/06 stays NS/SL/26-27/06
-const normalizeInvoiceNumber = (num: string): string => {
-  const parts = num.trim().split('/')
-  const last = parts[parts.length - 1]
-  const parsed = parseInt(last)
-  if (!isNaN(parsed)) {
-    parts[parts.length - 1] = String(parsed).padStart(2, '0')
-  }
-  return parts.join('/')
-}
-
-// Generate fiscal year string (e.g., "26-27" for April 2026 - March 2027)
-const getFiscalYear = (): string => {
-  const now = new Date()
-  const month = now.getMonth() + 1 // 1-12
-  const year = now.getFullYear() % 100 // last 2 digits
-  if (month >= 4) {
-    // April onwards = current year to next year
-    return `${String(year).padStart(2, '0')}-${String(year + 1).padStart(2, '0')}`
-  } else {
-    // Jan-March = previous year to current year
-    return `${String(year - 1).padStart(2, '0')}-${String(year).padStart(2, '0')}`
-  }
-}
+import {
+  normalizeInvoiceNumber,
+  getFiscalYear,
+  determineSupplyType,
+  computeTaxableAmount,
+  calculateItemGst,
+  calculateInvoiceTotals
+} from './salesLogic'
 
 // Generate next invoice number in format NS/SL/26-27/01
 const generateNextInvoiceNumber = async (prisma: any): Promise<string> => {
@@ -50,19 +32,6 @@ const generateNextInvoiceNumber = async (prisma: any): Promise<string> => {
   }
 
   return `${prefix}${String(nextNum).padStart(2, '0')}`
-}
-
-// Determine supply type based on party GSTIN
-const determineSupplyType = (party: any, totalAmount: number, isInterState: boolean): string => {
-  const hasGstin = party?.taxId && party.taxId.length === 15
-
-  if (hasGstin) {
-    return 'B2B'
-  } else if (isInterState && totalAmount > 250000) {
-    return 'B2C_LARGE'
-  } else {
-    return 'B2C_SMALL'
-  }
 }
 
 export const setupSalesHandlers = () => {
@@ -139,46 +108,26 @@ export const setupSalesHandlers = () => {
         const placeOfSupply = data.placeOfSupply || party.stateCode || company?.stateCode || ''
         const placeOfSupplyName = data.placeOfSupplyName || party.stateName || company?.stateName || ''
 
-        // Calculate totals with GST components
-        let subtotal = 0
-        let taxAmount = 0
-        let totalCgst = 0
-        let totalSgst = 0
-        let totalIgst = 0
-        let totalCess = 0
+        const totalCess = 0
 
         const companyStateCode = company?.stateCode || ''
         const isInterState = companyStateCode !== placeOfSupply && placeOfSupply !== ''
 
-        // Process items and calculate GST components
+        // Calculate taxable subtotal and GST totals across all lines
+        const { subtotal, taxAmount, totalCgst, totalSgst, totalIgst } = calculateInvoiceTotals(
+          data.items,
+          { isInterState, discount: data.discount || 0 }
+        )
+
+        // Process items and calculate GST components per line
         const processedItems: any[] = []
         for (const item of data.items) {
-          const itemTaxableAmount = item.quantity * item.rate - (item.discount || 0)
-          subtotal += itemTaxableAmount
+          const itemTaxableAmount = computeTaxableAmount(item.quantity, item.rate, item.discount || 0)
 
           const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
 
-          // Calculate GST components inline (use tx, not prisma)
-          const halfRate = (item.taxRate || 0) / 2
-          let gstComponents
-          if (isInterState) {
-            gstComponents = {
-              cgstRate: 0, cgstAmount: 0, sgstRate: 0, sgstAmount: 0,
-              igstRate: item.taxRate || 0, igstAmount: (itemTaxableAmount * (item.taxRate || 0)) / 100
-            }
-          } else {
-            gstComponents = {
-              cgstRate: halfRate, cgstAmount: (itemTaxableAmount * halfRate) / 100,
-              sgstRate: halfRate, sgstAmount: (itemTaxableAmount * halfRate) / 100,
-              igstRate: 0, igstAmount: 0
-            }
-          }
-
+          const gstComponents = calculateItemGst(itemTaxableAmount, item.taxRate || 0, isInterState)
           const itemTax = gstComponents.cgstAmount + gstComponents.sgstAmount + gstComponents.igstAmount
-          taxAmount += itemTax
-          totalCgst += gstComponents.cgstAmount
-          totalSgst += gstComponents.sgstAmount
-          totalIgst += gstComponents.igstAmount
 
           processedItems.push({
             itemId: item.itemId,
@@ -320,40 +269,20 @@ export const setupSalesHandlers = () => {
         const placeOfSupplyName = data.placeOfSupplyName || party?.stateName || company?.stateName || ''
         const isInterState = companyStateCode !== placeOfSupply && placeOfSupply !== ''
 
-        // Calculate new totals with GST components
-        let subtotal = 0
-        let taxAmount = 0
-        let totalCgst = 0
-        let totalSgst = 0
-        let totalIgst = 0
+        // Calculate new taxable subtotal and GST totals across all lines
+        const { subtotal, taxAmount, totalCgst, totalSgst, totalIgst } = calculateInvoiceTotals(
+          data.items,
+          { isInterState, discount: data.discount || 0 }
+        )
 
         const processedItems: any[] = []
         for (const item of data.items) {
-          const itemTaxableAmount = item.quantity * item.rate - (item.discount || 0)
-          subtotal += itemTaxableAmount
+          const itemTaxableAmount = computeTaxableAmount(item.quantity, item.rate, item.discount || 0)
 
           const dbItem = await tx.item.findUnique({ where: { id: item.itemId } })
 
-          const halfRate = (item.taxRate || 0) / 2
-          let gstComponents
-          if (isInterState) {
-            gstComponents = {
-              cgstRate: 0, cgstAmount: 0, sgstRate: 0, sgstAmount: 0,
-              igstRate: item.taxRate || 0, igstAmount: (itemTaxableAmount * (item.taxRate || 0)) / 100
-            }
-          } else {
-            gstComponents = {
-              cgstRate: halfRate, cgstAmount: (itemTaxableAmount * halfRate) / 100,
-              sgstRate: halfRate, sgstAmount: (itemTaxableAmount * halfRate) / 100,
-              igstRate: 0, igstAmount: 0
-            }
-          }
-
+          const gstComponents = calculateItemGst(itemTaxableAmount, item.taxRate || 0, isInterState)
           const itemTax = gstComponents.cgstAmount + gstComponents.sgstAmount + gstComponents.igstAmount
-          taxAmount += itemTax
-          totalCgst += gstComponents.cgstAmount
-          totalSgst += gstComponents.sgstAmount
-          totalIgst += gstComponents.igstAmount
 
           processedItems.push({
             itemId: item.itemId,

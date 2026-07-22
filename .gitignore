@@ -43,6 +43,9 @@ prisma/migrations/*
 .env.local
 .env.*.local
 
+# Tests
+coverage
+
 # Build
 build
 out
