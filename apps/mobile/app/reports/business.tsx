@@ -15,6 +15,7 @@ import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
+import { presetRange, type DatePreset } from '@/utils/dateRanges'
 import { shareTextFile, toCsv } from '@/utils/exportShare'
 import {
   getPayables,
@@ -141,9 +142,23 @@ type ResultData =
   | { kind: 'payables'; data: PartyBalanceReport }
   | { kind: 'tax'; data: TaxReport }
 
+// One-tap period chips — 'all' clears both dates (the screen's original
+// default: no bounds), 'custom' means the user typed at least one date.
+type PeriodChoice = 'all' | DatePreset | 'custom'
+
+const PERIOD_CHIPS: { id: Exclude<PeriodChoice, 'custom'>; label: string }[] = [
+  { id: 'all', label: 'All Time' },
+  { id: 'today', label: 'Today' },
+  { id: 'thisMonth', label: 'This Month' },
+  { id: 'lastMonth', label: 'Last Month' },
+  { id: 'thisQuarter', label: 'This Quarter' },
+  { id: 'thisYear', label: 'This FY' },
+]
+
 export default function BusinessReportsScreen() {
   const db = useDb()
   const [active, setActive] = useState<ReportId>('sales')
+  const [period, setPeriod] = useState<PeriodChoice>('all')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [status, setStatus] = useState<SalesStatus>('')
@@ -159,6 +174,19 @@ export default function BusinessReportsScreen() {
   function selectReport(id: ReportId) {
     setActive(id)
     setResult(null)
+  }
+
+  function applyPeriod(p: Exclude<PeriodChoice, 'custom'>) {
+    setPeriod(p)
+    setResult(null)
+    if (p === 'all') {
+      setStartDate('')
+      setEndDate('')
+    } else {
+      const r = presetRange(p)
+      setStartDate(r.start)
+      setEndDate(r.end)
+    }
   }
 
   async function handleGenerate() {
@@ -219,28 +247,50 @@ export default function BusinessReportsScreen() {
         </ScrollView>
 
         {showDateFilter ? (
-          <View style={styles.dateRow}>
-            <View style={styles.dateCol}>
-              <ThemedText style={styles.label}>Start Date</ThemedText>
-              <TextInput
-                style={styles.input}
-                value={startDate}
-                onChangeText={setStartDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor="#999"
-              />
+          <>
+            <ThemedText style={styles.label}>Period</ThemedText>
+            <View style={styles.presetRow}>
+              {PERIOD_CHIPS.map((p) => (
+                <Pressable
+                  key={p.id}
+                  onPress={() => applyPeriod(p.id)}
+                  style={[styles.presetChip, period === p.id && styles.presetChipActive]}
+                >
+                  <ThemedText style={period === p.id ? styles.presetTextActive : styles.presetText}>
+                    {p.label}
+                  </ThemedText>
+                </Pressable>
+              ))}
             </View>
-            <View style={styles.dateCol}>
-              <ThemedText style={styles.label}>End Date</ThemedText>
-              <TextInput
-                style={styles.input}
-                value={endDate}
-                onChangeText={setEndDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor="#999"
-              />
+            <View style={styles.dateRow}>
+              <View style={styles.dateCol}>
+                <ThemedText style={styles.label}>Start Date</ThemedText>
+                <TextInput
+                  style={styles.input}
+                  value={startDate}
+                  onChangeText={(v) => {
+                    setStartDate(v)
+                    setPeriod('custom')
+                  }}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="#999"
+                />
+              </View>
+              <View style={styles.dateCol}>
+                <ThemedText style={styles.label}>End Date</ThemedText>
+                <TextInput
+                  style={styles.input}
+                  value={endDate}
+                  onChangeText={(v) => {
+                    setEndDate(v)
+                    setPeriod('custom')
+                  }}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="#999"
+                />
+              </View>
             </View>
-          </View>
+          </>
         ) : null}
 
         {showStatusFilter ? (
@@ -434,6 +484,12 @@ const styles = StyleSheet.create({
   tabText: { fontSize: 13, color: '#374151' },
   tabTextActive: { fontSize: 13, color: 'white', fontWeight: '600' },
   label: { fontSize: 14, fontWeight: '600', marginTop: 12 },
+  // Same chips as reports/gst.tsx so the two report screens feel identical.
+  presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  presetChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#e5e7eb' },
+  presetChipActive: { backgroundColor: '#007AFF' },
+  presetText: { fontSize: 12, color: '#374151' },
+  presetTextActive: { fontSize: 12, color: 'white', fontWeight: '600' },
   dateRow: { flexDirection: 'row', gap: 12 },
   dateCol: { flex: 1 },
   input: {

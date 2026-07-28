@@ -7,6 +7,7 @@ import { ThemedText } from '@/components/themed-text'
 import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
+import { presetRange, type DatePreset } from '@/utils/dateRanges'
 import { shareTextFile } from '@/utils/exportShare'
 import {
   getGSTR1,
@@ -34,10 +35,10 @@ import { toGSTNGstr1 } from '@neu/shared'
 // user picks a period (presets or custom dates) then taps a report card. Mirrors
 // desktop GSTReports.tsx; the GSTN/Excel/JSON export buttons are out of scope.
 
-type Preset = 'thisMonth' | 'lastMonth' | 'thisQuarter' | 'lastQuarter' | 'thisYear' | 'custom'
+type Preset = DatePreset | 'custom'
 type ReportType = 'gstr1' | 'gstr2' | 'gstr3b' | 'gstr9' | 'hsn'
 
-const PRESETS: { id: Preset; label: string }[] = [
+const PRESETS: { id: Exclude<Preset, 'custom'>; label: string }[] = [
   { id: 'thisMonth', label: 'This Month' },
   { id: 'lastMonth', label: 'Last Month' },
   { id: 'thisQuarter', label: 'This Quarter' },
@@ -53,45 +54,7 @@ const REPORT_CARDS: { id: ReportType; label: string; hint: string }[] = [
   { id: 'hsn', label: 'HSN Summary', hint: 'Rate-wise by HSN code' },
 ]
 
-// Local-time yyyy-mm-dd (NOT toISOString — that shifts IST dates back a day).
-function toIsoLocal(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-function presetRange(preset: Preset): { start: string; end: string } | null {
-  const now = new Date()
-  const y = now.getFullYear()
-  const m = now.getMonth()
-  switch (preset) {
-    case 'thisMonth':
-      return { start: toIsoLocal(new Date(y, m, 1)), end: toIsoLocal(new Date(y, m + 1, 0)) }
-    case 'lastMonth':
-      return { start: toIsoLocal(new Date(y, m - 1, 1)), end: toIsoLocal(new Date(y, m, 0)) }
-    case 'thisQuarter': {
-      const q = Math.floor(m / 3)
-      return { start: toIsoLocal(new Date(y, q * 3, 1)), end: toIsoLocal(new Date(y, q * 3 + 3, 0)) }
-    }
-    case 'lastQuarter': {
-      let q = Math.floor(m / 3) - 1
-      let yy = y
-      if (q < 0) {
-        q = 3
-        yy = y - 1
-      }
-      return { start: toIsoLocal(new Date(yy, q * 3, 1)), end: toIsoLocal(new Date(yy, q * 3 + 3, 0)) }
-    }
-    case 'thisYear': {
-      // Indian financial year: April 1 → March 31.
-      const fy = m >= 3 ? y : y - 1
-      return { start: toIsoLocal(new Date(fy, 3, 1)), end: toIsoLocal(new Date(fy + 1, 2, 31)) }
-    }
-    default:
-      return null
-  }
-}
+// Period math lives in utils/dateRanges.ts now (shared with Business Reports).
 
 function toRange(startStr: string, endStr: string): GstRange | null {
   const start = new Date(startStr)
@@ -128,14 +91,12 @@ export default function GstReportsScreen() {
 
   // Any date/preset change invalidates the open report (prevents showing stale
   // numbers under a new period). Mirrors desktop.
-  function applyPreset(p: Preset) {
+  function applyPreset(p: Exclude<Preset, 'custom'>) {
     setPreset(p)
     setReport(null)
     const r = presetRange(p)
-    if (r) {
-      setStartDate(r.start)
-      setEndDate(r.end)
-    }
+    setStartDate(r.start)
+    setEndDate(r.end)
   }
   function onStartChange(v: string) {
     setStartDate(v)
