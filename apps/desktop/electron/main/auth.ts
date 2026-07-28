@@ -25,6 +25,12 @@ oauth2Client.on('tokens', (tokens) => {
   // Refresh responses don't include refresh_token — keep the old one.
   const merged = { ...existing, ...tokens }
   store.set('google_tokens', merged)
+  // A new/rotated refresh token restarts the 7-day Testing-mode life clock —
+  // the SessionBanner's day-6 renew prompt keys off this timestamp.
+  if (tokens.refresh_token) {
+    store.set('signed_in_at', Date.now())
+    store.delete('auth_invalidated_at')
+  }
 })
 
 const SCOPES = [
@@ -80,6 +86,8 @@ export const setupAuthHandlers = () => {
 
               // Store tokens securely; signing in cancels any prior offline mode.
               store.set('google_tokens', tokens)
+              store.set('signed_in_at', Date.now())
+              store.delete('auth_invalidated_at')
               setOfflineMode(false)
 
               // Get user info
@@ -119,6 +127,9 @@ export const setupAuthHandlers = () => {
       store.delete('google_tokens')
       store.delete('user_info')
       store.delete('demo_mode')
+      // A DELIBERATE sign-out is not an expiry — no red banner afterwards.
+      store.delete('signed_in_at')
+      store.delete('auth_invalidated_at')
       setOfflineMode(false)
       oauth2Client.setCredentials({})
       // Clear this device's sync baseline so the NEXT account that signs in
@@ -148,6 +159,10 @@ export const setupAuthHandlers = () => {
         isAuthenticated: true,
         user: userInfo,
         offlineMode: false,
+        // When the CURRENT refresh token was issued — the SessionBanner shows
+        // a renew prompt at day 6 (Testing-mode tokens die at day 7).
+        signedInAt: (store.get('signed_in_at') as number | undefined) ?? null,
+        authInvalidatedAt: null,
       }
     }
 
@@ -155,6 +170,10 @@ export const setupAuthHandlers = () => {
       isAuthenticated: false,
       user: null,
       offlineMode: isOfflineMode(),
+      signedInAt: null,
+      // Set when Google REVOKED the session (vs never signed in / signed out
+      // on purpose) — drives the red "sign-in expired" banner.
+      authInvalidatedAt: (store.get('auth_invalidated_at') as number | undefined) ?? null,
     }
   })
 
@@ -213,9 +232,13 @@ export const isAuthError = (err: unknown): boolean => {
   )
 }
 
-// Wipe persisted tokens so the next sync attempt prompts re-auth.
+// Wipe persisted tokens so the next sync attempt prompts re-auth. Called on
+// auth ERRORS (revoked/expired grant) — record the moment so the UI can show
+// "sign-in expired" instead of pretending the user never signed in.
 export const clearStoredCredentials = () => {
   store.delete('google_tokens')
   store.delete('user_info')
+  store.delete('signed_in_at')
+  store.set('auth_invalidated_at', Date.now())
   oauth2Client.setCredentials({})
 }

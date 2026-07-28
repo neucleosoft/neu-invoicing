@@ -153,6 +153,27 @@ const Layout = () => {
 
   const { connect: connectGoogle, isConnecting, dialog: connectDialog } = useConnectGoogle()
 
+  // Session health strip — polls auth status once a minute so the day-6 renew
+  // prompt and the "expired" state appear WITHOUT a restart. Testing-mode
+  // Google sessions die 7 days after issue; the amber banner renews at day 6,
+  // the red one appears once Google has revoked the grant. (Both go dormant
+  // forever once the OAuth consent screen is published.)
+  const [session, setSession] = useState<{ authInvalidatedAt?: number | null; signedInAt?: number | null; isAuthenticated?: boolean } | null>(null)
+  useEffect(() => {
+    let disposed = false
+    const check = () => {
+      window.electronAPI.auth.getAuthStatus().then((s: any) => {
+        if (!disposed) setSession(s)
+      }).catch(() => {})
+    }
+    check()
+    const interval = setInterval(check, 60_000)
+    return () => { disposed = true; clearInterval(interval) }
+  }, [])
+  const SIX_DAYS_MS = 6 * 24 * 60 * 60 * 1000
+  const sessionExpired = !!session?.authInvalidatedAt && !session?.isAuthenticated
+  const sessionAging = !!session?.isAuthenticated && !!session?.signedInAt && Date.now() - session.signedInAt >= SIX_DAYS_MS
+
   const collapsed = !sidebarOpen
 
   const SyncBadge = () => {
@@ -380,6 +401,24 @@ const Layout = () => {
 
       {/* Main Content */}
       <main className="flex-1 overflow-auto bg-gradient-to-b from-slate-50 to-white dark:from-slate-950 dark:to-slate-900">
+        {sessionExpired && (
+          <button
+            onClick={() => connectGoogle()}
+            disabled={isConnecting}
+            className="w-full bg-red-600 text-white text-sm font-semibold py-2.5 px-4 text-center hover:bg-red-700"
+          >
+            Google sign-in expired — sync &amp; backups are paused. Click to sign in again.
+          </button>
+        )}
+        {!sessionExpired && sessionAging && (
+          <button
+            onClick={() => connectGoogle()}
+            disabled={isConnecting}
+            className="w-full bg-amber-600 text-white text-sm font-semibold py-2.5 px-4 text-center hover:bg-amber-700"
+          >
+            Google sign-in expires soon — click to renew and keep backups running.
+          </button>
+        )}
         <div className="p-8">
           <Outlet />
         </div>

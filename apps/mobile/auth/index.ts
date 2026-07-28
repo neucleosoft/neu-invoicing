@@ -37,6 +37,18 @@ const EXPIRY_KEY = 'neu.auth.accessTokenExpiry'
 // Cached profile JSON so boot needs NO network call — an offline launch stays
 // signed in instead of appearing logged out (or worse, wiping tokens).
 const USER_KEY = 'neu.auth.user'
+// Unix-ms when the CURRENT refresh token was issued. In Google's Testing mode
+// a refresh token dies 7 days after issue — the SessionBanner prompts a renew
+// at day 6 so backups/sync never break silently. Reset whenever Google hands
+// us a (new or rotated) refresh token.
+const SIGNED_IN_AT_KEY = 'neu.auth.signedInAt'
+
+/** When the current refresh token was issued (ms), or null. Read by the
+ *  SessionBanner to show the day-6 "renew soon" prompt. */
+export async function getSignedInAt(): Promise<number | null> {
+  const v = await SecureStore.getItemAsync(SIGNED_IN_AT_KEY)
+  return v ? Number(v) : null
+}
 
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
 
@@ -57,7 +69,11 @@ async function persistTokens(t: {
     SecureStore.setItemAsync(STORAGE_KEY, t.accessToken),
     SecureStore.setItemAsync(EXPIRY_KEY, String(expiry)),
   ]
-  if (t.refreshToken) writes.push(SecureStore.setItemAsync(REFRESH_KEY, t.refreshToken))
+  if (t.refreshToken) {
+    writes.push(SecureStore.setItemAsync(REFRESH_KEY, t.refreshToken))
+    // A fresh (or rotated) refresh token restarts the 7-day Testing-mode clock.
+    writes.push(SecureStore.setItemAsync(SIGNED_IN_AT_KEY, String(Date.now())))
+  }
   await Promise.all(writes)
 }
 
@@ -97,6 +113,10 @@ type AuthContextValue = {
    * caller should prompt a re-sign-in.
    */
   getFreshAccessToken: () => Promise<string | null>
+  /** True when Google has REVOKED the session (invalid_grant) while a user is
+   *  still cached — sync/backups are dead until a fresh sign-in. Drives the
+   *  red SessionBanner. */
+  authDead: boolean
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null)
@@ -106,6 +126,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null)
   const [offlineMode, setOfflineMode] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [authDead, setAuthDead] = useState(false)
 
   const [, response, promptAsync] = Google.useAuthRequest({
     webClientId: WEB_CLIENT_ID,
@@ -189,6 +210,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .then((userInfo) => {
           setUser(userInfo)
           setAccessToken(auth.accessToken)
+          setAuthDead(false)
           // A real sign-in supersedes offline mode.
           setOfflineMode(false)
           return Promise.all([
@@ -216,6 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       !!token && !!expiry && Date.now() < Number(expiry) - 60_000
     if (stillValid) {
       setAccessToken(token)
+      setAuthDead(false)
       return token
     }
     if (!refresh) {
@@ -227,6 +250,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const fresh = await refreshAccessToken(refresh)
       setAccessToken(fresh)
+      setAuthDead(false)
       return fresh
     } catch (e) {
       // Only a REVOKED/expired grant means "signed out". A network failure
@@ -235,7 +259,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // signed out).
       const detail =
         String((e as { code?: string }).code ?? '') + ' ' + String((e as Error).message ?? '')
-      if (detail.includes('invalid_grant')) return null
+      if (detail.includes('invalid_grant')) {
+        // Google revoked the grant (7-day Testing-mode expiry, or manual
+        // revoke). Surface it — the red banner tells the user to sign in.
+        setAuthDead(true)
+        return null
+      }
       console.error('Token refresh failed (transient)', e)
       return token
     }
@@ -277,6 +306,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         signOut,
         enterOfflineMode,
         getFreshAccessToken,
+        authDead,
       },
     },
     children
