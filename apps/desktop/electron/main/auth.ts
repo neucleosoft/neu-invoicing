@@ -163,6 +163,10 @@ export const setupAuthHandlers = () => {
         // a renew prompt at day 6 (Testing-mode tokens die at day 7).
         signedInAt: (store.get('signed_in_at') as number | undefined) ?? null,
         authInvalidatedAt: null,
+        // Cloud backup slot age (recorded hourly by the scheduler): ms mtime,
+        // 0 = no backup exists, null/undefined = never checked yet.
+        backupSlotMtime: (store.get('backup_slot_mtime') as number | undefined) ?? null,
+        backupFrequency: (store.get('backup_frequency') as string | undefined) ?? 'off',
       }
     }
 

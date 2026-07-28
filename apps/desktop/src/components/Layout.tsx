@@ -158,7 +158,7 @@ const Layout = () => {
   // Google sessions die 7 days after issue; the amber banner renews at day 6,
   // the red one appears once Google has revoked the grant. (Both go dormant
   // forever once the OAuth consent screen is published.)
-  const [session, setSession] = useState<{ authInvalidatedAt?: number | null; signedInAt?: number | null; isAuthenticated?: boolean } | null>(null)
+  const [session, setSession] = useState<{ authInvalidatedAt?: number | null; signedInAt?: number | null; isAuthenticated?: boolean; backupSlotMtime?: number | null; backupFrequency?: string } | null>(null)
   useEffect(() => {
     let disposed = false
     const check = () => {
@@ -173,6 +173,20 @@ const Layout = () => {
   const SIX_DAYS_MS = 6 * 24 * 60 * 60 * 1000
   const sessionExpired = !!session?.authInvalidatedAt && !session?.isAuthenticated
   const sessionAging = !!session?.isAuthenticated && !!session?.signedInAt && Date.now() - session.signedInAt >= SIX_DAYS_MS
+
+  // Stale-backup warning: compares the SLOT's own age (recorded hourly from
+  // Drive) against the user's chosen cadence — daily backups warn at 3 days,
+  // weekly at 14, monthly at 60, "off" (manual-only) at 7. slotMtime 0 means
+  // no backup exists at all. Suppressed while a session banner is showing —
+  // a dead sign-in already explains a stale backup.
+  const STALE_DAYS: Record<string, number> = { off: 7, daily: 3, weekly: 14, monthly: 60 }
+  const staleAfterMs = (STALE_DAYS[session?.backupFrequency ?? 'off'] ?? 7) * 24 * 60 * 60 * 1000
+  const slotMtime = session?.backupSlotMtime
+  const backupMissing = session?.isAuthenticated && slotMtime === 0
+  const backupStaleDays = session?.isAuthenticated && typeof slotMtime === 'number' && slotMtime > 0 && Date.now() - slotMtime >= staleAfterMs
+    ? Math.floor((Date.now() - slotMtime) / (24 * 60 * 60 * 1000))
+    : null
+  const showBackupWarning = !sessionExpired && !sessionAging && (backupMissing || backupStaleDays !== null)
 
   const collapsed = !sidebarOpen
 
@@ -417,6 +431,16 @@ const Layout = () => {
             className="w-full bg-amber-600 text-white text-sm font-semibold py-2.5 px-4 text-center hover:bg-amber-700"
           >
             Google sign-in expires soon — click to renew and keep backups running.
+          </button>
+        )}
+        {showBackupWarning && (
+          <button
+            onClick={() => navigate('/settings')}
+            className="w-full bg-amber-600 text-white text-sm font-semibold py-2.5 px-4 text-center hover:bg-amber-700"
+          >
+            {backupMissing
+              ? 'No cloud backup exists yet — open Settings to back up now.'
+              : `Cloud backup is ${backupStaleDays} days old — recent work is not protected. Open Settings to back up.`}
           </button>
         )}
         <div className="p-8">

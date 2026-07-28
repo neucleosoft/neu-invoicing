@@ -19,6 +19,7 @@ import { useSQLiteContext } from 'expo-sqlite'
 import { useAuth } from '@/auth'
 import { useDb } from '@/db'
 
+import { recordBackupSlotAge } from './backupHealth'
 import { runLadderIfDue } from './ladder'
 import { purgeArchivedDocs } from './purge'
 import { consumeRestoreNotice } from './restoreNotice'
@@ -60,6 +61,7 @@ export function AutoSync() {
         await runLadderIfDue(liveDb, token)
         await purgeArchivedDocs(db, token)
         await runScheduledBackupIfDue(liveDb, token)
+        await recordBackupSlotAge(token)
       } catch {
         // transient/offline — auto-sync never surfaces errors
       } finally {

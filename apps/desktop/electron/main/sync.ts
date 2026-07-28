@@ -801,6 +801,29 @@ export const restoreFromLadder = async (slotName: string): Promise<{ success: bo
   }
 }
 
+// Records the cloud backup slot's own age for the Layout's stale-backup
+// warning. Reads the SLOT's timestamp from Drive (one files.list per hour) —
+// deliberately NOT our upload history, because the warning must keep working
+// precisely when uploads are failing. 0 = slot missing entirely.
+const recordBackupSlotAge = async () => {
+  try {
+    if (!isSignedIn() || store.get('demo_mode')) return
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const res = await drive.files.list({
+      spaces: 'appDataFolder',
+      q: `name='${CLOUD_DB_FILENAME}'`,
+      fields: 'files(modifiedTime)',
+      pageSize: 1,
+    })
+    const f = (res.data.files || [])[0]
+    store.set('backup_slot_mtime', f?.modifiedTime ? new Date(f.modifiedTime).getTime() : 0)
+  } catch {
+    // Unreachable (offline / dead token) — keep the last known value; the
+    // session banner owns the dead-token story.
+  }
+}
+
 let schedulerInterval: NodeJS.Timeout | null = null
 
 export const startBackupScheduler = () => {
@@ -809,9 +832,11 @@ export const startBackupScheduler = () => {
   // for 3 days" cases.
   void runIfScheduledSyncDue()
   void runLadderIfDue()
+  void recordBackupSlotAge()
   schedulerInterval = setInterval(() => {
     void runIfScheduledSyncDue()
     void runLadderIfDue()
+    void recordBackupSlotAge()
   }, SCHEDULER_TICK_MS)
 }
 
