@@ -1,4 +1,4 @@
-import { router, useFocusEffect } from 'expo-router';
+import { router, useFocusEffect, type Href } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
@@ -810,6 +810,19 @@ export default function SettingsScreen() {
             />
           </>
         )}
+        <Pressable
+          onPress={() => router.push('/reconcilePayments' as Href)}
+          style={styles.businessRow}
+        >
+          <View style={{ flex: 1 }}>
+            <ThemedText type="defaultSemiBold">Reconcile paid invoices</ThemedText>
+            <ThemedText style={styles.businessHint}>
+              Invoices marked paid without a payment record behind them — confirm and record the
+              missing payments instead of downgrading statuses.
+            </ThemedText>
+          </View>
+          <ThemedText style={styles.businessChevron}>›</ThemedText>
+        </Pressable>
       </ThemedView>
         </>
       )}
