@@ -40,10 +40,14 @@ import {
   type ThemePreference,
 } from '@/hooks/theme-preference';
 
+// Settings outgrew a single scroll — grouped into tabs like desktop's page.
+type SettingsTabId = 'business' | 'sync' | 'app';
+
 export default function SettingsScreen() {
   const { user, accessToken, getFreshAccessToken, signOut, signIn } = useAuth();
   const liveDb = useSQLiteContext();
   const db = useDb();
+  const [tab, setTab] = useState<SettingsTabId>('business');
 
   const [backupInfo, setBackupInfo] = useState<CloudBackupInfo | null>(null);
   const [backupLoading, setBackupLoading] = useState(true);
@@ -508,6 +512,28 @@ export default function SettingsScreen() {
     <ScrollView contentContainerStyle={styles.content}>
       <ThemedText type="title">Settings</ThemedText>
 
+      <View style={styles.tabRow}>
+        {(
+          [
+            { id: 'business', label: 'Business' },
+            { id: 'sync', label: 'Sync & Backup' },
+            { id: 'app', label: 'App' },
+          ] as const
+        ).map((t) => (
+          <Pressable
+            key={t.id}
+            onPress={() => setTab(t.id)}
+            style={[styles.tabChip, tab === t.id && styles.tabChipActive]}
+          >
+            <ThemedText style={tab === t.id ? styles.tabTextActive : styles.tabText}>
+              {t.label}
+            </ThemedText>
+          </Pressable>
+        ))}
+      </View>
+
+      {tab === 'app' && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Profile</ThemedText>
         <View style={styles.profileRow}>
@@ -527,7 +553,11 @@ export default function SettingsScreen() {
           </Pressable>
         )}
       </ThemedView>
+        </>
+      )}
 
+      {tab === 'business' && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Business</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -550,7 +580,11 @@ export default function SettingsScreen() {
           <ThemedText style={styles.businessChevron}>›</ThemedText>
         </Pressable>
       </ThemedView>
+        </>
+      )}
 
+      {tab === 'sync' && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Device Sync (beta)</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -777,7 +811,11 @@ export default function SettingsScreen() {
           </>
         )}
       </ThemedView>
+        </>
+      )}
 
+      {tab === 'app' && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">App Lock</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -869,7 +907,11 @@ export default function SettingsScreen() {
           ))}
         </View>
       </ThemedView>
+        </>
+      )}
 
+      {tab === 'business' && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Invoice Template</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -943,6 +985,8 @@ export default function SettingsScreen() {
           />
         </View>
       </ThemedView>
+        </>
+      )}
 
       {user && (
         <ThemedView style={styles.section}>
@@ -958,6 +1002,18 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   content: { padding: 16, paddingTop: 48, paddingBottom: 48, gap: 24 },
   section: { gap: 12 },
+  tabRow: { flexDirection: 'row', gap: 8 },
+  tabChip: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
+  tabChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  tabText: { fontSize: 13, lineHeight: 17 },
+  tabTextActive: { fontSize: 13, lineHeight: 17, color: 'white', fontWeight: '600' },
   profileRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   avatar: { width: 56, height: 56, borderRadius: 28 },
   avatarPlaceholder: { backgroundColor: '#ccc' },
