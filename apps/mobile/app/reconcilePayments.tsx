@@ -30,7 +30,10 @@ export default function ReconcilePaymentsScreen() {
     findUnbackedInvoices(db)
       .then((r) => {
         setRows(r)
-        setUnticked(new Set())
+        // Nothing pre-selected — recording money must be a per-invoice,
+        // deliberate act. (Pre-ticking everything once turned one tap into 31
+        // wrong payment records on a device holding stale statuses.)
+        setUnticked(new Set(r.map((x) => x.id)))
       })
       .catch((e) => {
         Alert.alert('Error', e instanceof Error ? e.message : 'Failed to scan invoices')
@@ -92,9 +95,10 @@ export default function ReconcilePaymentsScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
         <ThemedText style={styles.intro}>
-          These invoices claim money that has no payment record behind it. Untick any invoice the
-          customer has NOT actually settled, then record the rest — each gets a real payment entry
-          for the missing amount.
+          These invoices claim money that has no payment record behind it. Tick ONLY the invoices
+          you are certain the customer fully settled — each ticked one gets a real payment entry
+          for the missing amount. If unsure about an invoice, leave it unticked and check with
+          your books first.
         </ThemedText>
 
         {rows === null ? (
