@@ -20,6 +20,7 @@ import { ThemedView } from '@/components/themed-view'
 import { schema, useDb } from '@/db'
 import { formatCurrency } from '@/utils/currency'
 import { formatDate } from '@/utils/date'
+import { presetRange, toIsoLocal, type DatePreset } from '@/utils/dateRanges'
 import { buildCustomerLedger, sliceToDateRange, type LedgerData } from '@/utils/ledger'
 import { buildStatementPdfPayload } from '@/utils/statementPdf'
 
@@ -30,17 +31,18 @@ import { buildStatementPdfPayload } from '@/utils/statementPdf'
 
 type Customer = typeof schema.customer.$inferSelect
 
-function todayIso() {
-  return new Date().toISOString().slice(0, 10)
-}
+// One-tap period chips (shared math in utils/dateRanges). No "All Time" here —
+// a statement is a from→to slice by definition, both dates are required.
+type PeriodChoice = DatePreset | 'custom'
 
-// April 1 of the current Indian financial year (FY runs Apr–Mar). Mirrors
-// desktop startOfFiscalYear(): before April, the FY started last calendar year.
-function fyStartIso(): string {
-  const now = new Date()
-  const year = now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
-  return new Date(year, 3, 1).toISOString().slice(0, 10)
-}
+const PERIOD_CHIPS: { id: DatePreset; label: string }[] = [
+  { id: 'today', label: 'Today' },
+  { id: 'thisMonth', label: 'This Month' },
+  { id: 'lastMonth', label: 'Last Month' },
+  { id: 'thisQuarter', label: 'This Quarter' },
+  { id: 'lastQuarter', label: 'Last Quarter' },
+  { id: 'thisYear', label: 'This FY' },
+]
 
 function parseDate(s: string): Date | null {
   if (!s.trim()) return null
@@ -52,8 +54,12 @@ export default function CustomerStatementScreen() {
   const db = useDb()
   const [customers, setCustomers] = useState<Customer[]>([])
   const [customerId, setCustomerId] = useState('')
-  const [fromDate, setFromDate] = useState(fyStartIso())
-  const [toDate, setToDate] = useState(todayIso())
+  // Default = current FY start → today. toIsoLocal, NOT toISOString: the old
+  // ISO slice ran in UTC, so IST users got "March 31" as FY start and saw
+  // yesterday as "today" before 5:30 AM.
+  const [period, setPeriod] = useState<PeriodChoice>('thisYear')
+  const [fromDate, setFromDate] = useState(presetRange('thisYear').start)
+  const [toDate, setToDate] = useState(toIsoLocal(new Date()))
   const [showPicker, setShowPicker] = useState(false)
   const [loading, setLoading] = useState(false)
 
@@ -148,13 +154,36 @@ export default function CustomerStatementScreen() {
           </ThemedText>
         </Pressable>
 
+        <ThemedText style={styles.label}>Period</ThemedText>
+        <View style={styles.presetRow}>
+          {PERIOD_CHIPS.map((p) => (
+            <Pressable
+              key={p.id}
+              onPress={() => {
+                setPeriod(p.id)
+                const r = presetRange(p.id)
+                setFromDate(r.start)
+                setToDate(r.end)
+              }}
+              style={[styles.presetChip, period === p.id && styles.presetChipActive]}
+            >
+              <ThemedText style={period === p.id ? styles.presetTextActive : styles.presetText}>
+                {p.label}
+              </ThemedText>
+            </Pressable>
+          ))}
+        </View>
+
         <View style={styles.dateRow}>
           <View style={styles.dateCol}>
             <ThemedText style={styles.label}>From</ThemedText>
             <TextInput
               style={styles.input}
               value={fromDate}
-              onChangeText={setFromDate}
+              onChangeText={(v) => {
+                setFromDate(v)
+                setPeriod('custom')
+              }}
               placeholder="YYYY-MM-DD"
               placeholderTextColor="#999"
             />
@@ -164,7 +193,10 @@ export default function CustomerStatementScreen() {
             <TextInput
               style={styles.input}
               value={toDate}
-              onChangeText={setToDate}
+              onChangeText={(v) => {
+                setToDate(v)
+                setPeriod('custom')
+              }}
               placeholder="YYYY-MM-DD"
               placeholderTextColor="#999"
             />
@@ -263,6 +295,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   placeholder: { opacity: 0.5 },
+  // Same chips as the other two report screens.
+  presetRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 8 },
+  presetChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: '#e5e7eb' },
+  presetChipActive: { backgroundColor: '#007AFF' },
+  presetText: { fontSize: 12, color: '#374151' },
+  presetTextActive: { fontSize: 12, color: 'white', fontWeight: '600' },
   dateRow: { flexDirection: 'row', gap: 12 },
   dateCol: { flex: 1 },
   input: {
