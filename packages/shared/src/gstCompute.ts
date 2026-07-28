@@ -66,6 +66,11 @@ export interface GstComputeInput {
   /** Override the derived place of supply (e.g. a manual selection). */
   placeOfSupply?: string
   placeOfSupplyName?: string
+  /** Round the grand total to a whole rupee with a Round Off adjustment
+   *  (default true — standard for documents WE author). Purchase-side callers
+   *  pass false: a supplier's paper bill total keeps its paise so our record
+   *  matches their document. */
+  roundTotalToRupee?: boolean
 }
 
 export interface GstComputeResult {
@@ -79,9 +84,18 @@ export interface GstComputeResult {
   totalSgst: number
   totalIgst: number
   totalCess: number
+  /** totalAmount − (subtotal + taxAmount − discount): the whole-rupee rounding
+   *  adjustment, shown as the "Round Off" line on printed documents. 0 when
+   *  roundTotalToRupee is false. */
+  roundOff: number
   supplyType: string
   items: GstLineResult[]
 }
+
+// Money lives in floats here (legacy schema); every stored/printed amount must
+// be a real paise value — floating residue like 2.6973000000000003 must never
+// leave this module (it reached production PDFs as ₹8,292.096).
+const round2 = (n: number) => Math.round(n * 100) / 100
 
 // B2B when the party carries a full 15-char GSTIN; otherwise B2C, split into
 // B2C_LARGE (inter-state and over ₹2.5L, which GSTR-1 reports line-by-line) vs
@@ -116,7 +130,7 @@ export function computeGstValues(input: GstComputeInput): GstComputeResult {
 
   const resultItems: GstLineResult[] = items.map((item) => {
     const taxRate = item.taxRate || 0
-    const taxableAmount = item.quantity * item.rate - (item.discount || 0)
+    const taxableAmount = round2(item.quantity * item.rate - (item.discount || 0))
     subtotal += taxableAmount
 
     const halfRate = taxRate / 2
@@ -128,16 +142,16 @@ export function computeGstValues(input: GstComputeInput): GstComputeResult {
     let igstAmount = 0
     if (isInterState) {
       igstRate = taxRate
-      igstAmount = (taxableAmount * taxRate) / 100
+      igstAmount = round2((taxableAmount * taxRate) / 100)
     } else {
       cgstRate = halfRate
-      cgstAmount = (taxableAmount * halfRate) / 100
+      cgstAmount = round2((taxableAmount * halfRate) / 100)
       sgstRate = halfRate
-      sgstAmount = (taxableAmount * halfRate) / 100
+      sgstAmount = cgstAmount
     }
 
-    const cessAmount = item.cessAmount || 0
-    const itemTax = cgstAmount + sgstAmount + igstAmount + cessAmount
+    const cessAmount = round2(item.cessAmount || 0)
+    const itemTax = round2(cgstAmount + sgstAmount + igstAmount + cessAmount)
 
     taxAmount += itemTax
     totalCgst += cgstAmount
@@ -152,7 +166,7 @@ export function computeGstValues(input: GstComputeInput): GstComputeResult {
       taxableAmount,
       taxRate,
       hsnCode,
-      total: taxableAmount + itemTax,
+      total: round2(taxableAmount + itemTax),
       cgstRate,
       cgstAmount,
       sgstRate,
@@ -164,7 +178,18 @@ export function computeGstValues(input: GstComputeInput): GstComputeResult {
     }
   })
 
-  const totalAmount = subtotal + taxAmount - (input.docDiscount || 0)
+  // Sums of 2dp values still carry float noise (0.1+0.2 style) — settle them.
+  subtotal = round2(subtotal)
+  taxAmount = round2(taxAmount)
+  totalCgst = round2(totalCgst)
+  totalSgst = round2(totalSgst)
+  totalIgst = round2(totalIgst)
+  totalCess = round2(totalCess)
+
+  const rawTotal = round2(subtotal + taxAmount - (input.docDiscount || 0))
+  const roundToRupee = input.roundTotalToRupee !== false
+  const totalAmount = roundToRupee ? Math.round(rawTotal) : rawTotal
+  const roundOff = round2(totalAmount - rawTotal)
   const supplyType = determineSupplyType(party, totalAmount, isInterState)
 
   return {
@@ -178,6 +203,7 @@ export function computeGstValues(input: GstComputeInput): GstComputeResult {
     totalSgst,
     totalIgst,
     totalCess,
+    roundOff,
     supplyType,
     items: resultItems,
   }
@@ -219,8 +245,10 @@ export function applyPurchaseTaxOverride(
     // sometimes mislabel the same way — re-split by the actual state decision so
     // both apps store the same, legal split. Mixed splits pass through untouched.
     if (!gst.isInterState && totalIgst > 0 && totalCgst === 0 && totalSgst === 0) {
-      totalCgst = tax / 2
-      totalSgst = tax / 2
+      // Halves must sum back to the exact printed tax — round one side, give
+      // the remainder to the other (½ of an odd paise can't round twice).
+      totalCgst = round2(tax / 2)
+      totalSgst = round2(tax - totalCgst)
       totalIgst = 0
     } else if (gst.isInterState && totalIgst === 0) {
       totalIgst = tax
@@ -230,20 +258,24 @@ export function applyPurchaseTaxOverride(
   } else if (gst.isInterState) {
     totalIgst = tax
   } else {
-    totalCgst = tax / 2
-    totalSgst = tax / 2
+    totalCgst = round2(tax / 2)
+    totalSgst = round2(tax - totalCgst)
   }
 
   // Recover the doc discount the caller passed to computeGstValues, so the
   // override path nets it identically (totalAmount = subtotal + tax − discount).
-  const docDiscount = gst.subtotal + gst.taxAmount - gst.totalAmount
+  // gst.totalAmount may carry a whole-rupee roundOff — strip it first.
+  const docDiscount = round2(gst.subtotal + gst.taxAmount - (gst.totalAmount - gst.roundOff))
 
   return {
     ...gst,
-    taxAmount: tax,
-    totalAmount: gst.subtotal + tax - docDiscount,
-    totalCgst,
-    totalSgst,
-    totalIgst,
+    taxAmount: round2(tax),
+    // Purchase overrides mirror the supplier's printed figures: keep paise,
+    // never re-round their total to a whole rupee.
+    totalAmount: round2(gst.subtotal + tax - docDiscount),
+    roundOff: 0,
+    totalCgst: round2(totalCgst),
+    totalSgst: round2(totalSgst),
+    totalIgst: round2(totalIgst),
   }
 }

@@ -88,6 +88,7 @@ export function numberToWords(num: number): string {
   const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety']
   function twoD(n: number): string { if (n === 0) return ''; if (n < 20) return ones[n]; return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '') }
   function threeD(n: number): string { if (n === 0) return ''; if (n >= 100) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + twoD(n % 100) : ''); return twoD(n) }
+  if (!Number.isFinite(num)) return 'Zero Rupees Only'
   const integer = Math.floor(Math.abs(num))
   const decimal = Math.round((Math.abs(num) - integer) * 100)
   let r = '', rem = integer
@@ -97,7 +98,11 @@ export function numberToWords(num: number): string {
   if (rem > 0) r += threeD(rem)
   r = r.trim()
   if (r) r += ' Rupees'
-  if (decimal > 0) r += ' and ' + twoD(decimal) + ' Paise'
+  // Paise-only amounts read "Fifty Paise Only" — never start a sentence with
+  // "and"; rupee+paise amounts keep the joining "and".
+  if (decimal > 0) r += (r ? ' and ' : '') + twoD(decimal) + ' Paise'
+  // A credit amount must not silently read as a positive one.
+  if (num < 0 && r) r = 'Minus ' + r
   return (r || 'Zero Rupees') + ' Only'
 }
 

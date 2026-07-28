@@ -383,6 +383,12 @@ function buildItemsSection(inv: InvoiceData, isInter: boolean, taxGroups: Return
     }
   })
 
+  // Whole-rupee Round Off (mirrors the shared builders - sub-50-paise deltas only).
+  const roundOff = Math.round((inv.totalAmount - ((inv.subtotal ?? 0) + (inv.taxAmount ?? 0) - (inv.discount ?? 0))) * 100) / 100
+  if ((inv.subtotal ?? 0) > 0 && Math.abs(roundOff) > 0.004 && Math.abs(roundOff) <= 0.5) {
+    taxRows.push([{ text: '' }, { text: 'Round Off', italics: true, fontSize: 9, alignment: 'right' as const }, { text: '-', alignment: 'right' as const }, { text: '-', alignment: 'right' as const }, { text: '-', alignment: 'right' as const }, { text: (roundOff > 0 ? '+' : '-') + fmtNum(Math.abs(roundOff)), alignment: 'right' as const, fontSize: 9 }])
+  }
+
   // Total row
   const totalQty = inv.items.reduce((s, i) => s + i.quantity, 0)
   const totalRow: TableCell[] = [

@@ -56,6 +56,7 @@ export interface PDFDocumentData {
   totalAmount: number
   subtotal?: number
   taxAmount?: number
+  discount?: number
   notes?: string
   termsConditions?: string
   isInterState?: boolean

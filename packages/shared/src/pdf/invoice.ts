@@ -271,6 +271,14 @@ function buildItemsSection(inv: InvoiceData, isInter: boolean, taxGroups: Return
     }
   })
 
+  // Whole-rupee Round Off (engine rounds authored totals to the rupee). Derived
+  // from stored figures; a genuine round-off is always ≤ 50 paise — anything
+  // larger means older unrounded data (or a missing discount figure), no line.
+  const roundOff = Math.round((inv.totalAmount - ((inv.subtotal ?? 0) + (inv.taxAmount ?? 0) - (inv.discount ?? 0))) * 100) / 100
+  if ((inv.subtotal ?? 0) > 0 && Math.abs(roundOff) > 0.004 && Math.abs(roundOff) <= 0.5) {
+    taxRows.push([{ text: '' }, { text: 'Round Off', italics: true, fontSize: 9, alignment: 'right' }, { text: '-', alignment: 'right' }, { text: '-', alignment: 'right' }, { text: '-', alignment: 'right' }, { text: (roundOff > 0 ? '+' : '-') + fmtNum(Math.abs(roundOff)), alignment: 'right', fontSize: 9 }])
+  }
+
   const totalQty = inv.items.reduce((s, i) => s + i.quantity, 0)
   const totalRow: TableCell[] = [
     { text: '', fillColor: GREEN },

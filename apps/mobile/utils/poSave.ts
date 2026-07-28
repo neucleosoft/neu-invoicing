@@ -95,6 +95,8 @@ async function computePoGst(
     .where(eq(schema.supplier.id, supplierId))
     .limit(1)
   return computeGstValues({
+    // Purchase-side: keep the supplier's paise — never rupee-round their total.
+    roundTotalToRupee: false,
     company: company
       ? { stateCode: company.stateCode, stateName: company.stateName }
       : null,
