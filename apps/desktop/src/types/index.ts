@@ -643,6 +643,7 @@ declare global {
         fetchBillImage: (billId: string) => Promise<{ success: boolean; error?: string }>
         getLadderInfo: () => Promise<{ name: string; modifiedTime: string | null; size: number | null }[]>
         restoreFromLadder: (slotName: string) => Promise<{ success: boolean; error?: string }>
+        resetSyncData: () => Promise<{ success: boolean; deleted?: number; error?: string }>
         getBackupInfo: () => Promise<{
           cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
           thisDeviceLastUpload: string | null

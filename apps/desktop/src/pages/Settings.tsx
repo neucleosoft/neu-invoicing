@@ -305,6 +305,40 @@ const Settings = () => {
     }
   }
 
+  const [resettingSync, setResettingSync] = useState(false)
+
+  // Reset sync data — double confirm: the operation is safe for DATA but wipes
+  // the account's sync memory, and the second dialog spells out the follow-up
+  // procedure (restore or sign out every other device).
+  const handleResetSyncData = async () => {
+    const first = await confirm({
+      title: 'Reset sync data?',
+      message:
+        'This deletes every device’s sync diary on this Google account and clears this device’s sync baselines. No invoices, backups or photos are touched.',
+      confirmText: 'Continue',
+      cancelText: 'Cancel',
+    })
+    if (!first) return
+    const second = await confirm({
+      title: 'One more thing',
+      message:
+        'Any OTHER device that still holds old data and syncs on this account will re-share it. After resetting, restore every device from your chosen backup — or sign devices out. Reset now?',
+      confirmText: 'Reset sync data',
+      cancelText: 'Cancel',
+    })
+    if (!second) return
+    setResettingSync(true)
+    try {
+      const r = await window.electronAPI.sync.resetSyncData()
+      if (r.success) toast.success(`Sync data reset — ${r.deleted ?? 0} device diary file(s) deleted`)
+      else toast.error(r.error || 'Reset failed')
+    } catch {
+      toast.error('Reset failed')
+    } finally {
+      setResettingSync(false)
+    }
+  }
+
   const handleRemoveLogo = async () => {
     if (!company?.id) return
     try {
@@ -1014,6 +1048,25 @@ const Settings = () => {
                     Your data is stored locally in the app's data folder. The Google Drive sync provides an additional
                     backup layer for your important business data.
                   </p>
+                </div>
+
+                {/* The fire extinguisher — present but never inviting. */}
+                <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-1">Reset sync data</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Deletes every device&apos;s sync diary on this Google account and clears this
+                    device&apos;s sync baselines. Backups, the time machine, photos and all local data
+                    stay untouched. Use when re-baselining every device from one backup — any device
+                    NOT restored (or signed out) afterwards will re-share its old data on its next sync.
+                  </p>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-300 text-red-700 dark:text-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                    disabled={resettingSync || isBackingUp || isRestoring || rowSyncing}
+                    onClick={handleResetSyncData}
+                  >
+                    {resettingSync ? 'Resetting…' : 'Reset sync data…'}
+                  </button>
                 </div>
 
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">

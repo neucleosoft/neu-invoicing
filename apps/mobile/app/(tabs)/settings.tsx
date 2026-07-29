@@ -19,6 +19,7 @@ import {
 } from '@/sync/drive';
 import { appendSyncActivity, getSyncActivity, type SyncActivityEntry } from '@/sync/activityLog';
 import { reloadDb } from '@/db/reload';
+import { resetSyncData } from '@/sync/resetSyncData';
 import { setRestoreNotice } from '@/sync/restoreNotice';
 import { LAST_ROW_SYNC_KEY } from '@/sync/AutoSync';
 import { getLadderInfo, restoreFromLadder, type LadderRungInfo } from '@/sync/ladder';
@@ -58,6 +59,7 @@ export default function SettingsScreen() {
   const [backingUp, setBackingUp] = useState(false);
   const [ladderInfo, setLadderInfo] = useState<LadderRungInfo[]>([]);
   const [ladderRestoring, setLadderRestoring] = useState<string | null>(null);
+  const [resettingSync, setResettingSync] = useState(false);
 
   // App lock (PIN). The PIN is stored as a salted hash in SecureStore; the
   // lock screen itself lives in components/AppLockGate.tsx.
@@ -501,6 +503,47 @@ export default function SettingsScreen() {
 
   const healthChecked = healthReport?.sections.reduce((sum, s) => sum + s.checked, 0) ?? 0;
 
+  // Reset sync data — double confirm: safe for DATA, but wipes the account's
+  // sync memory; the second dialog spells out the follow-up procedure.
+  function handleResetSyncData() {
+    Alert.alert(
+      'Reset sync data?',
+      'This deletes every device’s sync diary on this Google account and clears this device’s sync baselines. No invoices, backups or photos are touched.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          onPress: () => {
+            Alert.alert(
+              'One more thing',
+              'Any OTHER device that still holds old data and syncs on this account will re-share it. After resetting, restore every device from your chosen backup — or sign devices out. Reset now?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Reset sync data',
+                  style: 'destructive',
+                  onPress: async () => {
+                    setResettingSync(true);
+                    try {
+                      const fresh = await getFreshAccessToken();
+                      if (!fresh) throw new Error('Session expired — sign in again.');
+                      const n = await resetSyncData(fresh);
+                      Alert.alert('Done', `Sync data reset — ${n} device diary file(s) deleted from Drive.`);
+                    } catch (e) {
+                      Alert.alert('Reset failed', e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setResettingSync(false);
+                    }
+                  },
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
+  }
+
   function handleSignOut() {
     Alert.alert('Sign out?', 'You will need to sign in again to use the app.', [
       { text: 'Cancel', style: 'cancel' },
@@ -822,6 +865,29 @@ export default function SettingsScreen() {
             </ThemedText>
           </View>
           <ThemedText style={styles.businessChevron}>›</ThemedText>
+        </Pressable>
+      </ThemedView>
+
+      {/* The fire extinguisher — present but never inviting. */}
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Reset sync data</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Deletes every device&apos;s sync diary on this Google account and clears this
+          device&apos;s sync baselines. Backups, the time machine, photos and all local data stay
+          untouched. Use when re-baselining every device from one backup — any device NOT
+          restored (or signed out) afterwards will re-share its old data on its next sync.
+        </ThemedText>
+        <Pressable
+          onPress={handleResetSyncData}
+          disabled={resettingSync || restoring || backingUp || rowSyncing || ladderRestoring != null || !accessToken}
+          style={[
+            styles.dangerButton,
+            (resettingSync || restoring || backingUp || rowSyncing || ladderRestoring != null || !accessToken) && styles.disabledButton,
+          ]}
+        >
+          <ThemedText style={styles.dangerButtonText}>
+            {resettingSync ? 'Resetting…' : 'Reset sync data…'}
+          </ThemedText>
         </Pressable>
       </ThemedView>
         </>
