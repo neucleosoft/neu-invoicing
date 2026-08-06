@@ -30,6 +30,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     fetchBillImage: (billId: string) =>
       ipcRenderer.invoke("sync:fetchBillImage", billId),
     getLadderInfo: () => ipcRenderer.invoke("sync:getLadderInfo"),
+    resetSyncData: () => ipcRenderer.invoke("sync:resetSyncData"),
     restoreFromLadder: (slotName: string) =>
       ipcRenderer.invoke("sync:restoreFromLadder", slotName),
     getBackupInfo: () => ipcRenderer.invoke("sync:getBackupInfo"),

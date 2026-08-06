@@ -53,6 +53,7 @@ export interface PDFDocumentData {
   totalAmount: number
   subtotal?: number
   taxAmount?: number
+  discount?: number
   notes?: string
   termsConditions?: string
   isInterState?: boolean
@@ -217,7 +218,9 @@ export function numberToWords(num: number): string {
   if (rem > 0) r += threeD(rem)
   r = r.trim()
   if (r) r += ' Rupees'
-  if (decimal > 0) r += ' and ' + twoD(decimal) + ' Paise'
+  // Paise-only amounts read "Fifty Paise Only" — never start with "and".
+  if (decimal > 0) r += (r ? ' and ' : '') + twoD(decimal) + ' Paise'
+  if (num < 0 && r) r = 'Minus ' + r
   return (r || 'Zero Rupees') + ' Only'
 }
 

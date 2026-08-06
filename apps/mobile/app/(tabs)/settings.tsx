@@ -1,5 +1,6 @@
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import Constants from 'expo-constants';
+import { router, useFocusEffect, type Href } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as Sharing from 'expo-sharing';
@@ -19,6 +20,7 @@ import {
 } from '@/sync/drive';
 import { appendSyncActivity, getSyncActivity, type SyncActivityEntry } from '@/sync/activityLog';
 import { reloadDb } from '@/db/reload';
+import { resetSyncData } from '@/sync/resetSyncData';
 import { setRestoreNotice } from '@/sync/restoreNotice';
 import { LAST_ROW_SYNC_KEY } from '@/sync/AutoSync';
 import { getLadderInfo, restoreFromLadder, type LadderRungInfo } from '@/sync/ladder';
@@ -40,10 +42,20 @@ import {
   type ThemePreference,
 } from '@/hooks/theme-preference';
 
+// Settings outgrew a single scroll — grouped into tabs like desktop's page.
+type SettingsTabId = 'business' | 'sync' | 'app';
+
+// Technician mode (Android developer-options pattern): the mechanic's tools —
+// manual sync, time machine, data health, reset — hide behind 7 taps on the
+// version number in About. The boss's Settings stays a short, safe list;
+// support calls unlock the drawer with one rehearsed gesture.
+const TECH_MODE_KEY = 'neu.technicianMode';
+
 export default function SettingsScreen() {
   const { user, accessToken, getFreshAccessToken, signOut, signIn } = useAuth();
   const liveDb = useSQLiteContext();
   const db = useDb();
+  const [tab, setTab] = useState<SettingsTabId>('business');
 
   const [backupInfo, setBackupInfo] = useState<CloudBackupInfo | null>(null);
   const [backupLoading, setBackupLoading] = useState(true);
@@ -54,6 +66,40 @@ export default function SettingsScreen() {
   const [backingUp, setBackingUp] = useState(false);
   const [ladderInfo, setLadderInfo] = useState<LadderRungInfo[]>([]);
   const [ladderRestoring, setLadderRestoring] = useState<string | null>(null);
+  const [resettingSync, setResettingSync] = useState(false);
+
+  // Technician mode: persisted flag + the 7-tap unlock on the About row.
+  const [techMode, setTechMode] = useState(false);
+  const [tapHint, setTapHint] = useState('');
+  const versionTaps = useRef(0);
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    void SecureStore.getItemAsync(TECH_MODE_KEY).then((v) => setTechMode(v === 'true'));
+  }, []);
+  function handleVersionTap() {
+    versionTaps.current += 1;
+    if (tapTimer.current) clearTimeout(tapTimer.current);
+    tapTimer.current = setTimeout(() => {
+      versionTaps.current = 0;
+      setTapHint('');
+    }, 1500);
+    const n = versionTaps.current;
+    if (n >= 7) {
+      versionTaps.current = 0;
+      setTapHint('');
+      const next = !techMode;
+      setTechMode(next);
+      void SecureStore.setItemAsync(TECH_MODE_KEY, next ? 'true' : 'false');
+      Alert.alert(
+        next ? 'Technician mode enabled' : 'Technician mode disabled',
+        next
+          ? 'Advanced sync, data-health and reset tools are now visible in Settings.'
+          : 'Advanced tools are hidden again.',
+      );
+    } else if (n >= 4) {
+      setTapHint(`${7 - n} more taps to ${techMode ? 'exit' : 'enter'} technician mode`);
+    }
+  }
 
   // App lock (PIN). The PIN is stored as a salted hash in SecureStore; the
   // lock screen itself lives in components/AppLockGate.tsx.
@@ -497,6 +543,47 @@ export default function SettingsScreen() {
 
   const healthChecked = healthReport?.sections.reduce((sum, s) => sum + s.checked, 0) ?? 0;
 
+  // Reset sync data — double confirm: safe for DATA, but wipes the account's
+  // sync memory; the second dialog spells out the follow-up procedure.
+  function handleResetSyncData() {
+    Alert.alert(
+      'Reset sync data?',
+      'This deletes every device’s sync diary on this Google account and clears this device’s sync baselines. No invoices, backups or photos are touched.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Continue',
+          onPress: () => {
+            Alert.alert(
+              'One more thing',
+              'Any OTHER device that still holds old data and syncs on this account will re-share it. After resetting, restore every device from your chosen backup — or sign devices out. Reset now?',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                  text: 'Reset sync data',
+                  style: 'destructive',
+                  onPress: async () => {
+                    setResettingSync(true);
+                    try {
+                      const fresh = await getFreshAccessToken();
+                      if (!fresh) throw new Error('Session expired — sign in again.');
+                      const n = await resetSyncData(fresh);
+                      Alert.alert('Done', `Sync data reset — ${n} sync file(s) deleted from Drive.`);
+                    } catch (e) {
+                      Alert.alert('Reset failed', e instanceof Error ? e.message : String(e));
+                    } finally {
+                      setResettingSync(false);
+                    }
+                  },
+                },
+              ],
+            );
+          },
+        },
+      ],
+    );
+  }
+
   function handleSignOut() {
     Alert.alert('Sign out?', 'You will need to sign in again to use the app.', [
       { text: 'Cancel', style: 'cancel' },
@@ -508,6 +595,28 @@ export default function SettingsScreen() {
     <ScrollView contentContainerStyle={styles.content}>
       <ThemedText type="title">Settings</ThemedText>
 
+      <View style={styles.tabRow}>
+        {(
+          [
+            { id: 'business', label: 'Business' },
+            { id: 'sync', label: 'Sync & Backup' },
+            { id: 'app', label: 'App' },
+          ] as const
+        ).map((t) => (
+          <Pressable
+            key={t.id}
+            onPress={() => setTab(t.id)}
+            style={[styles.tabChip, tab === t.id && styles.tabChipActive]}
+          >
+            <ThemedText style={tab === t.id ? styles.tabTextActive : styles.tabText}>
+              {t.label}
+            </ThemedText>
+          </Pressable>
+        ))}
+      </View>
+
+      {tab === 'app' && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Profile</ThemedText>
         <View style={styles.profileRow}>
@@ -527,7 +636,11 @@ export default function SettingsScreen() {
           </Pressable>
         )}
       </ThemedView>
+        </>
+      )}
 
+      {tab === 'business' && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Business</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -550,7 +663,13 @@ export default function SettingsScreen() {
           <ThemedText style={styles.businessChevron}>›</ThemedText>
         </Pressable>
       </ThemedView>
+        </>
+      )}
 
+      {tab === 'sync' && (
+        <>
+      {techMode && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Device Sync (beta)</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -585,6 +704,9 @@ export default function SettingsScreen() {
           </View>
         )}
       </ThemedView>
+
+        </>
+      )}
 
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Backup & Restore</ThemedText>
@@ -672,7 +794,7 @@ export default function SettingsScreen() {
           </ThemedText>
         </Pressable>
 
-        {ladderInfo.some((l) => l.modifiedTime) && (
+        {techMode && ladderInfo.some((l) => l.modifiedTime) && (
           <>
             <ThemedText style={styles.businessHint}>
               Time machine — older automatic copies, kept at different ages on purpose so a
@@ -711,6 +833,8 @@ export default function SettingsScreen() {
         )}
       </ThemedView>
 
+      {techMode && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Data Health</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -776,8 +900,50 @@ export default function SettingsScreen() {
             />
           </>
         )}
+        <Pressable
+          onPress={() => router.push('/reconcilePayments' as Href)}
+          style={styles.businessRow}
+        >
+          <View style={{ flex: 1 }}>
+            <ThemedText type="defaultSemiBold">Reconcile paid invoices</ThemedText>
+            <ThemedText style={styles.businessHint}>
+              Invoices marked paid without a payment record behind them — confirm and record the
+              missing payments instead of downgrading statuses.
+            </ThemedText>
+          </View>
+          <ThemedText style={styles.businessChevron}>›</ThemedText>
+        </Pressable>
       </ThemedView>
 
+      {/* The fire extinguisher — present but never inviting. */}
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">Reset sync data</ThemedText>
+        <ThemedText style={styles.businessHint}>
+          Deletes every device&apos;s sync diary on this Google account and clears this
+          device&apos;s sync baselines. Backups, the time machine, photos and all local data stay
+          untouched. Use when re-baselining every device from one backup — any device NOT
+          restored (or signed out) afterwards will re-share its old data on its next sync.
+        </ThemedText>
+        <Pressable
+          onPress={handleResetSyncData}
+          disabled={resettingSync || restoring || backingUp || rowSyncing || ladderRestoring != null || !accessToken}
+          style={[
+            styles.dangerButton,
+            (resettingSync || restoring || backingUp || rowSyncing || ladderRestoring != null || !accessToken) && styles.disabledButton,
+          ]}
+        >
+          <ThemedText style={styles.dangerButtonText}>
+            {resettingSync ? 'Resetting…' : 'Reset sync data…'}
+          </ThemedText>
+        </Pressable>
+      </ThemedView>
+        </>
+      )}
+        </>
+      )}
+
+      {tab === 'app' && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">App Lock</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -827,6 +993,8 @@ export default function SettingsScreen() {
         ) : null}
       </ThemedView>
 
+      {techMode && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Diagnostics</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -853,6 +1021,9 @@ export default function SettingsScreen() {
         />
       </ThemedView>
 
+        </>
+      )}
+
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Appearance</ThemedText>
         <View style={styles.freqChips}>
@@ -869,7 +1040,21 @@ export default function SettingsScreen() {
           ))}
         </View>
       </ThemedView>
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">About</ThemedText>
+        <Pressable onPress={handleVersionTap} hitSlop={8}>
+          <ThemedText style={styles.businessHint}>
+            Neu Invoicing · version {Constants.expoConfig?.version ?? '1.0.0'}
+            {techMode ? ' · technician mode' : ''}
+          </ThemedText>
+          {tapHint ? <ThemedText style={styles.businessHint}>{tapHint}</ThemedText> : null}
+        </Pressable>
+      </ThemedView>
+        </>
+      )}
 
+      {tab === 'business' && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Invoice Template</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -943,6 +1128,8 @@ export default function SettingsScreen() {
           />
         </View>
       </ThemedView>
+        </>
+      )}
 
       {user && (
         <ThemedView style={styles.section}>
@@ -958,6 +1145,18 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   content: { padding: 16, paddingTop: 48, paddingBottom: 48, gap: 24 },
   section: { gap: 12 },
+  tabRow: { flexDirection: 'row', gap: 8 },
+  tabChip: {
+    flex: 1,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#d1d5db',
+  },
+  tabChipActive: { backgroundColor: '#007AFF', borderColor: '#007AFF' },
+  tabText: { fontSize: 13, lineHeight: 17 },
+  tabTextActive: { fontSize: 13, lineHeight: 17, color: 'white', fontWeight: '600' },
   profileRow: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   avatar: { width: 56, height: 56, borderRadius: 28 },
   avatarPlaceholder: { backgroundColor: '#ccc' },

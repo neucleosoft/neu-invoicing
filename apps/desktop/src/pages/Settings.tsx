@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { Company } from '../types'
 import { InvoiceTemplate, TEMPLATE_INFO } from '../utils/generateInvoicePDF'
@@ -152,6 +152,35 @@ const Settings = () => {
   const [logoMissing, setLogoMissing] = useState(false)
   const [logoLoading, setLogoLoading] = useState(false)
   const [signatureLoading, setSignatureLoading] = useState(false)
+
+  // Technician mode (Android developer-options pattern): the mechanic's tools
+  // — manual sync, time machine, data reset, diagnostics — hide behind 7
+  // clicks on the version line at the page bottom. Persisted per machine.
+  const [techMode, setTechMode] = useState<boolean>(
+    () => localStorage.getItem('technician_mode') === 'true',
+  )
+  const [tapHint, setTapHint] = useState('')
+  const versionTaps = useRef(0)
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleVersionTap = () => {
+    versionTaps.current += 1
+    if (tapTimer.current) clearTimeout(tapTimer.current)
+    tapTimer.current = setTimeout(() => {
+      versionTaps.current = 0
+      setTapHint('')
+    }, 1500)
+    const n = versionTaps.current
+    if (n >= 7) {
+      versionTaps.current = 0
+      setTapHint('')
+      const next = !techMode
+      setTechMode(next)
+      localStorage.setItem('technician_mode', next ? 'true' : 'false')
+      toast.success(next ? 'Technician mode enabled' : 'Technician mode disabled')
+    } else if (n >= 4) {
+      setTapHint(`${7 - n} more clicks to ${techMode ? 'exit' : 'enter'} technician mode`)
+    }
+  }
   // PO boilerplate — printed on every Purchase Order PDF. Defaults seeded from a real PO
   // we received; users edit to match their business.
   const [poSpecialInstructions, setPoSpecialInstructions] = useState('')
@@ -302,6 +331,40 @@ const Settings = () => {
       toast.error('Failed to update logo')
     } finally {
       setLogoLoading(false)
+    }
+  }
+
+  const [resettingSync, setResettingSync] = useState(false)
+
+  // Reset sync data — double confirm: the operation is safe for DATA but wipes
+  // the account's sync memory, and the second dialog spells out the follow-up
+  // procedure (restore or sign out every other device).
+  const handleResetSyncData = async () => {
+    const first = await confirm({
+      title: 'Reset sync data?',
+      message:
+        'This deletes every device’s sync diary on this Google account and clears this device’s sync baselines. No invoices, backups or photos are touched.',
+      confirmText: 'Continue',
+      cancelText: 'Cancel',
+    })
+    if (!first) return
+    const second = await confirm({
+      title: 'One more thing',
+      message:
+        'Any OTHER device that still holds old data and syncs on this account will re-share it. After resetting, restore every device from your chosen backup — or sign devices out. Reset now?',
+      confirmText: 'Reset sync data',
+      cancelText: 'Cancel',
+    })
+    if (!second) return
+    setResettingSync(true)
+    try {
+      const r = await window.electronAPI.sync.resetSyncData()
+      if (r.success) toast.success(`Sync data reset — ${r.deleted ?? 0} device diary file(s) deleted`)
+      else toast.error(r.error || 'Reset failed')
+    } catch {
+      toast.error('Reset failed')
+    } finally {
+      setResettingSync(false)
     }
   }
 
@@ -860,6 +923,7 @@ const Settings = () => {
                   </div>
                 ) : (
                   <>
+{techMode && (<>
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Device Sync (beta)</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -906,6 +970,7 @@ const Settings = () => {
                     </div>
                   )}
                 </div>
+                </>)}
 
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Google Drive Backup</h3>
@@ -974,7 +1039,7 @@ const Settings = () => {
                       {isRestoring ? 'Restoring…' : 'Restore from cloud…'}
                     </button>
 
-                    {ladderInfo.some((l) => l.modifiedTime) && (
+                    {techMode && ladderInfo.some((l) => l.modifiedTime) && (
                       <div className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <h4 className="text-sm font-semibold mb-1">Time machine</h4>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
@@ -1016,6 +1081,29 @@ const Settings = () => {
                   </p>
                 </div>
 
+                {/* The fire extinguisher — present but never inviting, and
+                    technician-only. */}
+                {techMode && (
+                <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
+                  <h3 className="font-semibold mb-1">Reset sync data</h3>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Deletes every device&apos;s sync diary on this Google account and clears this
+                    device&apos;s sync baselines. Backups, the time machine, photos and all local data
+                    stay untouched. Use when re-baselining every device from one backup — any device
+                    NOT restored (or signed out) afterwards will re-share its old data on its next sync.
+                  </p>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 text-xs font-medium rounded-lg border border-red-300 text-red-700 dark:text-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
+                    disabled={resettingSync || isBackingUp || isRestoring || rowSyncing}
+                    onClick={handleResetSyncData}
+                  >
+                    {resettingSync ? 'Resetting…' : 'Reset sync data…'}
+                  </button>
+                </div>
+                )}
+
+                {techMode && (
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Diagnostics</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
@@ -1029,12 +1117,22 @@ const Settings = () => {
                     Open logs folder
                   </button>
                 </div>
+                )}
               </div>
               {connectDialog}
             </>
           )}
         </div>
       </div>
+      {/* 7 clicks toggles technician mode — the Android developer-options
+          gesture, discoverable when guided, never by accident. */}
+      <p
+        className="mt-6 text-center text-xs text-gray-400 dark:text-gray-600 select-none"
+        onClick={handleVersionTap}
+      >
+        Neu Invoicing · v1.0.0{techMode ? ' · technician mode' : ''}
+        {tapHint ? ` · ${tapHint}` : ''}
+      </p>
     </div>
   )
 }

@@ -35,6 +35,7 @@ export interface CreditNoteData {
   totalAmount: number
   subtotal?: number
   taxAmount?: number
+  discount?: number
   customer: {
     name: string
     taxId?: string
@@ -333,6 +334,12 @@ function buildItemsSection(note: CreditNoteData, isInter: boolean, taxGroups: Re
       ])
     }
   })
+
+  // Whole-rupee Round Off (see invoice.ts — same guard: only sub-50-paise deltas).
+  const roundOff = Math.round((note.totalAmount - ((note.subtotal ?? 0) + (note.taxAmount ?? 0) - (note.discount ?? 0))) * 100) / 100
+  if ((note.subtotal ?? 0) > 0 && Math.abs(roundOff) > 0.004 && Math.abs(roundOff) <= 0.5) {
+    taxRows.push([{ text: '' }, { text: 'Round Off', italics: true, fontSize: 9, alignment: 'right' }, { text: '-', alignment: 'right' }, { text: '-', alignment: 'right' }, { text: '-', alignment: 'right' }, { text: (roundOff > 0 ? '+' : '-') + fmtNum(Math.abs(roundOff)), alignment: 'right', fontSize: 9 }])
+  }
 
   const totalQty = note.items.reduce((s, i) => s + i.quantity, 0)
   const totalRow: TableCell[] = [

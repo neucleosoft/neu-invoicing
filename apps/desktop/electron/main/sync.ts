@@ -204,6 +204,53 @@ export const setupSyncHandlers = () => {
 
   // Backup ladder (S4): rung metadata + the destructive time-machine restore.
   ipcMain.handle('sync:getLadderInfo', async () => getLadderInfo())
+
+  // Reset sync data — the fire extinguisher. Deletes every device diary
+  // (changes-*.json) on this account's Drive and clears this device's local
+  // sync bookkeeping. Touches NOTHING else: backups, ladder, photos and all
+  // local rows stay. Diaries are the sync system's memory OUTSIDE any backup —
+  // they survive restores and resurrect old rows (the ghost-invoice /52-/53
+  // mechanism), so a clean re-baseline must wipe them. Other devices that
+  // still hold old data will re-share it on their next sync — the caller's
+  // procedure (restore or sign out every device) handles that half.
+  ipcMain.handle('sync:resetSyncData', async () => {
+    try {
+      if (!isSignedIn()) return { success: false, error: 'Not signed in' }
+      const auth = getOAuth2Client()
+      const drive = google.drive({ version: 'v3', auth })
+      let deleted = 0
+      let pageToken: string | undefined
+      do {
+        const res = await drive.files.list({
+          spaces: 'appDataFolder',
+          // Diaries AND the business-identity marker: after a reset, the next
+          // device to sync stamps its business as this account's identity
+          // fresh — the deliberate "change which company this account syncs".
+          q: "name contains 'changes-' or name = 'business-identity.json'",
+          fields: 'nextPageToken, files(id, name)',
+          pageSize: 100,
+          pageToken,
+        })
+        for (const f of res.data.files ?? []) {
+          if (f.id && (f.name?.startsWith('changes-') || f.name === 'business-identity.json')) {
+            await drive.files.delete({ fileId: f.id })
+            deleted++
+          }
+        }
+        pageToken = res.data.nextPageToken ?? undefined
+      } while (pageToken)
+      resetSyncBaseline()
+      const log = (store.get('sync_activity_log') as { at: number }[] | undefined) ?? []
+      store.set('sync_activity_log', [
+        { at: Date.now(), kind: 'RESET', detail: `Sync data reset — ${deleted} sync file(s) (device diaries + identity marker) deleted from Drive; local baselines cleared` },
+        ...log,
+      ].slice(0, 100))
+      return { success: true, deleted }
+    } catch (error) {
+      return handleSyncError(error, 'Reset sync data')
+    }
+  })
+
   ipcMain.handle('sync:restoreFromLadder', async (_, slotName: string) => {
     if (!isSignedIn()) return { success: false, error: 'OFFLINE' }
     return await restoreFromLadder(slotName)
@@ -801,6 +848,29 @@ export const restoreFromLadder = async (slotName: string): Promise<{ success: bo
   }
 }
 
+// Records the cloud backup slot's own age for the Layout's stale-backup
+// warning. Reads the SLOT's timestamp from Drive (one files.list per hour) —
+// deliberately NOT our upload history, because the warning must keep working
+// precisely when uploads are failing. 0 = slot missing entirely.
+const recordBackupSlotAge = async () => {
+  try {
+    if (!isSignedIn() || store.get('demo_mode')) return
+    const auth = getOAuth2Client()
+    const drive = google.drive({ version: 'v3', auth })
+    const res = await drive.files.list({
+      spaces: 'appDataFolder',
+      q: `name='${CLOUD_DB_FILENAME}'`,
+      fields: 'files(modifiedTime)',
+      pageSize: 1,
+    })
+    const f = (res.data.files || [])[0]
+    store.set('backup_slot_mtime', f?.modifiedTime ? new Date(f.modifiedTime).getTime() : 0)
+  } catch {
+    // Unreachable (offline / dead token) — keep the last known value; the
+    // session banner owns the dead-token story.
+  }
+}
+
 let schedulerInterval: NodeJS.Timeout | null = null
 
 export const startBackupScheduler = () => {
@@ -809,9 +879,11 @@ export const startBackupScheduler = () => {
   // for 3 days" cases.
   void runIfScheduledSyncDue()
   void runLadderIfDue()
+  void recordBackupSlotAge()
   schedulerInterval = setInterval(() => {
     void runIfScheduledSyncDue()
     void runLadderIfDue()
+    void recordBackupSlotAge()
   }, SCHEDULER_TICK_MS)
 }
 

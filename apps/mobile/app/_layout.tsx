@@ -34,6 +34,8 @@ import { runMigrations, schema, useDb } from '@/db';
 import { registerDbReload } from '@/db/reload';
 import { AuthProvider, useAuth } from '@/auth';
 import { AppLockGate } from '@/components/AppLockGate';
+import { BackupBanner } from '@/components/BackupBanner';
+import { SessionBanner } from '@/components/SessionBanner';
 import { AutoSync } from '@/sync/AutoSync';
 
 // Field logging first — a crash during boot must still leave a trace.
@@ -182,6 +184,10 @@ function RootLayoutInner() {
           every minute while active. Tripwire pauses still require the manual
           Sync button in Settings. */}
       <AutoSync />
+      {/* Health strips — visible over every screen when the Google session is
+          dying/dead or the cloud backup has gone stale. Null when healthy. */}
+      <SessionBanner />
+      <BackupBanner />
       {/* App lock wraps the WHOLE navigator so no route or deep link renders
           under it; AutoSync stays outside — the lock protects eyes, not sync. */}
       <AppLockGate>

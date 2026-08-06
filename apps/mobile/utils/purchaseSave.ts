@@ -254,6 +254,8 @@ async function computePurchaseGst(
 
   return applyPurchaseTaxOverride(
     computeGstValues({
+      // Purchase-side: keep the supplier's paise — never rupee-round their total.
+      roundTotalToRupee: false,
       company: company
         ? { stateCode: company.stateCode, stateName: company.stateName }
         : null,

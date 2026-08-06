@@ -481,6 +481,12 @@ export interface AuthStatus {
   // True when the user chose to skip Google sign-in and use the app offline.
   // Mutually exclusive with `isAuthenticated` (signing in clears the flag).
   offlineMode?: boolean
+  // When the current refresh token was issued (ms). Testing-mode tokens die at
+  // day 7 — the SessionBanner prompts a renew at day 6.
+  signedInAt?: number | null
+  // Set when Google REVOKED the session (vs a deliberate sign-out) — drives
+  // the red "sign-in expired" banner.
+  authInvalidatedAt?: number | null
 }
 
 // GST Report Types
@@ -637,6 +643,7 @@ declare global {
         fetchBillImage: (billId: string) => Promise<{ success: boolean; error?: string }>
         getLadderInfo: () => Promise<{ name: string; modifiedTime: string | null; size: number | null }[]>
         restoreFromLadder: (slotName: string) => Promise<{ success: boolean; error?: string }>
+        resetSyncData: () => Promise<{ success: boolean; deleted?: number; error?: string }>
         getBackupInfo: () => Promise<{
           cloudBackup: { lastSyncTimestamp: string; deviceId: string } | null
           thisDeviceLastUpload: string | null

@@ -367,6 +367,12 @@ function buildItemsSection(ch: ChallanData, isInter: boolean, taxGroups: ReturnT
     }
   })
 
+  // Whole-rupee Round Off (mirrors the shared builders - sub-50-paise deltas only).
+  const roundOff = Math.round((ch.totalAmount - ((ch.subtotal ?? 0) + (ch.taxAmount ?? 0) - (ch.discount ?? 0))) * 100) / 100
+  if ((ch.subtotal ?? 0) > 0 && Math.abs(roundOff) > 0.004 && Math.abs(roundOff) <= 0.5) {
+    taxRows.push([{ text: '' }, { text: 'Round Off', italics: true, fontSize: 9, alignment: 'right' as const }, { text: '-', alignment: 'right' as const }, { text: '-', alignment: 'right' as const }, { text: '-', alignment: 'right' as const }, { text: (roundOff > 0 ? '+' : '-') + fmtNum(Math.abs(roundOff)), alignment: 'right' as const, fontSize: 9 }])
+  }
+
   // Total row
   const totalQty = ch.items.reduce((s, i) => s + i.quantity, 0)
   const totalRow: TableCell[] = [
