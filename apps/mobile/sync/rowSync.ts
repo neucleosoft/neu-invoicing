@@ -27,6 +27,7 @@ import {
 import { useDb } from '@/db'
 
 import { appendSyncActivity } from './activityLog'
+import { ensureBusinessIdentity } from './businessIdentity'
 import { withDbFileLock } from './dbFileLock'
 import { getDeviceId } from './deviceId'
 import { getMobileHlcClock } from './hlc'
@@ -133,6 +134,16 @@ export async function rowSyncNow(
   try {
     const deviceId = await getDeviceId()
     const now = Date.now()
+
+    // Business-identity guard: never merge two different companies' books.
+    // Mismatch = pause with receipts; Reset sync data is the deliberate way
+    // to make THIS device's business the one this account syncs.
+    const identity = await ensureBusinessIdentity(db, accessToken)
+    if (!identity.ok) {
+      const detail = `Sync paused: this Google account syncs "${identity.remoteName}" but this device holds "${identity.localName}". Reset sync data (Settings) makes this device's business the synced one.`
+      await appendSyncActivity([{ kind: 'IDENTITY', detail }])
+      return { success: false, error: detail }
+    }
 
     // PULL first, so renumbers/merges ride the push below.
     const { packets, newerVersion } = await downloadPeerDiaries(accessToken, diaryFileName(deviceId))

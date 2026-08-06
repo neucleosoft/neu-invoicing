@@ -223,13 +223,16 @@ export const setupSyncHandlers = () => {
       do {
         const res = await drive.files.list({
           spaces: 'appDataFolder',
-          q: "name contains 'changes-'",
+          // Diaries AND the business-identity marker: after a reset, the next
+          // device to sync stamps its business as this account's identity
+          // fresh — the deliberate "change which company this account syncs".
+          q: "name contains 'changes-' or name = 'business-identity.json'",
           fields: 'nextPageToken, files(id, name)',
           pageSize: 100,
           pageToken,
         })
         for (const f of res.data.files ?? []) {
-          if (f.id && f.name?.startsWith('changes-')) {
+          if (f.id && (f.name?.startsWith('changes-') || f.name === 'business-identity.json')) {
             await drive.files.delete({ fileId: f.id })
             deleted++
           }
@@ -239,7 +242,7 @@ export const setupSyncHandlers = () => {
       resetSyncBaseline()
       const log = (store.get('sync_activity_log') as { at: number }[] | undefined) ?? []
       store.set('sync_activity_log', [
-        { at: Date.now(), kind: 'RESET', detail: `Sync data reset — ${deleted} device diary file(s) deleted from Drive; local baselines cleared` },
+        { at: Date.now(), kind: 'RESET', detail: `Sync data reset — ${deleted} sync file(s) (device diaries + identity marker) deleted from Drive; local baselines cleared` },
         ...log,
       ].slice(0, 100))
       return { success: true, deleted }

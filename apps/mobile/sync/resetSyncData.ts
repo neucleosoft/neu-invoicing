@@ -10,6 +10,7 @@
 import * as SecureStore from 'expo-secure-store'
 
 import { appendSyncActivity } from './activityLog'
+import { IDENTITY_MARKER_NAME } from './businessIdentity'
 import { clearLastKnownCloudMtime } from './drive'
 
 const DRIVE_FILES_URL = 'https://www.googleapis.com/drive/v3/files'
@@ -24,7 +25,10 @@ export async function resetSyncData(accessToken: string): Promise<number> {
   do {
     const params = new URLSearchParams({
       spaces: 'appDataFolder',
-      q: "name contains 'changes-'",
+      // Diaries AND the business-identity marker: after a reset, the next
+      // device to sync stamps its business as this account's identity fresh —
+      // that's the deliberate "change which company this account syncs" path.
+      q: `name contains 'changes-' or name = '${IDENTITY_MARKER_NAME}'`,
       fields: 'nextPageToken, files(id,name)',
       pageSize: '100',
     })
@@ -38,7 +42,7 @@ export async function resetSyncData(accessToken: string): Promise<number> {
       files?: { id: string; name: string }[]
     }
     for (const f of data.files ?? []) {
-      if (!f.name.startsWith('changes-')) continue
+      if (!f.name.startsWith('changes-') && f.name !== IDENTITY_MARKER_NAME) continue
       const del = await fetch(`${DRIVE_FILES_URL}/${f.id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${accessToken}` },
@@ -59,7 +63,7 @@ export async function resetSyncData(accessToken: string): Promise<number> {
   await appendSyncActivity([
     {
       kind: 'RESET',
-      detail: `Sync data reset — ${deleted} device diary file(s) deleted from Drive; local baselines cleared`,
+      detail: `Sync data reset — ${deleted} sync file(s) (device diaries + identity marker) deleted from Drive; local baselines cleared`,
     },
   ])
   return deleted

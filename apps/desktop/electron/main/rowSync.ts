@@ -515,6 +515,80 @@ async function purgeArchivedDocs(drive: any): Promise<void> {
 
 // ── The whole flow ───────────────────────────────────────────────────────────
 
+// Business-identity guard — sync's "are we the same company?" handshake.
+// One Google account syncs ONE business; the first device to sync stamps
+// `business-identity.json` with its company row's permanent id (renames stay
+// free — the name is display-only). A mismatch aborts the sync; the deliberate
+// escape hatch is Reset sync data, which deletes the marker so the next device
+// stamps its business fresh. Desktop twin of apps/mobile/sync/businessIdentity.
+const IDENTITY_MARKER_NAME = 'business-identity.json'
+
+type IdentityCheck = { ok: true } | { ok: false; remoteName: string; localName: string }
+
+const ensureBusinessIdentity = async (
+  drive: ReturnType<typeof google.drive>,
+  db: DesktopDb,
+): Promise<IdentityCheck> => {
+  const [company] = await db
+    .select({ id: schema.company.id, name: schema.company.name })
+    .from(schema.company)
+    .limit(1)
+  // No local company yet (fresh install before restore/onboarding): nothing to
+  // protect on this side.
+  if (!company) return { ok: true }
+
+  const writeMarker = async (fileId: string | null) => {
+    const content = JSON.stringify({
+      companyId: company.id,
+      companyName: company.name,
+      stampedAt: Date.now(),
+      stampedBy: getDeviceId(),
+    })
+    if (fileId) {
+      await drive.files.update({ fileId, media: { mimeType: 'application/json', body: content } })
+    } else {
+      await drive.files.create({
+        requestBody: { name: IDENTITY_MARKER_NAME, parents: ['appDataFolder'] },
+        media: { mimeType: 'application/json', body: content },
+      })
+    }
+  }
+
+  const list = await drive.files.list({
+    spaces: 'appDataFolder',
+    q: `name='${IDENTITY_MARKER_NAME}' and trashed=false`,
+    fields: 'files(id)',
+    pageSize: 1,
+  })
+  const fileId = list.data.files?.[0]?.id ?? null
+  if (!fileId) {
+    await writeMarker(null)
+    return { ok: true }
+  }
+
+  let marker: { companyId?: string; companyName?: string } | null = null
+  try {
+    const res = await drive.files.get({ fileId, alt: 'media' })
+    marker = (typeof res.data === 'string' ? JSON.parse(res.data) : res.data) as {
+      companyId?: string
+      companyName?: string
+    }
+  } catch {
+    marker = null
+  }
+  // Unreadable/corrupt marker: re-stamp rather than brick sync forever.
+  if (!marker?.companyId) {
+    await writeMarker(fileId)
+    return { ok: true }
+  }
+
+  if (marker.companyId === company.id) {
+    if (marker.companyName !== company.name) await writeMarker(fileId)
+    return { ok: true }
+  }
+  return { ok: false, remoteName: marker.companyName || 'another business', localName: company.name }
+}
+
 export const rowSyncNow = async (
   opts: { confirmRemovals?: boolean } = {},
 ): Promise<RowSyncResult> => {
@@ -529,6 +603,14 @@ export const rowSyncNow = async (
     const drive = google.drive({ version: 'v3', auth })
     const deviceId = getDeviceId()
     const now = Date.now()
+
+    // Business-identity guard: never merge two different companies' books.
+    const identity = await ensureBusinessIdentity(drive, db)
+    if (!identity.ok) {
+      const detail = `Sync paused: this Google account syncs "${identity.remoteName}" but this device holds "${identity.localName}". Reset sync data (Settings) makes this device's business the synced one.`
+      appendActivity([{ kind: 'IDENTITY', detail }])
+      return { success: false, error: detail }
+    }
 
     // PULL first, so renumbers/merges ride the push below.
     const { packets, newerVersion } = await downloadPeerDiaries(drive, diaryFileName(deviceId))

@@ -528,7 +528,7 @@ export default function SettingsScreen() {
                       const fresh = await getFreshAccessToken();
                       if (!fresh) throw new Error('Session expired — sign in again.');
                       const n = await resetSyncData(fresh);
-                      Alert.alert('Done', `Sync data reset — ${n} device diary file(s) deleted from Drive.`);
+                      Alert.alert('Done', `Sync data reset — ${n} sync file(s) deleted from Drive.`);
                     } catch (e) {
                       Alert.alert('Reset failed', e instanceof Error ? e.message : String(e));
                     } finally {
