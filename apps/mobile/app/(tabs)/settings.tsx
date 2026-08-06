@@ -1,5 +1,6 @@
+import Constants from 'expo-constants';
 import { router, useFocusEffect, type Href } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import * as Sharing from 'expo-sharing';
@@ -44,6 +45,12 @@ import {
 // Settings outgrew a single scroll — grouped into tabs like desktop's page.
 type SettingsTabId = 'business' | 'sync' | 'app';
 
+// Technician mode (Android developer-options pattern): the mechanic's tools —
+// manual sync, time machine, data health, reset — hide behind 7 taps on the
+// version number in About. The boss's Settings stays a short, safe list;
+// support calls unlock the drawer with one rehearsed gesture.
+const TECH_MODE_KEY = 'neu.technicianMode';
+
 export default function SettingsScreen() {
   const { user, accessToken, getFreshAccessToken, signOut, signIn } = useAuth();
   const liveDb = useSQLiteContext();
@@ -60,6 +67,39 @@ export default function SettingsScreen() {
   const [ladderInfo, setLadderInfo] = useState<LadderRungInfo[]>([]);
   const [ladderRestoring, setLadderRestoring] = useState<string | null>(null);
   const [resettingSync, setResettingSync] = useState(false);
+
+  // Technician mode: persisted flag + the 7-tap unlock on the About row.
+  const [techMode, setTechMode] = useState(false);
+  const [tapHint, setTapHint] = useState('');
+  const versionTaps = useRef(0);
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    void SecureStore.getItemAsync(TECH_MODE_KEY).then((v) => setTechMode(v === 'true'));
+  }, []);
+  function handleVersionTap() {
+    versionTaps.current += 1;
+    if (tapTimer.current) clearTimeout(tapTimer.current);
+    tapTimer.current = setTimeout(() => {
+      versionTaps.current = 0;
+      setTapHint('');
+    }, 1500);
+    const n = versionTaps.current;
+    if (n >= 7) {
+      versionTaps.current = 0;
+      setTapHint('');
+      const next = !techMode;
+      setTechMode(next);
+      void SecureStore.setItemAsync(TECH_MODE_KEY, next ? 'true' : 'false');
+      Alert.alert(
+        next ? 'Technician mode enabled' : 'Technician mode disabled',
+        next
+          ? 'Advanced sync, data-health and reset tools are now visible in Settings.'
+          : 'Advanced tools are hidden again.',
+      );
+    } else if (n >= 4) {
+      setTapHint(`${7 - n} more taps to ${techMode ? 'exit' : 'enter'} technician mode`);
+    }
+  }
 
   // App lock (PIN). The PIN is stored as a salted hash in SecureStore; the
   // lock screen itself lives in components/AppLockGate.tsx.
@@ -628,6 +668,8 @@ export default function SettingsScreen() {
 
       {tab === 'sync' && (
         <>
+      {techMode && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Device Sync (beta)</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -662,6 +704,9 @@ export default function SettingsScreen() {
           </View>
         )}
       </ThemedView>
+
+        </>
+      )}
 
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Backup & Restore</ThemedText>
@@ -749,7 +794,7 @@ export default function SettingsScreen() {
           </ThemedText>
         </Pressable>
 
-        {ladderInfo.some((l) => l.modifiedTime) && (
+        {techMode && ladderInfo.some((l) => l.modifiedTime) && (
           <>
             <ThemedText style={styles.businessHint}>
               Time machine — older automatic copies, kept at different ages on purpose so a
@@ -788,6 +833,8 @@ export default function SettingsScreen() {
         )}
       </ThemedView>
 
+      {techMode && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Data Health</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -892,6 +939,8 @@ export default function SettingsScreen() {
       </ThemedView>
         </>
       )}
+        </>
+      )}
 
       {tab === 'app' && (
         <>
@@ -944,6 +993,8 @@ export default function SettingsScreen() {
         ) : null}
       </ThemedView>
 
+      {techMode && (
+        <>
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Diagnostics</ThemedText>
         <ThemedText style={styles.businessHint}>
@@ -970,6 +1021,9 @@ export default function SettingsScreen() {
         />
       </ThemedView>
 
+        </>
+      )}
+
       <ThemedView style={styles.section}>
         <ThemedText type="subtitle">Appearance</ThemedText>
         <View style={styles.freqChips}>
@@ -985,6 +1039,16 @@ export default function SettingsScreen() {
             </Pressable>
           ))}
         </View>
+      </ThemedView>
+      <ThemedView style={styles.section}>
+        <ThemedText type="subtitle">About</ThemedText>
+        <Pressable onPress={handleVersionTap} hitSlop={8}>
+          <ThemedText style={styles.businessHint}>
+            Neu Invoicing · version {Constants.expoConfig?.version ?? '1.0.0'}
+            {techMode ? ' · technician mode' : ''}
+          </ThemedText>
+          {tapHint ? <ThemedText style={styles.businessHint}>{tapHint}</ThemedText> : null}
+        </Pressable>
       </ThemedView>
         </>
       )}

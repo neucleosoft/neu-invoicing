@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useStore } from '../store/useStore'
 import { Company } from '../types'
 import { InvoiceTemplate, TEMPLATE_INFO } from '../utils/generateInvoicePDF'
@@ -152,6 +152,35 @@ const Settings = () => {
   const [logoMissing, setLogoMissing] = useState(false)
   const [logoLoading, setLogoLoading] = useState(false)
   const [signatureLoading, setSignatureLoading] = useState(false)
+
+  // Technician mode (Android developer-options pattern): the mechanic's tools
+  // — manual sync, time machine, data reset, diagnostics — hide behind 7
+  // clicks on the version line at the page bottom. Persisted per machine.
+  const [techMode, setTechMode] = useState<boolean>(
+    () => localStorage.getItem('technician_mode') === 'true',
+  )
+  const [tapHint, setTapHint] = useState('')
+  const versionTaps = useRef(0)
+  const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const handleVersionTap = () => {
+    versionTaps.current += 1
+    if (tapTimer.current) clearTimeout(tapTimer.current)
+    tapTimer.current = setTimeout(() => {
+      versionTaps.current = 0
+      setTapHint('')
+    }, 1500)
+    const n = versionTaps.current
+    if (n >= 7) {
+      versionTaps.current = 0
+      setTapHint('')
+      const next = !techMode
+      setTechMode(next)
+      localStorage.setItem('technician_mode', next ? 'true' : 'false')
+      toast.success(next ? 'Technician mode enabled' : 'Technician mode disabled')
+    } else if (n >= 4) {
+      setTapHint(`${7 - n} more clicks to ${techMode ? 'exit' : 'enter'} technician mode`)
+    }
+  }
   // PO boilerplate — printed on every Purchase Order PDF. Defaults seeded from a real PO
   // we received; users edit to match their business.
   const [poSpecialInstructions, setPoSpecialInstructions] = useState('')
@@ -894,6 +923,7 @@ const Settings = () => {
                   </div>
                 ) : (
                   <>
+{techMode && (<>
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Device Sync (beta)</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
@@ -940,6 +970,7 @@ const Settings = () => {
                     </div>
                   )}
                 </div>
+                </>)}
 
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Google Drive Backup</h3>
@@ -1008,7 +1039,7 @@ const Settings = () => {
                       {isRestoring ? 'Restoring…' : 'Restore from cloud…'}
                     </button>
 
-                    {ladderInfo.some((l) => l.modifiedTime) && (
+                    {techMode && ladderInfo.some((l) => l.modifiedTime) && (
                       <div className="mt-5 pt-4 border-t border-gray-200 dark:border-gray-700">
                         <h4 className="text-sm font-semibold mb-1">Time machine</h4>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
@@ -1050,7 +1081,9 @@ const Settings = () => {
                   </p>
                 </div>
 
-                {/* The fire extinguisher — present but never inviting. */}
+                {/* The fire extinguisher — present but never inviting, and
+                    technician-only. */}
+                {techMode && (
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-1">Reset sync data</h3>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
@@ -1068,7 +1101,9 @@ const Settings = () => {
                     {resettingSync ? 'Resetting…' : 'Reset sync data…'}
                   </button>
                 </div>
+                )}
 
+                {techMode && (
                 <div className="bg-gray-50 dark:bg-gray-900/40 p-4 rounded-lg">
                   <h3 className="font-semibold mb-2">Diagnostics</h3>
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
@@ -1082,12 +1117,22 @@ const Settings = () => {
                     Open logs folder
                   </button>
                 </div>
+                )}
               </div>
               {connectDialog}
             </>
           )}
         </div>
       </div>
+      {/* 7 clicks toggles technician mode — the Android developer-options
+          gesture, discoverable when guided, never by accident. */}
+      <p
+        className="mt-6 text-center text-xs text-gray-400 dark:text-gray-600 select-none"
+        onClick={handleVersionTap}
+      >
+        Neu Invoicing · v1.0.0{techMode ? ' · technician mode' : ''}
+        {tapHint ? ` · ${tapHint}` : ''}
+      </p>
     </div>
   )
 }
